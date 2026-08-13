@@ -10,6 +10,11 @@ import "./index.css";
 
 const queryClient = new QueryClient();
 
+// 未認証時のログイン誘導は 1 度だけ行う。プレビュー iframe などで cookie が
+// 遮断される環境では毎回 UNAUTHORIZED が返るため、無制限に startLogin() を
+// 呼ぶとリダイレクトが繰り返され画面が描画されない。
+let loginRedirectStarted = false;
+
 const redirectToLoginIfUnauthorized = (error: unknown) => {
   if (!(error instanceof TRPCClientError)) return;
   if (typeof window === "undefined") return;
@@ -17,6 +22,9 @@ const redirectToLoginIfUnauthorized = (error: unknown) => {
   const isUnauthorized = error.message === UNAUTHED_ERR_MSG;
 
   if (!isUnauthorized) return;
+
+  if (loginRedirectStarted) return;
+  loginRedirectStarted = true;
 
   startLogin();
 };
@@ -73,9 +81,9 @@ const trpcClient = trpc.createClient({
 });
 
 createRoot(document.getElementById("root")!).render(
-  <trpc.Provider client={trpcClient} queryClient={queryClient}>
-    <QueryClientProvider client={queryClient}>
+  <QueryClientProvider client={queryClient}>
+    <trpc.Provider client={trpcClient} queryClient={queryClient}>
       <App />
-    </QueryClientProvider>
-  </trpc.Provider>
+    </trpc.Provider>
+  </QueryClientProvider>
 );

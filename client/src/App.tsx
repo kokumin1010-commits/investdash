@@ -1,38 +1,46 @@
+import DashboardLayout from "@/components/DashboardLayout";
+import { SidebarProvider } from "@/components/ui/sidebar";
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import NotFound from "@/pages/NotFound";
 import { Route, Switch } from "wouter";
 import ErrorBoundary from "./components/ErrorBoundary";
 import { ThemeProvider } from "./contexts/ThemeContext";
-import Home from "./pages/Home";
+import Dashboard from "./pages/Dashboard";
+import HoldingDetail from "./pages/HoldingDetail";
+import Holdings from "./pages/Holdings";
+import ImportScreenshot from "./pages/ImportScreenshot";
+import News from "./pages/News";
+import SettingsPage from "./pages/Settings";
+import Watchlist from "./pages/Watchlist";
 
 function Router() {
-  // make sure to consider if you need authentication for certain routes
   return (
     <Switch>
-      <Route path={"/"} component={Home} />
-      <Route path={"/404"} component={NotFound} />
-      {/* Final fallback route */}
+      <Route path="/" component={Dashboard} />
+      <Route path="/holdings" component={Holdings} />
+      <Route path="/holdings/:id" component={HoldingDetail} />
+      <Route path="/watchlist" component={Watchlist} />
+      <Route path="/news" component={News} />
+      <Route path="/import" component={ImportScreenshot} />
+      <Route path="/settings" component={SettingsPage} />
+      <Route path="/404" component={NotFound} />
       <Route component={NotFound} />
     </Switch>
   );
 }
 
-// NOTE: About Theme
-// - First choose a default theme according to your design style (dark or light bg), than change color palette in index.css
-//   to keep consistent foreground/background color across components
-// - If you want to make theme switchable, pass `switchable` ThemeProvider and use `useTheme` hook
-
 function App() {
   return (
     <ErrorBoundary>
-      <ThemeProvider
-        defaultTheme="light"
-        // switchable
-      >
-        <TooltipProvider>
-          <Toaster />
-          <Router />
+      <ThemeProvider defaultTheme="light" switchable>
+        <TooltipProvider delayDuration={200}>
+          <Toaster position="top-center" />
+          <SidebarProvider>
+            <DashboardLayout>
+              <Router />
+            </DashboardLayout>
+          </SidebarProvider>
         </TooltipProvider>
       </ThemeProvider>
     </ErrorBoundary>
@@ -40,3 +48,4 @@ function App() {
 }
 
 export default App;
+

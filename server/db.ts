@@ -1,11 +1,27 @@
-import { eq } from "drizzle-orm";
+import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
-import { InsertUser, users } from "../drizzle/schema";
-import { ENV } from './_core/env';
+import {
+  holdings,
+  importJobs,
+  investmentCards,
+  newsItems,
+  portfolioSnapshots,
+  signals,
+  userSettings,
+  users,
+  watchlist,
+  type InsertHolding,
+  type InsertImportJob,
+  type InsertInvestmentCard,
+  type InsertNewsItem,
+  type InsertSignal,
+  type InsertUser,
+  type InsertWatchlistItem,
+} from "../drizzle/schema";
+import { ENV } from "./_core/env";
 
 let _db: ReturnType<typeof drizzle> | null = null;
 
-// Lazily create the drizzle instance so local tooling can run without a DB.
 export async function getDb() {
   if (!_db && process.env.DATABASE_URL) {
     try {
@@ -17,6 +33,14 @@ export async function getDb() {
   }
   return _db;
 }
+
+async function requireDb() {
+  const db = await getDb();
+  if (!db) throw new Error("データベースに接続できません");
+  return db;
+}
+
+/* ---------------------------------- users --------------------------------- */
 
 export async function upsertUser(user: InsertUser): Promise<void> {
   if (!user.openId) {
@@ -30,9 +54,7 @@ export async function upsertUser(user: InsertUser): Promise<void> {
   }
 
   try {
-    const values: InsertUser = {
-      openId: user.openId,
-    };
+    const values: InsertUser = { openId: user.openId };
     const updateSet: Record<string, unknown> = {};
 
     const textFields = ["name", "email", "loginMethod"] as const;
@@ -56,8 +78,8 @@ export async function upsertUser(user: InsertUser): Promise<void> {
       values.role = user.role;
       updateSet.role = user.role;
     } else if (user.openId === ENV.ownerOpenId) {
-      values.role = 'admin';
-      updateSet.role = 'admin';
+      values.role = "admin";
+      updateSet.role = "admin";
     }
 
     if (!values.lastSignedIn) {
@@ -68,9 +90,7 @@ export async function upsertUser(user: InsertUser): Promise<void> {
       updateSet.lastSignedIn = new Date();
     }
 
-    await db.insert(users).values(values).onDuplicateKeyUpdate({
-      set: updateSet,
-    });
+    await db.insert(users).values(values).onDuplicateKeyUpdate({ set: updateSet });
   } catch (error) {
     console.error("[Database] Failed to upsert user:", error);
     throw error;
@@ -79,14 +99,371 @@ export async function upsertUser(user: InsertUser): Promise<void> {
 
 export async function getUserByOpenId(openId: string) {
   const db = await getDb();
-  if (!db) {
-    console.warn("[Database] Cannot get user: database not available");
-    return undefined;
-  }
-
+  if (!db) return undefined;
   const result = await db.select().from(users).where(eq(users.openId, openId)).limit(1);
-
   return result.length > 0 ? result[0] : undefined;
 }
 
-// TODO: add feature queries here as your schema grows.
+/* -------------------------------- settings -------------------------------- */
+
+export async function getSettings(userId: number) {
+  const db = await requireDb();
+  const rows = await db
+    .select()
+    .from(userSettings)
+    .where(eq(userSettings.userId, userId))
+    .limit(1);
+  if (rows.length > 0) return rows[0];
+
+  await db.insert(userSettings).values({ userId }).onDuplicateKeyUpdate({ set: { userId } });
+  const created = await db
+    .select()
+    .from(userSettings)
+    .where(eq(userSettings.userId, userId))
+    .limit(1);
+  return created[0];
+}
+
+export async function updateSettings(
+  userId: number,
+  patch: Partial<{
+    baseCurrency: string;
+    usdJpyRate: string;
+    concentrationThreshold: number;
+    sectorConcentrationThreshold: number;
+    cashBalance: string;
+    autoNewsEnabled: boolean;
+    lastPriceSyncAt: Date;
+    lastNewsSyncAt: Date;
+  }>
+) {
+  const db = await requireDb();
+  await getSettings(userId);
+  await db.update(userSettings).set(patch).where(eq(userSettings.userId, userId));
+  return getSettings(userId);
+}
+
+/* -------------------------------- holdings -------------------------------- */
+
+export async function listHoldings(userId: number) {
+  const db = await requireDb();
+  return db.select().from(holdings).where(eq(holdings.userId, userId)).orderBy(holdings.symbol);
+}
+
+export async function getHolding(userId: number, id: number) {
+  const db = await requireDb();
+  const rows = await db
+    .select()
+    .from(holdings)
+    .where(and(eq(holdings.userId, userId), eq(holdings.id, id)))
+    .limit(1);
+  return rows[0];
+}
+
+export async function getHoldingBySymbol(userId: number, symbol: string) {
+  const db = await requireDb();
+  const rows = await db
+    .select()
+    .from(holdings)
+    .where(and(eq(holdings.userId, userId), eq(holdings.symbol, symbol)))
+    .limit(1);
+  return rows[0];
+}
+
+export async function insertHolding(values: InsertHolding) {
+  const db = await requireDb();
+  const res = await db.insert(holdings).values(values);
+  return Number((res as unknown as { insertId: number }).insertId);
+}
+
+export async function updateHolding(
+  userId: number,
+  id: number,
+  patch: Partial<InsertHolding>
+) {
+  const db = await requireDb();
+  await db
+    .update(holdings)
+    .set(patch)
+    .where(and(eq(holdings.userId, userId), eq(holdings.id, id)));
+}
+
+export async function updateHoldingBySymbol(
+  userId: number,
+  symbol: string,
+  patch: Partial<InsertHolding>
+) {
+  const db = await requireDb();
+  await db
+    .update(holdings)
+    .set(patch)
+    .where(and(eq(holdings.userId, userId), eq(holdings.symbol, symbol)));
+}
+
+export async function deleteHolding(userId: number, id: number) {
+  const db = await requireDb();
+  const target = await getHolding(userId, id);
+  await db.delete(holdings).where(and(eq(holdings.userId, userId), eq(holdings.id, id)));
+  return target;
+}
+
+/* ---------------------------- investment cards ---------------------------- */
+
+export async function getCard(userId: number, symbol: string) {
+  const db = await requireDb();
+  const rows = await db
+    .select()
+    .from(investmentCards)
+    .where(and(eq(investmentCards.userId, userId), eq(investmentCards.symbol, symbol)))
+    .limit(1);
+  return rows[0];
+}
+
+export async function listCards(userId: number) {
+  const db = await requireDb();
+  return db.select().from(investmentCards).where(eq(investmentCards.userId, userId));
+}
+
+export async function upsertCard(values: InsertInvestmentCard) {
+  const db = await requireDb();
+  const existing = await getCard(values.userId, values.symbol);
+  if (existing) {
+    await db
+      .update(investmentCards)
+      .set(values)
+      .where(eq(investmentCards.id, existing.id));
+    return existing.id;
+  }
+  const res = await db.insert(investmentCards).values(values);
+  return Number((res as unknown as { insertId: number }).insertId);
+}
+
+/* ---------------------------------- news ---------------------------------- */
+
+export async function listNews(userId: number, opts: { symbol?: string; limit?: number } = {}) {
+  const db = await requireDb();
+  const { symbol, limit = 60 } = opts;
+  const where = symbol
+    ? and(eq(newsItems.userId, userId), eq(newsItems.symbol, symbol))
+    : eq(newsItems.userId, userId);
+  return db
+    .select()
+    .from(newsItems)
+    .where(where)
+    .orderBy(desc(newsItems.publishedAt), desc(newsItems.id))
+    .limit(limit);
+}
+
+export async function existingNewsHashes(userId: number, hashes: string[]) {
+  if (hashes.length === 0) return new Set<string>();
+  const db = await requireDb();
+  const rows = await db
+    .select({ urlHash: newsItems.urlHash })
+    .from(newsItems)
+    .where(and(eq(newsItems.userId, userId), inArray(newsItems.urlHash, hashes)));
+  return new Set(rows.map(r => r.urlHash));
+}
+
+export async function insertNews(values: InsertNewsItem[]) {
+  if (values.length === 0) return 0;
+  const db = await requireDb();
+  await db.insert(newsItems).values(values);
+  return values.length;
+}
+
+export async function updateNewsVerdict(
+  userId: number,
+  urlHash: string,
+  patch: {
+    sentiment: "POSITIVE" | "NEGATIVE" | "NEUTRAL";
+    impactScore: number;
+    summary: string;
+    reasoning: string;
+  }
+) {
+  const db = await requireDb();
+  await db
+    .update(newsItems)
+    .set({ ...patch, analyzedAt: new Date() })
+    .where(and(eq(newsItems.userId, userId), eq(newsItems.urlHash, urlHash)));
+}
+
+export async function deleteNewsForSymbol(userId: number, symbol: string) {
+  const db = await requireDb();
+  await db
+    .delete(newsItems)
+    .where(and(eq(newsItems.userId, userId), eq(newsItems.symbol, symbol)));
+}
+
+/** 古いニュースを削除して肥大化を防ぐ（既定 90 日） */
+export async function pruneOldNews(userId: number, days = 90) {
+  const db = await requireDb();
+  await db
+    .delete(newsItems)
+    .where(
+      and(
+        eq(newsItems.userId, userId),
+        sql`${newsItems.createdAt} < DATE_SUB(NOW(), INTERVAL ${days} DAY)`
+      )
+    );
+}
+
+/* --------------------------------- signals -------------------------------- */
+
+export async function insertSignal(values: InsertSignal) {
+  const db = await requireDb();
+  const res = await db.insert(signals).values(values);
+  return Number((res as unknown as { insertId: number }).insertId);
+}
+
+/** 各銘柄の最新シグナルのみを返す */
+export async function latestSignals(userId: number) {
+  const db = await requireDb();
+  const rows = await db
+    .select()
+    .from(signals)
+    .where(eq(signals.userId, userId))
+    .orderBy(desc(signals.createdAt), desc(signals.id));
+
+  const map = new Map<string, (typeof rows)[number]>();
+  for (const r of rows) {
+    if (!map.has(r.symbol)) map.set(r.symbol, r);
+  }
+  return map;
+}
+
+export async function signalHistory(userId: number, symbol: string, limit = 20) {
+  const db = await requireDb();
+  return db
+    .select()
+    .from(signals)
+    .where(and(eq(signals.userId, userId), eq(signals.symbol, symbol)))
+    .orderBy(desc(signals.createdAt), desc(signals.id))
+    .limit(limit);
+}
+
+/* -------------------------------- watchlist ------------------------------- */
+
+export async function listWatchlist(userId: number) {
+  const db = await requireDb();
+  return db
+    .select()
+    .from(watchlist)
+    .where(eq(watchlist.userId, userId))
+    .orderBy(watchlist.priority, watchlist.symbol);
+}
+
+export async function getWatchItem(userId: number, id: number) {
+  const db = await requireDb();
+  const rows = await db
+    .select()
+    .from(watchlist)
+    .where(and(eq(watchlist.userId, userId), eq(watchlist.id, id)))
+    .limit(1);
+  return rows[0];
+}
+
+export async function getWatchBySymbol(userId: number, symbol: string) {
+  const db = await requireDb();
+  const rows = await db
+    .select()
+    .from(watchlist)
+    .where(and(eq(watchlist.userId, userId), eq(watchlist.symbol, symbol)))
+    .limit(1);
+  return rows[0];
+}
+
+export async function insertWatchItem(values: InsertWatchlistItem) {
+  const db = await requireDb();
+  const res = await db.insert(watchlist).values(values);
+  return Number((res as unknown as { insertId: number }).insertId);
+}
+
+export async function updateWatchItem(
+  userId: number,
+  id: number,
+  patch: Partial<InsertWatchlistItem>
+) {
+  const db = await requireDb();
+  await db
+    .update(watchlist)
+    .set(patch)
+    .where(and(eq(watchlist.userId, userId), eq(watchlist.id, id)));
+}
+
+export async function deleteWatchItem(userId: number, id: number) {
+  const db = await requireDb();
+  const target = await getWatchItem(userId, id);
+  await db.delete(watchlist).where(and(eq(watchlist.userId, userId), eq(watchlist.id, id)));
+  return target;
+}
+
+/* ------------------------------- import jobs ------------------------------ */
+
+export async function createImportJob(values: InsertImportJob) {
+  const db = await requireDb();
+  const res = await db.insert(importJobs).values(values);
+  return Number((res as unknown as { insertId: number }).insertId);
+}
+
+export async function getImportJob(userId: number, id: number) {
+  const db = await requireDb();
+  const rows = await db
+    .select()
+    .from(importJobs)
+    .where(and(eq(importJobs.userId, userId), eq(importJobs.id, id)))
+    .limit(1);
+  return rows[0];
+}
+
+export async function updateImportJob(
+  userId: number,
+  id: number,
+  patch: Partial<InsertImportJob>
+) {
+  const db = await requireDb();
+  await db
+    .update(importJobs)
+    .set(patch)
+    .where(and(eq(importJobs.userId, userId), eq(importJobs.id, id)));
+}
+
+export async function listImportJobs(userId: number, limit = 10) {
+  const db = await requireDb();
+  return db
+    .select()
+    .from(importJobs)
+    .where(eq(importJobs.userId, userId))
+    .orderBy(desc(importJobs.createdAt))
+    .limit(limit);
+}
+
+/* ------------------------------- snapshots -------------------------------- */
+
+export async function insertSnapshot(values: {
+  userId: number;
+  totalValue: string;
+  totalCost: string;
+  positionCount: number;
+}) {
+  const db = await requireDb();
+  await db.insert(portfolioSnapshots).values(values);
+}
+
+export async function listSnapshots(userId: number, limit = 90) {
+  const db = await requireDb();
+  const rows = await db
+    .select()
+    .from(portfolioSnapshots)
+    .where(eq(portfolioSnapshots.userId, userId))
+    .orderBy(desc(portfolioSnapshots.capturedAt))
+    .limit(limit);
+  return rows.reverse();
+}
+
+/** 全ユーザーの ID を取得（定期ジョブ用） */
+export async function listAllUserIds() {
+  const db = await requireDb();
+  const rows = await db.select({ id: users.id }).from(users);
+  return rows.map(r => r.id);
+}

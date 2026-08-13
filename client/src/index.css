@@ -43,74 +43,82 @@
 }
 
 :root {
-  --primary: var(--color-blue-700);
-  --primary-foreground: var(--color-blue-50);
-  --sidebar-primary: var(--color-blue-600);
-  --sidebar-primary-foreground: var(--color-blue-50);
-  --chart-1: var(--color-blue-300);
-  --chart-2: var(--color-blue-500);
-  --chart-3: var(--color-blue-600);
-  --chart-4: var(--color-blue-700);
-  --chart-5: var(--color-blue-800);
-  --radius: 0.65rem;
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.235 0.015 65);
+  /* 深い藍色を基調とした、長時間の閲覧に耐える落ち着いた配色 */
+  --primary: oklch(0.42 0.09 235);
+  --primary-foreground: oklch(0.98 0.005 235);
+  --sidebar-primary: oklch(0.42 0.09 235);
+  --sidebar-primary-foreground: oklch(0.98 0.005 235);
+  --chart-1: oklch(0.52 0.1 235);
+  --chart-2: oklch(0.58 0.11 165);
+  --chart-3: oklch(0.65 0.13 55);
+  --chart-4: oklch(0.55 0.12 300);
+  --chart-5: oklch(0.6 0.1 25);
+  --radius: 0.5rem;
+  --background: oklch(0.985 0.003 90);
+  --foreground: oklch(0.24 0.012 250);
   --card: oklch(1 0 0);
-  --card-foreground: oklch(0.235 0.015 65);
+  --card-foreground: oklch(0.24 0.012 250);
   --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.235 0.015 65);
-  --secondary: oklch(0.98 0.001 286.375);
-  --secondary-foreground: oklch(0.4 0.015 65);
-  --muted: oklch(0.967 0.001 286.375);
-  --muted-foreground: oklch(0.552 0.016 285.938);
-  --accent: oklch(0.967 0.001 286.375);
-  --accent-foreground: oklch(0.141 0.005 285.823);
-  --destructive: oklch(0.577 0.245 27.325);
-  --destructive-foreground: oklch(0.985 0 0);
-  --border: oklch(0.92 0.004 286.32);
-  --input: oklch(0.92 0.004 286.32);
-  --ring: oklch(0.623 0.214 259.815);
-  --sidebar: oklch(0.985 0 0);
-  --sidebar-foreground: oklch(0.235 0.015 65);
-  --sidebar-accent: oklch(0.967 0.001 286.375);
-  --sidebar-accent-foreground: oklch(0.141 0.005 285.823);
-  --sidebar-border: oklch(0.92 0.004 286.32);
-  --sidebar-ring: oklch(0.623 0.214 259.815);
+  --popover-foreground: oklch(0.24 0.012 250);
+  --secondary: oklch(0.965 0.005 240);
+  --secondary-foreground: oklch(0.36 0.015 250);
+  --muted: oklch(0.958 0.005 240);
+  --muted-foreground: oklch(0.52 0.012 250);
+  --accent: oklch(0.95 0.012 235);
+  --accent-foreground: oklch(0.27 0.03 235);
+  --destructive: oklch(0.55 0.2 18);
+  --destructive-foreground: oklch(0.99 0 0);
+  --border: oklch(0.9 0.005 240);
+  --input: oklch(0.9 0.005 240);
+  --ring: oklch(0.52 0.1 235);
+  --sidebar: oklch(0.975 0.004 240);
+  --sidebar-foreground: oklch(0.28 0.012 250);
+  --sidebar-accent: oklch(0.94 0.014 235);
+  --sidebar-accent-foreground: oklch(0.26 0.035 235);
+  --sidebar-border: oklch(0.9 0.005 240);
+  --sidebar-ring: oklch(0.52 0.1 235);
+  /* 損益表示に用いる意味色（日本の慣習に合わせず、国際的な緑=益／赤=損を採用） */
+  --gain: oklch(0.52 0.13 155);
+  --loss: oklch(0.55 0.19 20);
+  --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+  --ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
 }
 
 .dark {
-  --primary: var(--color-blue-700);
-  --primary-foreground: var(--color-blue-50);
-  --sidebar-primary: var(--color-blue-500);
-  --sidebar-primary-foreground: var(--color-blue-50);
-  --background: oklch(0.141 0.005 285.823);
-  --foreground: oklch(0.85 0.005 65);
-  --card: oklch(0.21 0.006 285.885);
-  --card-foreground: oklch(0.85 0.005 65);
-  --popover: oklch(0.21 0.006 285.885);
-  --popover-foreground: oklch(0.85 0.005 65);
-  --secondary: oklch(0.24 0.006 286.033);
-  --secondary-foreground: oklch(0.7 0.005 65);
-  --muted: oklch(0.274 0.006 286.033);
-  --muted-foreground: oklch(0.705 0.015 286.067);
-  --accent: oklch(0.274 0.006 286.033);
-  --accent-foreground:  oklch(0.92 0.005 65);
-  --destructive: oklch(0.704 0.191 22.216);
-  --destructive-foreground: oklch(0.985 0 0);
-  --border: oklch(1 0 0 / 10%);
+  --primary: oklch(0.68 0.11 230);
+  --primary-foreground: oklch(0.16 0.02 240);
+  --sidebar-primary: oklch(0.68 0.11 230);
+  --sidebar-primary-foreground: oklch(0.16 0.02 240);
+  --background: oklch(0.16 0.012 250);
+  --foreground: oklch(0.9 0.008 240);
+  --card: oklch(0.205 0.014 250);
+  --card-foreground: oklch(0.9 0.008 240);
+  --popover: oklch(0.205 0.014 250);
+  --popover-foreground: oklch(0.9 0.008 240);
+  --secondary: oklch(0.245 0.014 250);
+  --secondary-foreground: oklch(0.82 0.008 240);
+  --muted: oklch(0.25 0.014 250);
+  --muted-foreground: oklch(0.66 0.012 245);
+  --accent: oklch(0.28 0.03 235);
+  --accent-foreground: oklch(0.93 0.01 235);
+  --destructive: oklch(0.65 0.19 20);
+  --destructive-foreground: oklch(0.99 0 0);
+  --border: oklch(1 0 0 / 11%);
   --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.488 0.243 264.376);
-  --chart-1: var(--color-blue-300);
-  --chart-2: var(--color-blue-500);
-  --chart-3: var(--color-blue-600);
-  --chart-4: var(--color-blue-700);
-  --chart-5: var(--color-blue-800);
-  --sidebar: oklch(0.21 0.006 285.885);
-  --sidebar-foreground: oklch(0.85 0.005 65);
-  --sidebar-accent: oklch(0.274 0.006 286.033);
-  --sidebar-accent-foreground:  oklch(0.985 0 0);
-  --sidebar-border: oklch(1 0 0 / 10%);
-  --sidebar-ring: oklch(0.488 0.243 264.376);
+  --ring: oklch(0.62 0.11 230);
+  --chart-1: oklch(0.68 0.11 230);
+  --chart-2: oklch(0.7 0.12 165);
+  --chart-3: oklch(0.75 0.13 60);
+  --chart-4: oklch(0.68 0.13 300);
+  --chart-5: oklch(0.7 0.12 25);
+  --sidebar: oklch(0.185 0.013 250);
+  --sidebar-foreground: oklch(0.88 0.008 240);
+  --sidebar-accent: oklch(0.27 0.028 235);
+  --sidebar-accent-foreground: oklch(0.93 0.01 235);
+  --sidebar-border: oklch(1 0 0 / 11%);
+  --sidebar-ring: oklch(0.62 0.11 230);
+  --gain: oklch(0.7 0.15 155);
+  --loss: oklch(0.68 0.18 22);
 }
 
 @layer base {
@@ -119,6 +127,12 @@
   }
   body {
     @apply bg-background text-foreground;
+    font-feature-settings: "palt" 1;
+  }
+  /* 数値は等幅で桁を揃える */
+  .tabular {
+    font-variant-numeric: tabular-nums;
+    font-feature-settings: "tnum" 1;
   }
   button:not(:disabled),
   [role="button"]:not([aria-disabled="true"]),
@@ -130,6 +144,21 @@
   input[type="checkbox"]:not(:disabled),
   input[type="radio"]:not(:disabled) {
     @apply cursor-pointer;
+  }
+}
+
+@layer utilities {
+  .text-gain {
+    color: var(--gain);
+  }
+  .text-loss {
+    color: var(--loss);
+  }
+  .bg-gain-soft {
+    background-color: color-mix(in oklab, var(--gain) 12%, transparent);
+  }
+  .bg-loss-soft {
+    background-color: color-mix(in oklab, var(--loss) 12%, transparent);
   }
 }
 

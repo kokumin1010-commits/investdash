@@ -21,15 +21,28 @@ import {
 } from "@/components/ui/sidebar";
 import { startLogin } from "@/const";
 import { useIsMobile } from "@/hooks/useMobile";
-import { LayoutDashboard, LogOut, PanelLeft, Users } from "lucide-react";
+import {
+  Eye,
+  LayoutDashboard,
+  LogOut,
+  Newspaper,
+  PanelLeft,
+  ScanLine,
+  Settings,
+  Wallet,
+} from "lucide-react";
 import { CSSProperties, useEffect, useRef, useState } from "react";
 import { useLocation } from "wouter";
 import { DashboardLayoutSkeleton } from './DashboardLayoutSkeleton';
 import { Button } from "./ui/button";
 
 const menuItems = [
-  { icon: LayoutDashboard, label: "Page 1", path: "/" },
-  { icon: Users, label: "Page 2", path: "/some-path" },
+  { icon: LayoutDashboard, label: "ダッシュボード", path: "/" },
+  { icon: Wallet, label: "保有銘柄", path: "/holdings" },
+  { icon: Eye, label: "ウォッチリスト", path: "/watchlist" },
+  { icon: Newspaper, label: "ニュース", path: "/news" },
+  { icon: ScanLine, label: "スクショ取込", path: "/import" },
+  { icon: Settings, label: "設定", path: "/settings" },
 ];
 
 const SIDEBAR_WIDTH_KEY = "sidebar-width";
@@ -46,35 +59,42 @@ export default function DashboardLayout({
     const saved = localStorage.getItem(SIDEBAR_WIDTH_KEY);
     return saved ? parseInt(saved, 10) : DEFAULT_WIDTH;
   });
-  const { loading, user } = useAuth();
+  const { loading, user, error } = useAuth();
 
   useEffect(() => {
     localStorage.setItem(SIDEBAR_WIDTH_KEY, sidebarWidth.toString());
   }, [sidebarWidth]);
 
-  if (loading) {
+  // 認証エラーが返っている場合は未ログイン扱いにし、スケルトンで固まらせない
+  if (loading && !error) {
     return <DashboardLayoutSkeleton />
   }
 
   if (!user) {
     return (
-      <div className="flex items-center justify-center min-h-screen">
+      <div className="flex items-center justify-center min-h-screen bg-background">
         <div className="flex flex-col items-center gap-8 p-8 max-w-md w-full">
-          <div className="flex flex-col items-center gap-6">
-            <h1 className="text-2xl font-semibold tracking-tight text-center">
-              Sign in to continue
-            </h1>
-            <p className="text-sm text-muted-foreground text-center max-w-sm">
-              Access to this dashboard requires authentication. Continue to launch the login flow.
-            </p>
+          <div className="flex flex-col items-center gap-5">
+            <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-primary text-primary-foreground">
+              <LayoutDashboard className="h-6 w-6" />
+            </div>
+            <div className="space-y-2 text-center">
+              <h1 className="text-2xl font-semibold tracking-tight">InvestDesk</h1>
+              <p className="text-sm text-muted-foreground">
+                保有銘柄・投資理由・ニュースを一元管理する意思決定支援ツールです。ご利用にはログインが必要です。
+              </p>
+            </div>
           </div>
           <Button
             onClick={() => startLogin()}
             size="lg"
-            className="w-full shadow-lg hover:shadow-xl transition-all"
+            className="w-full shadow-sm transition-all"
           >
-            Sign in
+            ログイン
           </Button>
+          <p className="text-center text-xs leading-relaxed text-muted-foreground">
+            本アプリの分析結果は情報提供であり、投資助言ではありません。
+          </p>
         </div>
       </div>
     );
@@ -169,7 +189,7 @@ function DashboardLayoutContent({
               {!isCollapsed ? (
                 <div className="flex items-center gap-2 min-w-0">
                   <span className="font-semibold tracking-tight truncate">
-                    Navigation
+                    InvestDesk
                   </span>
                 </div>
               ) : null}
@@ -224,7 +244,7 @@ function DashboardLayoutContent({
                   className="cursor-pointer text-destructive focus:text-destructive"
                 >
                   <LogOut className="mr-2 h-4 w-4" />
-                  <span>Sign out</span>
+                  <span>ログアウト</span>
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
