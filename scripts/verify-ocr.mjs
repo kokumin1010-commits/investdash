@@ -1,6 +1,11 @@
 /**
  * 実データのスクリーンショットで OCR 精度を検証するスクリプト。
- * 使い方: node scripts/verify-ocr.mjs /path/to/image.png
+ *
+ * 使い方:
+ *   node scripts/verify-ocr.mjs /path/to/image.png
+ *   node scripts/verify-ocr.mjs --format moomoo_jp /path/to/image.png
+ *
+ * --format を付けると、そのアプリのレイアウト定義をプロンプトに含めて検証する。
  */
 import fs from "node:fs";
 import path from "node:path";
@@ -8,7 +13,18 @@ import dotenv from "dotenv";
 
 dotenv.config();
 
-const files = process.argv.slice(2);
+const args = process.argv.slice(2);
+let formatId = null;
+const files = [];
+
+for (let i = 0; i < args.length; i++) {
+  if (args[i] === "--format") {
+    formatId = args[++i];
+  } else {
+    files.push(args[i]);
+  }
+}
+
 if (files.length === 0) {
   console.error("画像パスを指定してください");
   process.exit(1);
@@ -21,14 +37,37 @@ if (!apiUrl || !apiKey) {
   process.exit(1);
 }
 
-const SYSTEM_PROMPT = fs
+const basePrompt = fs
   .readFileSync(path.join(process.cwd(), "server/services/ocr.ts"), "utf8")
   .match(/const SYSTEM_PROMPT = `([\s\S]*?)`;/)?.[1];
 
-if (!SYSTEM_PROMPT) {
+if (!basePrompt) {
   console.error("SYSTEM_PROMPT を ocr.ts から抽出できませんでした");
   process.exit(1);
 }
+
+/** brokerFormats.ts から指定フォーマットの layoutPrompt を取り出す */
+function readLayoutPrompt(id) {
+  if (!id) return null;
+  const source = fs.readFileSync(
+    path.join(process.cwd(), "server/services/brokerFormats.ts"),
+    "utf8"
+  );
+  const blocks = source.split(/const [A-Z_]+: BrokerFormat = \{/);
+  for (const block of blocks) {
+    if (!block.includes(`id: "${id}"`)) continue;
+    const match = block.match(/layoutPrompt: `([\s\S]*?)`,\s*\n\};/);
+    if (match) return match[1];
+  }
+  return null;
+}
+
+const layoutPrompt = readLayoutPrompt(formatId);
+if (formatId && !layoutPrompt) {
+  console.warn(`警告: "${formatId}" のレイアウト定義が見つかりません。汎用ルールで検証します。`);
+}
+
+const SYSTEM_PROMPT = layoutPrompt ? `${basePrompt}\n\n---\n\n${layoutPrompt}` : basePrompt;
 
 const SCHEMA = {
   type: "json_schema",
@@ -102,6 +141,9 @@ const content = [
 ];
 
 const started = Date.now();
+console.log(
+  `フォーマット: ${formatId ?? "generic"}${layoutPrompt ? "（レイアウト定義あり）" : "（汎用ルール）"}`
+);
 const res = await fetch(`${apiUrl}/v1/chat/completions`, {
   method: "POST",
   headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },

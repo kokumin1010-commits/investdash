@@ -4,6 +4,7 @@ import * as db from "../db";
 import { protectedProcedure, router } from "../_core/trpc";
 import { storagePut } from "../storage";
 import { extractPositions, type ParsedPosition } from "../services/ocr";
+import { BROKER_FORMAT_OPTIONS, guessFormatFromBrokerName } from "../services/brokerFormats";
 import { fetchCompanyProfile, fetchQuote } from "../services/marketData";
 import { normalizeSymbol } from "../../shared/investing";
 
@@ -22,6 +23,9 @@ const rowSchema = z.object({
 const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
 
 export const importRouter = router({
+  /** 対応している証券アプリのフォーマット一覧 */
+  formats: protectedProcedure.query(() => BROKER_FORMAT_OPTIONS),
+
   /**
    * スクリーンショットを受け取り、S3 に保存して OCR 解析する。
    * 解析結果は importJobs に保持し、ユーザーの承認を待つ。
@@ -39,6 +43,8 @@ export const importRouter = router({
           )
           .min(1)
           .max(5),
+        /** 証券アプリの種類。指定するとレイアウト定義を使って精度が上がる */
+        formatId: z.enum(["moomoo_jp", "rakuten_ispeed", "futu", "generic"]).optional(),
       })
     )
     .mutation(async ({ ctx, input }) => {
@@ -76,13 +82,33 @@ export const importRouter = router({
         console.warn("[import] storage put failed:", error);
       }
 
-      const jobId = await db.createImportJob({ userId, fileKey, imageUrl, status: "PENDING" });
+      // 履歴用のジョブ作成に失敗しても、読み取り自体は続行できるようにする。
+      // ここで例外を投げると、正しく読み取れていてもユーザーには失敗として見えてしまう。
+      let jobId: number | null = null;
+      try {
+        jobId = await db.createImportJob({ userId, fileKey, imageUrl, status: "PENDING" });
+      } catch (error) {
+        console.warn("[import] failed to create job record:", error);
+      }
+
+      /** ジョブが作れていた場合のみ履歴を更新する */
+      const patchJob = async (patch: Parameters<typeof db.updateImportJob>[2]) => {
+        if (jobId === null) return;
+        try {
+          await db.updateImportJob(userId, jobId, patch);
+        } catch (error) {
+          console.warn("[import] failed to update job record:", error);
+        }
+      };
 
       try {
-        const result = await extractPositions(input.images.map(i => i.dataUrl));
+        const result = await extractPositions(
+          input.images.map(i => i.dataUrl),
+          input.formatId
+        );
 
         if (result.positions.length === 0) {
-          await db.updateImportJob(userId, jobId, {
+          await patchJob({
             status: "FAILED",
             errorMessage: "保有銘柄を読み取れませんでした",
             parsed: result,
@@ -112,22 +138,26 @@ export const importRouter = router({
           };
         });
 
-        await db.updateImportJob(userId, jobId, {
+        await patchJob({
           status: "PARSED",
           parsed: { rows, warnings: result.warnings },
           accountSummary: result.account,
         });
 
         return {
-          jobId,
+          jobId: jobId ?? undefined,
           rows,
           account: result.account,
           warnings: result.warnings,
+          /** 実際に適用したフォーマット */
+          formatId: result.formatId,
+          /** 画面から推定した証券アプリ（選択が未指定だった場合の参考情報） */
+          detectedFormatId: guessFormatFromBrokerName(result.account.broker),
         };
       } catch (error) {
         if (error instanceof TRPCError) throw error;
         const message = error instanceof Error ? error.message : "読み取りに失敗しました";
-        await db.updateImportJob(userId, jobId, { status: "FAILED", errorMessage: message });
+        await patchJob({ status: "FAILED", errorMessage: message });
         throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message });
       }
     }),

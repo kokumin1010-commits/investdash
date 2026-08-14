@@ -40,6 +40,29 @@ async function requireDb() {
   return db;
 }
 
+/**
+ * INSERT の結果から採番された ID を取り出す。
+ *
+ * drizzle の mysql2 ドライバは環境によって `ResultSetHeader` を直接返す場合と
+ * `[ResultSetHeader, FieldPacket[]]` の配列で返す場合がある。どちらでも動くよう
+ * 正規化する。取得できなければ NaN を後段に流さず、その場で失敗させる。
+ */
+function extractInsertId(result: unknown, table: string): number {
+  const header = Array.isArray(result) ? result[0] : result;
+  const raw = (header as { insertId?: unknown } | null)?.insertId;
+  const id = typeof raw === "bigint" ? Number(raw) : Number(raw);
+
+  if (!Number.isFinite(id) || id <= 0) {
+    throw new Error(
+      `${table} への登録で ID を取得できませんでした（受け取った値: ${String(raw)}）`
+    );
+  }
+  return id;
+}
+
+/** テスト用エクスポート */
+export const extractInsertIdForTest = extractInsertId;
+
 /* ---------------------------------- users --------------------------------- */
 
 export async function upsertUser(user: InsertUser): Promise<void> {
@@ -181,7 +204,7 @@ export async function getHoldingBySymbol(userId: number, symbol: string) {
 export async function insertHolding(values: InsertHolding) {
   const db = await requireDb();
   const res = await db.insert(holdings).values(values);
-  return Number((res as unknown as { insertId: number }).insertId);
+  return extractInsertId(res, "holdings");
 }
 
 export async function updateHolding(
@@ -243,7 +266,7 @@ export async function upsertCard(values: InsertInvestmentCard) {
     return existing.id;
   }
   const res = await db.insert(investmentCards).values(values);
-  return Number((res as unknown as { insertId: number }).insertId);
+  return extractInsertId(res, "investmentCards");
 }
 
 /* ---------------------------------- news ---------------------------------- */
@@ -321,7 +344,7 @@ export async function pruneOldNews(userId: number, days = 90) {
 export async function insertSignal(values: InsertSignal) {
   const db = await requireDb();
   const res = await db.insert(signals).values(values);
-  return Number((res as unknown as { insertId: number }).insertId);
+  return extractInsertId(res, "signals");
 }
 
 /** 各銘柄の最新シグナルのみを返す */
@@ -384,7 +407,7 @@ export async function getWatchBySymbol(userId: number, symbol: string) {
 export async function insertWatchItem(values: InsertWatchlistItem) {
   const db = await requireDb();
   const res = await db.insert(watchlist).values(values);
-  return Number((res as unknown as { insertId: number }).insertId);
+  return extractInsertId(res, "watchlist");
 }
 
 export async function updateWatchItem(
@@ -411,7 +434,7 @@ export async function deleteWatchItem(userId: number, id: number) {
 export async function createImportJob(values: InsertImportJob) {
   const db = await requireDb();
   const res = await db.insert(importJobs).values(values);
-  return Number((res as unknown as { insertId: number }).insertId);
+  return extractInsertId(res, "importJobs");
 }
 
 export async function getImportJob(userId: number, id: number) {

@@ -55,6 +55,11 @@ type Row = {
 
 type Picked = { dataUrl: string; fileName: string; preview: string };
 
+type FormatId = "moomoo_jp" | "rakuten_ispeed" | "futu" | "generic";
+
+/** 前回選択した証券アプリを覚えておくためのキー */
+const FORMAT_STORAGE_KEY = "investdesk.import.format";
+
 const MAX_FILES = 5;
 
 export default function ImportScreenshot() {
@@ -67,14 +72,40 @@ export default function ImportScreenshot() {
   const [warnings, setWarnings] = useState<string[]>([]);
   const [cash, setCash] = useState<string>("");
   const [dragging, setDragging] = useState(false);
+  // 一度選べば次回以降も同じアプリが選択された状態になる
+  const [formatId, setFormatId] = useState<FormatId>(() => {
+    const saved = window.localStorage.getItem(FORMAT_STORAGE_KEY);
+    return saved === "moomoo_jp" || saved === "rakuten_ispeed" || saved === "futu"
+      ? saved
+      : "moomoo_jp";
+  });
+
+  const formats = trpc.import.formats.useQuery();
+
+  const changeFormat = (next: FormatId) => {
+    setFormatId(next);
+    window.localStorage.setItem(FORMAT_STORAGE_KEY, next);
+  };
 
   const parse = trpc.import.parseScreenshots.useMutation({
     onSuccess: res => {
       setRows(res.rows as Row[]);
-      setJobId(res.jobId);
+      setJobId(res.jobId ?? null);
       setWarnings(res.warnings);
       if (res.account.cash !== null) setCash(String(res.account.cash));
       toast.success(`${res.rows.length} 銘柄を読み取りました。内容をご確認ください。`);
+      // 選択と実際の画面が食い違っていた場合は知らせる
+      if (
+        res.detectedFormatId !== "generic" &&
+        res.detectedFormatId !== res.formatId
+      ) {
+        const detected = formats.data?.find(f => f.id === res.detectedFormatId);
+        if (detected) {
+          toast.info(
+            `画面から「${detected.label}」と判定しました。選択と違う場合は次回から切り替えてください。`
+          );
+        }
+      }
     },
     onError: e => toast.error(e.message),
   });
@@ -188,6 +219,41 @@ export default function ImportScreenshot() {
 
               {files.length > 0 ? (
                 <div className="mt-4 space-y-3">
+                  {/* 証券アプリの選択 */}
+                  <div className="flex flex-wrap items-end gap-3 rounded-lg border bg-muted/20 p-3">
+                    <div className="min-w-[220px] flex-1 space-y-1.5">
+                      <Label htmlFor="broker-format" className="text-xs">
+                        どの証券アプリの画面ですか
+                      </Label>
+                      <Select value={formatId} onValueChange={v => changeFormat(v as FormatId)}>
+                        <SelectTrigger id="broker-format" className="h-9">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {(formats.data ?? []).map(f => (
+                            <SelectItem key={f.id} value={f.id}>
+                              <span className="flex items-center gap-2">
+                                {f.label}
+                                {f.verified ? (
+                                  <Badge
+                                    variant="outline"
+                                    className="h-4 border-gain/40 px-1 text-[10px] text-gain"
+                                  >
+                                    学習済
+                                  </Badge>
+                                ) : null}
+                              </span>
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <p className="flex-1 text-xs leading-relaxed text-muted-foreground">
+                      「学習済」のアプリは画面の列構成を把握しているため、読み取り精度が上がります。
+                      一覧にないアプリは「その他」を選んでください。
+                    </p>
+                  </div>
+
                   <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
                     {files.map((f, i) => (
                       <div key={i} className="group relative overflow-hidden rounded-lg border">
@@ -218,6 +284,7 @@ export default function ImportScreenshot() {
                       onClick={() =>
                         parse.mutate({
                           images: files.map(f => ({ dataUrl: f.dataUrl, fileName: f.fileName })),
+                          formatId,
                         })
                       }
                     >

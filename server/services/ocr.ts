@@ -1,4 +1,5 @@
 import { invokeLLM } from "../_core/llm";
+import { getBrokerFormat, type BrokerFormatId } from "./brokerFormats";
 
 /**
  * 証券会社アプリのスクリーンショットから保有ポジションを抽出する。
@@ -40,6 +41,8 @@ export type OcrResult = {
   account: ParsedAccount;
   /** 読み取りに関する注意点 */
   warnings: string[];
+  /** 実際に適用したフォーマット */
+  formatId: BrokerFormatId;
 };
 
 const SYSTEM_PROMPT = `あなたは証券口座のスクリーンショットを読み取る専門のデータ抽出エンジンです。
@@ -48,21 +51,25 @@ const SYSTEM_PROMPT = `あなたは証券口座のスクリーンショットを
 1. 画面に実際に表示されている数値のみを抽出する。推測や補完は絶対に行わない。
 2. 数値が途切れている・見切れている場合は null にし、warnings に理由を記載する。
 3. 桁区切りのカンマは除去して数値化する（例: "4,859,250.00" → 4859250）。
-4. 楽天証券 iSPEED の保有一覧では、各行のレイアウトは次の通り:
-   - 1列目: 銘柄名（上段）と証券コード（下段、"一般"や"NISA"などのタグが付く）
-   - 2列目: 評価額（上段）と数量（下段）
-   - 3列目: 評価損益（上段は金額、下段はパーセント）
-   - 4列目: 現在値（上段）と取得単価（下段）
+4. 各行は上下 2 段の組み合わせで表示される。列見出しの「A/B」という表記は
+   「上段が A、下段が B」を意味する。見出しを必ず確認してから列を対応づける。
 5. 取得単価が右端で見切れている場合（例: "3,390.0(" のように末尾が欠けている）、
    評価額・数量・評価損益から逆算できる場合のみ算出し、warnings に「取得単価を逆算」と記載する。
    逆算式: 取得単価 =（評価額 − 評価損益）÷ 数量
 6. マイナスの損益は必ず負の数として表現する。
-7. 証券コードは日本株なら4桁の数字（末尾が英字の場合もある）、米国株ならアルファベットのティッカー。
+7. 証券コードは日本株なら 4 桁の数字（末尾が英字の場合もある）、米国株ならアルファベットの
+   ティッカー、香港株なら 5 桁以内の数字、台湾株なら 4 桁の数字。
 8. 画面上部の「純資産」「預り金」も抽出する。
 9. 行が画面下端で途切れて数値が読めない場合はその行を含めず、warnings に記載する。
+10. 銘柄名が「オリエンタル…」のように省略記号で切れている場合は、表示されている文字を
+    そのまま name に入れる。勝手に補完してはならない。証券コードから正式名称を特定するのは
+    後段の処理が行う。
+11. 「一般」「NISA」「特定」などの口座区分タグは銘柄名やコードに含めない。
 
 confidence は各行の読み取り確度を 0-100 で自己評価する。全ての数値が明瞭なら 95 以上、
-一部を逆算・推定した場合は 60-80、不明瞭な箇所が多い場合は 50 未満とする。`;
+一部を逆算・推定した場合は 60-80、不明瞭な箇所が多い場合は 50 未満とする。
+
+broker には画面から判断できるアプリ名を入れる。判断できない場合は null にする。`;
 
 const OUTPUT_SCHEMA = {
   type: "json_schema" as const,
@@ -120,11 +127,27 @@ const OUTPUT_SCHEMA = {
 
 /**
  * base64 データ URL（複数枚可）を渡してポジションを抽出する。
+ *
+ * `formatId` を指定すると、そのアプリのレイアウト定義をプロンプトに含めるため
+ * 列の対応を誤りにくくなる。省略時は汎用ルールで読み取る。
  */
-export async function extractPositions(imageDataUrls: string[]): Promise<OcrResult> {
+export async function extractPositions(
+  imageDataUrls: string[],
+  formatId?: BrokerFormatId
+): Promise<OcrResult> {
   if (imageDataUrls.length === 0) {
-    return { positions: [], account: emptyAccount(), warnings: ["画像が指定されていません"] };
+    return {
+      positions: [],
+      account: emptyAccount(),
+      warnings: ["画像が指定されていません"],
+      formatId: formatId ?? "generic",
+    };
   }
+
+  const format = getBrokerFormat(formatId);
+  const systemPrompt = format.layoutPrompt
+    ? `${SYSTEM_PROMPT}\n\n---\n\n${format.layoutPrompt}`
+    : SYSTEM_PROMPT;
 
   const content = [
     {
@@ -143,7 +166,7 @@ export async function extractPositions(imageDataUrls: string[]): Promise<OcrResu
   const res = await invokeLLM({
     model: "gemini-3.1-pro-preview",
     messages: [
-      { role: "system", content: SYSTEM_PROMPT },
+      { role: "system", content: systemPrompt },
       { role: "user", content },
     ],
     responseFormat: OUTPUT_SCHEMA,
@@ -166,6 +189,7 @@ export async function extractPositions(imageDataUrls: string[]): Promise<OcrResu
     positions: (parsed.positions ?? []).filter(p => p.name && p.tickerCode).map(normalizePosition),
     account: parsed.account ?? emptyAccount(),
     warnings: parsed.warnings ?? [],
+    formatId: format.id,
   };
 }
 
