@@ -35,6 +35,17 @@ const EXPECTED = [
   { sheet: 2, symbol: "8053.T", name: "住友商事", qty: 400, marketValue: 716400, pnl: 389600, price: 1791.0 },
   { sheet: 2, symbol: "4911.T", name: "資生堂", qty: 700, marketValue: 2489900, pnl: 600150, price: 3557.0 },
   { sheet: 2, symbol: "3778.T", name: "さくらインターネット", qty: 800, marketValue: 3096000, pnl: 628000, price: 3870.0 },
+
+  // 3 枚目（IMG_7598）。さくらインターネットは 2 枚目と重複するため除外
+  { sheet: 3, symbol: "8031.T", name: "三井物産", qty: 400, marketValue: 1930000, pnl: 640000, price: 4825.0 },
+  { sheet: 3, symbol: "8473.T", name: "SBIホールディングス", qty: 1200, marketValue: 3684000, pnl: 1267200, price: 3070.0 },
+  { sheet: 3, symbol: "2768.T", name: "双日", qty: 1600, marketValue: 9094400, pnl: 1400200, price: 5684.0 },
+  { sheet: 3, symbol: "3436.T", name: "SUMCO", qty: 700, marketValue: 2744000, pnl: 1923908.82, price: 3920.0 },
+  { sheet: 3, symbol: "6920.T", name: "レーザーテック", qty: 100, marketValue: 3882000, pnl: 2311000, price: 38820.0 },
+  { sheet: 3, symbol: "8411.T", name: "みずほフィナンシャルグループ", qty: 500, marketValue: 4310000, pnl: 2542000, price: 8620.0 },
+  { sheet: 3, symbol: "6752.T", name: "パナソニックホールディングス", qty: 800, marketValue: 3776800, pnl: 2600800, price: 4721.0 },
+  { sheet: 3, symbol: "4919.T", name: "ミルボン", qty: 3000, marketValue: 9750000, pnl: 2745000, price: 3250.0 },
+  { sheet: 3, symbol: "8604.T", name: "野村ホールディングス", qty: 7900, marketValue: 12403000, pnl: 3457840, price: 1570.0 },
 ];
 
 const fmt = n =>
@@ -51,9 +62,10 @@ const bySymbol = new Map(rows.map(r => [r.symbol, r]));
 let issues = 0;
 let checked = 0;
 
-console.log("=== 元画面 vs 登録データの照合 ===\n");
-console.log("枚 コード     銘柄                     株数   取得単価    現在値       評価額        損益  判定");
-console.log("─".repeat(100));
+console.log("=== 元画面 vs 登録データの照合 ===");
+console.log("株数・取得単価・銘柄名を照合する。現在値は取込後に株価更新が走るため参考表示のみ。\n");
+console.log("枚 コード     銘柄                     株数   取得単価  取込時値    最新値      変動  判定");
+console.log("─".repeat(96));
 
 for (const e of EXPECTED) {
   const actual = bySymbol.get(e.symbol);
@@ -72,32 +84,27 @@ for (const e of EXPECTED) {
 
   const problems = [];
   if (qty !== e.qty) problems.push(`株数 ${qty} ≠ ${e.qty}`);
-  if (Math.abs(price - e.price) > 0.01) problems.push(`現在値 ${price} ≠ ${e.price}`);
   // 取得単価は小数 2 位に丸めているため誤差 0.01 まで許容
   if (Math.abs(avgCost - expectedAvgCost) > 0.01) {
     problems.push(`取得単価 ${avgCost} ≠ ${expectedAvgCost.toFixed(4)}`);
   }
-
-  // 登録値から評価額・損益を再計算して元画面と比べる
-  const calcValue = qty * price;
-  if (Math.abs(calcValue - e.marketValue) > 1) {
-    problems.push(`評価額 ${fmt(calcValue)} ≠ ${fmt(e.marketValue)}`);
-  }
-  const calcPnl = qty * (price - avgCost);
-  // 取得単価の丸めにより損益は最大 株数 × 0.005 ずれる
-  const pnlTolerance = Math.max(1, e.qty * 0.005);
-  if (Math.abs(calcPnl - e.pnl) > pnlTolerance) {
-    problems.push(`損益 ${fmt(Math.round(calcPnl))} ≠ ${fmt(e.pnl)}`);
-  }
   if (actual.name !== e.name) {
     problems.push(`銘柄名「${actual.name}」→「${e.name}」`);
+  }
+
+  // 現在値は取込後の株価更新で変わるため、乖離を参考表示するだけにする。
+  // ただし桁違い（10 倍以上）は取り違えの疑いがあるので不一致として扱う。
+  const drift = price - e.price;
+  if (price > 0 && (price / e.price > 10 || e.price / price > 10)) {
+    problems.push(`現在値が桁違い ${price} vs ${e.price}`);
   }
 
   checked++;
   const line =
     `${e.sheet}  ${e.symbol.padEnd(9)} ${e.name.padEnd(16, "　").slice(0, 16)}` +
     `${String(e.qty).padStart(7)} ${expectedAvgCost.toFixed(2).padStart(9)} ` +
-    `${String(e.price).padStart(9)} ${fmt(e.marketValue).padStart(12)} ${fmt(e.pnl).padStart(11)}`;
+    `${String(e.price).padStart(9)} ${price.toFixed(1).padStart(9)} ` +
+    `${((drift >= 0 ? "+" : "") + drift.toFixed(1)).padStart(9)}`;
 
   if (problems.length === 0) {
     console.log(`${line}  ✓`);
@@ -123,11 +130,12 @@ const expectedTotal = EXPECTED.reduce((s, e) => s + e.marketValue, 0);
 const expectedPnl = EXPECTED.reduce((s, e) => s + e.pnl, 0);
 
 console.log("\n=== 合計 ===");
-console.log(`銘柄数        : 登録 ${rows.length} / 元画面 ${EXPECTED.length} ${rows.length === EXPECTED.length ? "✓" : "✗"}`);
-console.log(`評価額合計    : 登録 ${fmt(Math.round(totalValue))} / 元画面 ${fmt(expectedTotal)} ${Math.abs(totalValue - expectedTotal) < 2 ? "✓" : "✗"}`);
-console.log(`取得原価合計  : ${fmt(Math.round(totalCost))}`);
-console.log(`含み損益      : 登録 ${fmt(Math.round(totalValue - totalCost))} / 元画面 ${fmt(expectedPnl)}`);
-console.log(`損益率        : ${(((totalValue - totalCost) / totalCost) * 100).toFixed(2)}%`);
+console.log(`銘柄数              : 登録 ${rows.length} / 元画面 ${EXPECTED.length} ${rows.length === EXPECTED.length ? "✓" : "✗"}`);
+console.log(`取得原価合計        : ${fmt(Math.round(totalCost))} 円`);
+console.log(`評価額合計（最新）  : ${fmt(Math.round(totalValue))} 円`);
+console.log(`評価額合計（取込時）: ${fmt(expectedTotal)} 円`);
+console.log(`含み損益（最新）    : ${fmt(Math.round(totalValue - totalCost))} 円（${(((totalValue - totalCost) / totalCost) * 100).toFixed(2)}%）`);
+console.log(`含み損益（取込時）  : ${fmt(expectedPnl)} 円`);
 
 // 業種が取得できているか
 const noSector = rows.filter(r => !r.sector);

@@ -33,3 +33,29 @@ export function clearToken(): void {
     // no-op
   }
 }
+
+/**
+ * 開発環境限定: URL の ?devToken=... を読み取ってトークンとして保存する。
+ * スクリーンショット撮影のように localStorage が空のブラウザで
+ * ロック画面を通過して画面を確認したいときに使う。
+ * 本番ビルドでは何もしない。
+ */
+export function adoptTokenFromUrl(): void {
+  if (!import.meta.env.DEV) return;
+  try {
+    const params = new URLSearchParams(window.location.search);
+    const token = params.get("devToken");
+    if (!token) return;
+    storeToken(token);
+    // URL からトークンを消して履歴に残さない
+    params.delete("devToken");
+    const qs = params.toString();
+    window.history.replaceState(
+      null,
+      "",
+      window.location.pathname + (qs ? `?${qs}` : "") + window.location.hash
+    );
+  } catch {
+    // 解析に失敗しても通常フローは継続する
+  }
+}

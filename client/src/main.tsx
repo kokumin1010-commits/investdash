@@ -4,8 +4,11 @@ import { httpBatchLink } from "@trpc/client";
 import { createRoot } from "react-dom/client";
 import superjson from "superjson";
 import App from "./App";
-import { getStoredToken } from "./lib/passcodeSession";
+import { adoptTokenFromUrl, getStoredToken } from "./lib/passcodeSession";
 import "./index.css";
+
+// 開発時のみ: ?devToken=... が付いていればトークンとして取り込む（描画前に実行）
+adoptTokenFromUrl();
 
 const queryClient = new QueryClient();
 
