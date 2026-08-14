@@ -158,6 +158,17 @@ export const importRouter = router({
         if (error instanceof TRPCError) throw error;
         const message = error instanceof Error ? error.message : "読み取りに失敗しました";
         await patchJob({ status: "FAILED", errorMessage: message });
+
+        // AI の利用枠を使い切った場合は、原因が伝わる文言に置き換える。
+        // 生のエラー文（412 Precondition Failed ...）ではユーザーが対処を判断できない。
+        if (/usage exhausted|412/.test(message)) {
+          throw new TRPCError({
+            code: "TOO_MANY_REQUESTS",
+            message:
+              "AI の利用枠を使い切ったため読み取りできませんでした。しばらく時間をおいてから再度お試しください。急ぎの場合は保有銘柄ページの「銘柄を追加」から手入力できます。",
+          });
+        }
+
         throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message });
       }
     }),
