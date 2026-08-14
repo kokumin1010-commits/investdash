@@ -163,13 +163,36 @@ export async function extractPositions(imageDataUrls: string[]): Promise<OcrResu
   }
 
   return {
-    positions: (parsed.positions ?? []).filter(p => p.name && p.tickerCode),
+    positions: (parsed.positions ?? []).filter(p => p.name && p.tickerCode).map(normalizePosition),
     account: parsed.account ?? emptyAccount(),
     warnings: parsed.warnings ?? [],
   };
 }
 
+/**
+ * 逆算した取得単価が `3389.315789473684` のような長い小数になることがあるため、
+ * 価格系は小数第 2 位、数量は整数に丸める。
+ */
+function normalizePosition(p: ParsedPosition): ParsedPosition {
+  return {
+    ...p,
+    quantity: roundTo(p.quantity, 0),
+    avgCost: roundTo(p.avgCost, 2),
+    currentPrice: roundTo(p.currentPrice, 2),
+    marketValue: roundTo(p.marketValue, 2),
+    pnl: roundTo(p.pnl, 2),
+  };
+}
+
+function roundTo(value: number | null, digits: number): number | null {
+  if (value === null || !Number.isFinite(value)) return null;
+  const factor = 10 ** digits;
+  return Math.round(value * factor) / factor;
+}
+
+/** テスト用エクスポート */
+export const normalizePositionForTest = normalizePosition;
+
 function emptyAccount(): ParsedAccount {
   return { netAssets: null, cash: null, currency: null, broker: null };
 }
-
