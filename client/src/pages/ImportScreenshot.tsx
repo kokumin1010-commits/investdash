@@ -22,6 +22,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { trpc } from "@/lib/trpc";
+import { looksLikeImage, prepareImage } from "@/lib/imageFile";
 import { marketLabel } from "@shared/investing";
 import {
   AlertTriangle,
@@ -62,6 +63,9 @@ const FORMAT_STORAGE_KEY = "investdesk.import.format";
 
 const MAX_FILES = 5;
 
+/** 変換後のサイズ上限。サーバー側の受け入れ上限に合わせる */
+const MAX_BYTES = 8 * 1024 * 1024;
+
 export default function ImportScreenshot() {
   const [, setLocation] = useLocation();
   const utils = trpc.useUtils();
@@ -72,6 +76,7 @@ export default function ImportScreenshot() {
   const [warnings, setWarnings] = useState<string[]>([]);
   const [cash, setCash] = useState<string>("");
   const [dragging, setDragging] = useState(false);
+  const [preparing, setPreparing] = useState(false);
   // 一度選べば次回以降も同じアプリが選択された状態になる
   const [formatId, setFormatId] = useState<FormatId>(() => {
     const saved = window.localStorage.getItem(FORMAT_STORAGE_KEY);
@@ -133,25 +138,39 @@ export default function ImportScreenshot() {
 
   const addFiles = async (list: FileList | null) => {
     if (!list) return;
-    const picked: Picked[] = [];
-    for (const file of Array.from(list).slice(0, MAX_FILES - files.length)) {
-      if (!file.type.startsWith("image/")) {
-        toast.error(`${file.name} は画像ファイルではありません`);
-        continue;
+    const targets = Array.from(list).slice(0, MAX_FILES - files.length);
+    if (targets.length === 0) return;
+
+    setPreparing(true);
+    try {
+      const picked: Picked[] = [];
+      for (const file of targets) {
+        if (!looksLikeImage(file)) {
+          toast.error(`${file.name || "選択されたファイル"} は画像として扱えません`);
+          continue;
+        }
+        try {
+          const prepared = await prepareImage(file);
+          if (prepared.byteSize > MAX_BYTES) {
+            toast.error(`${file.name} は変換後も 8MB を超えています`);
+            continue;
+          }
+          picked.push({
+            dataUrl: prepared.dataUrl,
+            fileName: prepared.fileName,
+            preview: prepared.dataUrl,
+          });
+        } catch (error) {
+          const message = error instanceof Error ? error.message : "画像を読み取れませんでした";
+          toast.error(`${file.name || "画像"}: ${message}`);
+        }
       }
-      if (file.size > 8 * 1024 * 1024) {
-        toast.error(`${file.name} は 8MB を超えています`);
-        continue;
+      if (picked.length > 0) {
+        setFiles(prev => [...prev, ...picked].slice(0, MAX_FILES));
       }
-      const dataUrl = await new Promise<string>((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = () => resolve(reader.result as string);
-        reader.onerror = reject;
-        reader.readAsDataURL(file);
-      });
-      picked.push({ dataUrl, fileName: file.name, preview: dataUrl });
+    } finally {
+      setPreparing(false);
     }
-    setFiles(prev => [...prev, ...picked].slice(0, MAX_FILES));
   };
 
   const updateRow = (index: number, patch: Partial<Row>) => {
@@ -195,7 +214,7 @@ export default function ImportScreenshot() {
                 <div className="space-y-1.5">
                   <p className="font-medium">画像をドラッグ＆ドロップ、またはファイルを選択</p>
                   <p className="text-xs text-muted-foreground">
-                    PNG / JPEG / WebP ・ 1 枚 8MB まで ・ 最大 {MAX_FILES} 枚
+                    PNG / JPEG / WebP / HEIC ・ 最大 {MAX_FILES} 枚
                     <br />
                     保有一覧が画面に収まらない場合は、スクロールして複数枚に分けて撮影してください。
                   </p>
@@ -203,7 +222,7 @@ export default function ImportScreenshot() {
                 <input
                   ref={fileInput}
                   type="file"
-                  accept="image/*"
+                  accept="image/*,.heic,.heif"
                   multiple
                   className="hidden"
                   onChange={e => {
@@ -211,22 +230,30 @@ export default function ImportScreenshot() {
                     e.target.value = "";
                   }}
                 />
-                <Button variant="outline" onClick={() => fileInput.current?.click()}>
-                  <Upload className="mr-1.5 h-4 w-4" />
-                  ファイルを選択
+                <Button
+                  variant="outline"
+                  disabled={preparing}
+                  onClick={() => fileInput.current?.click()}
+                >
+                  {preparing ? (
+                    <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
+                  ) : (
+                    <Upload className="mr-1.5 h-4 w-4" />
+                  )}
+                  {preparing ? "画像を準備中..." : "ファイルを選択"}
                 </Button>
               </div>
 
               {files.length > 0 ? (
                 <div className="mt-4 space-y-3">
                   {/* 証券アプリの選択 */}
-                  <div className="flex flex-wrap items-end gap-3 rounded-lg border bg-muted/20 p-3">
-                    <div className="min-w-[220px] flex-1 space-y-1.5">
+                  <div className="space-y-2 rounded-lg border bg-muted/20 p-3 sm:flex sm:items-end sm:gap-4 sm:space-y-0">
+                    <div className="w-full space-y-1.5 sm:w-[260px] sm:shrink-0">
                       <Label htmlFor="broker-format" className="text-xs">
                         どの証券アプリの画面ですか
                       </Label>
                       <Select value={formatId} onValueChange={v => changeFormat(v as FormatId)}>
-                        <SelectTrigger id="broker-format" className="h-9">
+                        <SelectTrigger id="broker-format" className="h-9 w-full">
                           <SelectValue />
                         </SelectTrigger>
                         <SelectContent>
@@ -248,7 +275,7 @@ export default function ImportScreenshot() {
                         </SelectContent>
                       </Select>
                     </div>
-                    <p className="flex-1 text-xs leading-relaxed text-muted-foreground">
+                    <p className="text-xs leading-relaxed text-muted-foreground sm:flex-1">
                       「学習済」のアプリは画面の列構成を把握しているため、読み取り精度が上がります。
                       一覧にないアプリは「その他」を選んでください。
                     </p>
