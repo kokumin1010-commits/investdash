@@ -75,6 +75,81 @@ export const PRIORITY_STYLES: Record<WatchPriority, string> = {
 
 export type Market = "JP" | "US" | "OTHER";
 
+/* ------------------------------------------------------------------ *
+ * 証券プラットフォーム（どの口座で保有しているか）
+ * ------------------------------------------------------------------ */
+
+export const BROKERS = ["moomoo_jp", "rakuten_ispeed", "futu", "other"] as const;
+export type Broker = (typeof BROKERS)[number];
+
+export const BROKER_LABELS: Record<Broker, string> = {
+  moomoo_jp: "moomoo 日本版",
+  rakuten_ispeed: "楽天証券 iSPEED",
+  futu: "富途牛牛 / Futu",
+  other: "その他",
+};
+
+/** 一覧やカードに載せる短い表記 */
+export const BROKER_SHORT: Record<Broker, string> = {
+  moomoo_jp: "moomoo",
+  rakuten_ispeed: "楽天",
+  futu: "富途",
+  other: "その他",
+};
+
+/**
+ * プラットフォームごとの配色。各社のブランドカラーに寄せ、
+ * 一覧をざっと眺めたときに口座の違いが色で判別できるようにする。
+ */
+export const BROKER_STYLES: Record<Broker, string> = {
+  moomoo_jp: "bg-orange-500/15 text-orange-600 border-orange-500/30 dark:text-orange-400",
+  rakuten_ispeed: "bg-red-500/15 text-red-600 border-red-500/30 dark:text-red-400",
+  futu: "bg-blue-500/15 text-blue-600 border-blue-500/30 dark:text-blue-400",
+  other: "bg-muted text-muted-foreground border-border",
+};
+
+/** 円グラフなど Tailwind クラスが使えない場所向けの実色 */
+export const BROKER_HEX: Record<Broker, string> = {
+  moomoo_jp: "#f97316",
+  rakuten_ispeed: "#dc2626",
+  futu: "#2563eb",
+  other: "#94a3b8",
+};
+
+export function brokerLabel(broker?: string | null): string {
+  if (!broker) return BROKER_LABELS.other;
+  return BROKER_LABELS[broker as Broker] ?? BROKER_LABELS.other;
+}
+
+export function brokerShort(broker?: string | null): string {
+  if (!broker) return BROKER_SHORT.other;
+  return BROKER_SHORT[broker as Broker] ?? BROKER_SHORT.other;
+}
+
+export function brokerStyle(broker?: string | null): string {
+  if (!broker) return BROKER_STYLES.other;
+  return BROKER_STYLES[broker as Broker] ?? BROKER_STYLES.other;
+}
+
+export function brokerHex(broker?: string | null): string {
+  if (!broker) return BROKER_HEX.other;
+  return BROKER_HEX[broker as Broker] ?? BROKER_HEX.other;
+}
+
+/** OCR のフォーマット ID を保有銘柄の broker 値へ変換する */
+export function brokerFromFormatId(formatId?: string | null): Broker {
+  switch (formatId) {
+    case "moomoo_jp":
+      return "moomoo_jp";
+    case "rakuten_ispeed":
+      return "rakuten_ispeed";
+    case "futu":
+      return "futu";
+    default:
+      return "other";
+  }
+}
+
 /** Yahoo Finance の英語セクター名 → 日本語表示名 */
 export const SECTOR_JA: Record<string, string> = {
   Technology: "情報技術",

@@ -8,6 +8,7 @@ import {
 } from "./analysis";
 import { fetchCompanyProfile, fetchPriceHistory, fetchQuotes } from "./marketData";
 import { buildNewsQuery, filterNoise, searchNews } from "./news";
+import { BROKER_LABELS, type Broker } from "../../shared/investing";
 
 /**
  * 保有ポジションとウォッチリストに対する横断処理。
@@ -27,6 +28,8 @@ export type PositionView = {
   name: string;
   market: "JP" | "US" | "OTHER";
   currency: string;
+  /** どの証券プラットフォームで保有しているか */
+  broker: "moomoo_jp" | "rakuten_ispeed" | "futu" | "other";
   quantity: number;
   avgCost: number;
   currentPrice: number | null;
@@ -79,6 +82,9 @@ export type PortfolioSummary = {
 
 export type SectorSlice = { key: string; label: string; value: number; pct: number; count: number };
 
+/** 証券プラットフォーム別の内訳。口座ごとの成績を比較できるよう損益も持たせる */
+export type BrokerSlice = SectorSlice & { pnl: number; pnlPct: number | null };
+
 export type ConcentrationAlert = {
   level: "HIGH" | "MEDIUM";
   kind: "POSITION" | "SECTOR" | "CURRENCY";
@@ -96,6 +102,7 @@ export async function buildPortfolio(userId: number): Promise<{
   summary: PortfolioSummary;
   sectors: SectorSlice[];
   currencies: SectorSlice[];
+  brokers: BrokerSlice[];
   alerts: ConcentrationAlert[];
 }> {
   const [rows, settings, signalMap, cards, allNews] = await Promise.all([
@@ -147,6 +154,7 @@ export async function buildPortfolio(userId: number): Promise<{
       name: h.name,
       market: h.market,
       currency: h.currency,
+      broker: h.broker,
       quantity,
       avgCost,
       currentPrice,
@@ -224,6 +232,7 @@ export async function buildPortfolio(userId: number): Promise<{
   /* --- 分布集計 --- */
   const sectorMap = new Map<string, { value: number; count: number }>();
   const currencyMap = new Map<string, { value: number; count: number }>();
+  const brokerMap = new Map<string, { value: number; count: number; cost: number }>();
 
   for (const p of positions) {
     const v = p.marketValueBase ?? 0;
@@ -237,6 +246,12 @@ export async function buildPortfolio(userId: number): Promise<{
     c.value += v;
     c.count += 1;
     currencyMap.set(p.currency, c);
+
+    const b = brokerMap.get(p.broker) ?? { value: 0, count: 0, cost: 0 };
+    b.value += v;
+    b.count += 1;
+    b.cost += p.costValueBase;
+    brokerMap.set(p.broker, b);
   }
 
   const toSlices = (m: Map<string, { value: number; count: number }>): SectorSlice[] =>
@@ -286,6 +301,18 @@ export async function buildPortfolio(userId: number): Promise<{
     summary,
     sectors: toSlices(sectorMap),
     currencies: toSlices(currencyMap),
+    brokers: Array.from(brokerMap.entries())
+      .map(([key, v]) => ({
+        key,
+        label: BROKER_LABELS[key as Broker] ?? key,
+        value: v.value,
+        pct: totalValueBase > 0 ? (v.value / totalValueBase) * 100 : 0,
+        count: v.count,
+        /** 口座単位の含み損益。口座ごとの成績を比較できるようにする */
+        pnl: v.value - v.cost,
+        pnlPct: v.cost > 0 ? ((v.value - v.cost) / v.cost) * 100 : null,
+      }))
+      .sort((a, b) => b.value - a.value),
     alerts: alerts.sort((a, b) => b.pct - a.pct),
   };
 }

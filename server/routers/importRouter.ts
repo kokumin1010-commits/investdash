@@ -6,7 +6,7 @@ import { storagePut } from "../storage";
 import { extractPositions, type ParsedPosition } from "../services/ocr";
 import { BROKER_FORMAT_OPTIONS, guessFormatFromBrokerName } from "../services/brokerFormats";
 import { fetchCompanyProfile, fetchQuote } from "../services/marketData";
-import { normalizeSymbol } from "../../shared/investing";
+import { brokerFromFormatId, normalizeSymbol } from "../../shared/investing";
 
 /** 承認前にユーザーへ提示する行 */
 const rowSchema = z.object({
@@ -190,10 +190,13 @@ export const importRouter = router({
           )
           .min(1),
         cashBalance: z.number().min(0).nullable().optional(),
+        /** 取込元の証券アプリ。銘柄に紐づけて口座別の集計に使う */
+        formatId: z.enum(["moomoo_jp", "rakuten_ispeed", "futu", "generic"]).optional(),
       })
     )
     .mutation(async ({ ctx, input }) => {
       const userId = ctx.user.id;
+      const broker = brokerFromFormatId(input.formatId);
       let created = 0;
       let updated = 0;
       const skipped: string[] = [];
@@ -236,6 +239,7 @@ export const importRouter = router({
             quantity: String(row.quantity),
             avgCost: String(row.avgCost),
             currency: quote?.currency ?? existing.currency,
+            broker,
             ...priceFields,
           });
           updated += 1;
@@ -248,6 +252,7 @@ export const importRouter = router({
             name: row.name,
             market: row.market,
             currency: quote?.currency ?? (row.market === "JP" ? "JPY" : "USD"),
+            broker,
             quantity: String(row.quantity),
             avgCost: String(row.avgCost),
             sector: profile?.sector ?? undefined,

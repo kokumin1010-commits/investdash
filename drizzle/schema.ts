@@ -51,6 +51,10 @@ export const holdings = mysqlTable(
     name: varchar("name", { length: 160 }).notNull(),
     market: mysqlEnum("market", ["JP", "US", "OTHER"]).default("JP").notNull(),
     currency: varchar("currency", { length: 8 }).default("JPY").notNull(),
+    /** どの証券プラットフォームで保有しているか */
+    broker: mysqlEnum("broker", ["moomoo_jp", "rakuten_ispeed", "futu", "other"])
+      .default("other")
+      .notNull(),
     /** 保有株数 */
     quantity: decimal("quantity", { precision: 20, scale: 4 }).notNull(),
     /** 取得単価 */

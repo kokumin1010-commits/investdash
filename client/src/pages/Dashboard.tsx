@@ -1,4 +1,5 @@
 import { MoneyText, PctText, PnlText } from "@/components/investing/Figures";
+import { BrokerBadge } from "@/components/investing/BrokerBadge";
 import { DisclaimerNote } from "@/components/investing/DisclaimerNote";
 import { SignalBadge } from "@/components/investing/SignalBadge";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -10,6 +11,7 @@ import { trpc } from "@/lib/trpc";
 import {
   SECTOR_COLORS,
   SIGNAL_ACTIONS,
+  brokerHex,
   formatMoney,
   sectorJa,
   type SignalAction,
@@ -495,6 +497,57 @@ export default function Dashboard() {
 
             {/* 通貨別分布 + 構成比上位 */}
             <div className="space-y-4">
+              {/* 証券口座別の内訳。どのプラットフォームにいくら置いているかを把握する */}
+              <Card>
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-base">証券口座別</CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-3">
+                  {(data?.brokers ?? []).map(b => (
+                    <div key={b.key} className="space-y-1.5">
+                      <div className="flex items-center justify-between gap-2">
+                        <BrokerBadge broker={b.key} />
+                        <span className="tabular text-xs text-muted-foreground">
+                          {b.pct.toFixed(1)}% / {b.count}銘柄
+                        </span>
+                      </div>
+                      <div className="flex items-baseline justify-between gap-2">
+                        <MoneyText
+                          value={b.value}
+                          currency={summary?.baseCurrency}
+                          className="text-sm font-semibold"
+                        />
+                        <div className="text-right">
+                          <PnlText
+                            value={b.pnl}
+                            currency={summary?.baseCurrency}
+                            compact
+                            className="text-xs"
+                          />
+                          <div className="text-[10px]">
+                            <PctText value={b.pnlPct} />
+                          </div>
+                        </div>
+                      </div>
+                      <div className="h-1.5 overflow-hidden rounded-full bg-muted">
+                        <div
+                          className="h-full rounded-full transition-all"
+                          style={{
+                            width: `${Math.min(100, b.pct)}%`,
+                            background: brokerHex(b.key),
+                          }}
+                        />
+                      </div>
+                    </div>
+                  ))}
+                  {(data?.brokers ?? []).length === 0 ? (
+                    <p className="py-2 text-xs text-muted-foreground">
+                      保有銘柄がありません
+                    </p>
+                  ) : null}
+                </CardContent>
+              </Card>
+
               <Card>
                 <CardHeader className="pb-3">
                   <CardTitle className="text-base">通貨別分布</CardTitle>

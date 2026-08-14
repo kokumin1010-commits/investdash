@@ -82,6 +82,7 @@ export const portfolioRouter = router({
         name: z.string().min(1).max(160).optional(),
         quantity: z.number().positive(),
         avgCost: z.number().min(0),
+        broker: z.enum(["moomoo_jp", "rakuten_ispeed", "futu", "other"]).optional(),
         notes: z.string().max(2000).optional(),
       })
     )
@@ -107,6 +108,7 @@ export const portfolioRouter = router({
         name: input.name || quote?.longName || quote?.shortName || tickerCode,
         market,
         currency: quote?.currency ?? (market === "JP" ? "JPY" : "USD"),
+        broker: input.broker ?? "other",
         quantity: String(input.quantity),
         avgCost: String(input.avgCost),
         currentPrice: quote?.price !== null && quote?.price !== undefined ? String(quote.price) : undefined,
@@ -141,6 +143,7 @@ export const portfolioRouter = router({
         name: z.string().min(1).max(160).optional(),
         quantity: z.number().positive().optional(),
         avgCost: z.number().min(0).optional(),
+        broker: z.enum(["moomoo_jp", "rakuten_ispeed", "futu", "other"]).optional(),
         notes: z.string().max(2000).optional(),
       })
     )
@@ -152,6 +155,7 @@ export const portfolioRouter = router({
         name: input.name,
         quantity: input.quantity !== undefined ? String(input.quantity) : undefined,
         avgCost: input.avgCost !== undefined ? String(input.avgCost) : undefined,
+        broker: input.broker,
         notes: input.notes,
       });
       return { success: true } as const;

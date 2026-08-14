@@ -1,4 +1,5 @@
 import { DisclaimerNote } from "@/components/investing/DisclaimerNote";
+import { BrokerBadge } from "@/components/investing/BrokerBadge";
 import { MoneyText, PctText, PnlText } from "@/components/investing/Figures";
 import { SignalBadge, SignalPlaceholder } from "@/components/investing/SignalBadge";
 import { Badge } from "@/components/ui/badge";
@@ -33,7 +34,16 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { trpc } from "@/lib/trpc";
-import { SIGNAL_ACTIONS, formatNumber, marketLabel, sectorJa, type SignalAction } from "@shared/investing";
+import {
+  BROKERS,
+  BROKER_LABELS,
+  SIGNAL_ACTIONS,
+  formatNumber,
+  marketLabel,
+  sectorJa,
+  type Broker,
+  type SignalAction,
+} from "@shared/investing";
 import {
   ArrowUpDown,
   Brain,
@@ -57,6 +67,7 @@ export default function Holdings() {
   const [query, setQuery] = useState("");
   const [sortKey, setSortKey] = useState<SortKey>("value");
   const [signalFilter, setSignalFilter] = useState<"ALL" | SignalAction | "NONE">("ALL");
+  const [brokerFilter, setBrokerFilter] = useState<"ALL" | Broker>("ALL");
   const [addOpen, setAddOpen] = useState(false);
   const [editTarget, setEditTarget] = useState<number | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<{ id: number; name: string } | null>(null);
@@ -107,6 +118,9 @@ export default function Holdings() {
         signalFilter === "NONE" ? !p.signal : p.signal?.action === signalFilter
       );
     }
+    if (brokerFilter !== "ALL") {
+      list = list.filter(p => p.broker === brokerFilter);
+    }
     const sorted = [...list];
     sorted.sort((a, b) => {
       switch (sortKey) {
@@ -123,7 +137,13 @@ export default function Holdings() {
       }
     });
     return sorted;
-  }, [positions, query, signalFilter, sortKey]);
+  }, [positions, query, signalFilter, brokerFilter, sortKey]);
+
+  /** 実際に保有がある口座だけを絞り込みの選択肢にする */
+  const usedBrokers = useMemo(() => {
+    const set = new Set(positions.map(p => p.broker));
+    return BROKERS.filter(b => set.has(b));
+  }, [positions]);
 
   const editing = positions.find(p => p.id === editTarget) ?? null;
 
@@ -192,6 +212,21 @@ export default function Holdings() {
             <SelectItem value="NONE">未生成</SelectItem>
           </SelectContent>
         </Select>
+        {usedBrokers.length > 1 ? (
+          <Select value={brokerFilter} onValueChange={v => setBrokerFilter(v as typeof brokerFilter)}>
+            <SelectTrigger className="h-9 w-[170px]">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="ALL">すべての口座</SelectItem>
+              {usedBrokers.map(b => (
+                <SelectItem key={b} value={b}>
+                  {BROKER_LABELS[b]}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        ) : null}
         <Select value={sortKey} onValueChange={v => setSortKey(v as SortKey)}>
           <SelectTrigger className="h-9 w-[160px]">
             <ArrowUpDown className="mr-1 h-3.5 w-3.5" />
@@ -255,8 +290,9 @@ export default function Holdings() {
                         ) : null}
                       </div>
                     </Link>
-                    <div className="shrink-0">
+                    <div className="flex shrink-0 flex-col items-end gap-1">
                       {p.signal ? <SignalBadge action={p.signal.action} /> : <SignalPlaceholder />}
+                      <BrokerBadge broker={p.broker} short />
                     </div>
                   </div>
 
@@ -365,9 +401,10 @@ export default function Holdings() {
             <div className="overflow-x-auto">
             <Table>
               <TableHeader>
-                <TableRow className="hover:bg-transparent">
-                  <TableHead className="min-w-[220px]">銘柄</TableHead>
-                  <TableHead className="text-right">株数</TableHead>
+                  <TableRow className="hover:bg-transparent">
+                    <TableHead className="min-w-[220px]">銘柄</TableHead>
+                    <TableHead className="min-w-[110px]">口座</TableHead>
+                    <TableHead className="text-right">株数</TableHead>
                   <TableHead className="text-right">取得単価</TableHead>
                   <TableHead className="text-right">現在値</TableHead>
                   <TableHead className="text-right">前日比</TableHead>
@@ -421,6 +458,9 @@ export default function Holdings() {
                           ) : null}
                         </div>
                       </Link>
+                    </TableCell>
+                    <TableCell>
+                      <BrokerBadge broker={p.broker} />
                     </TableCell>
                     <TableCell className="tabular text-right">
                       {formatNumber(p.quantity, 0)}
@@ -521,7 +561,7 @@ export default function Holdings() {
                 ))}
                 {rows.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={10} className="py-10 text-center text-sm text-muted-foreground">
+                    <TableCell colSpan={11} className="py-10 text-center text-sm text-muted-foreground">
                       条件に一致する銘柄がありません
                     </TableCell>
                   </TableRow>
@@ -591,6 +631,7 @@ function AddHoldingDialog({
   const [code, setCode] = useState("");
   const [quantity, setQuantity] = useState("");
   const [avgCost, setAvgCost] = useState("");
+  const [broker, setBroker] = useState<Broker>("moomoo_jp");
   const [notes, setNotes] = useState("");
 
   const lookup = trpc.portfolio.lookup.useMutation({
@@ -717,6 +758,22 @@ function AddHoldingDialog({
               rows={2}
             />
           </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="add-broker">保有している証券口座</Label>
+            <Select value={broker} onValueChange={v => setBroker(v as Broker)}>
+              <SelectTrigger id="add-broker">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {BROKERS.map(b => (
+                  <SelectItem key={b} value={b}>
+                    {BROKER_LABELS[b]}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
         </div>
 
         <DialogFooter>
@@ -738,6 +795,7 @@ function AddHoldingDialog({
                 name: preview?.name,
                 quantity: Number(quantity),
                 avgCost: Number(avgCost),
+                broker,
                 notes: notes || undefined,
               })
             }
@@ -756,13 +814,22 @@ function EditHoldingForm({
   holding,
   onDone,
 }: {
-  holding: { id: number; name: string; quantity: number; avgCost: number; currency: string; symbol: string };
+  holding: {
+    id: number;
+    name: string;
+    quantity: number;
+    avgCost: number;
+    currency: string;
+    symbol: string;
+    broker: Broker;
+  };
   onDone: () => void;
 }) {
   const utils = trpc.useUtils();
   const [name, setName] = useState(holding.name);
   const [quantity, setQuantity] = useState(String(holding.quantity));
   const [avgCost, setAvgCost] = useState(String(holding.avgCost));
+  const [broker, setBroker] = useState<Broker>(holding.broker);
 
   const update = trpc.portfolio.updateHolding.useMutation({
     onSuccess: async () => {
@@ -806,6 +873,21 @@ function EditHoldingForm({
             />
           </div>
         </div>
+        <div className="space-y-2">
+          <Label htmlFor="edit-broker">保有している証券口座</Label>
+          <Select value={broker} onValueChange={v => setBroker(v as Broker)}>
+            <SelectTrigger id="edit-broker">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {BROKERS.map(b => (
+                <SelectItem key={b} value={b}>
+                  {BROKER_LABELS[b]}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
       </div>
       <DialogFooter>
         <Button variant="outline" onClick={onDone}>
@@ -819,6 +901,7 @@ function EditHoldingForm({
               name: name.trim(),
               quantity: Number(quantity),
               avgCost: Number(avgCost),
+              broker,
             })
           }
         >

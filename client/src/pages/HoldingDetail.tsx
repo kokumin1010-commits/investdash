@@ -1,4 +1,5 @@
 import { DisclaimerNote } from "@/components/investing/DisclaimerNote";
+import { BrokerBadge } from "@/components/investing/BrokerBadge";
 import { MoneyText, PctText, PnlText } from "@/components/investing/Figures";
 import { SignalBadge, SignalPlaceholder } from "@/components/investing/SignalBadge";
 import { Badge } from "@/components/ui/badge";
@@ -126,6 +127,7 @@ export default function HoldingDetail({ params }: { params: { id: string } }) {
                 {holding.tickerCode}
               </Badge>
               <Badge variant="outline">{marketLabel(holding.market)}</Badge>
+              <BrokerBadge broker={holding.broker} />
               {view?.signal ? <SignalBadge action={view.signal.action} showLabel /> : <SignalPlaceholder />}
             </div>
             <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">

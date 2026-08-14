@@ -695,6 +695,7 @@ export default function ImportScreenshot() {
                       mode: r.mode,
                     })),
                     cashBalance: cash === "" ? null : Number(cash),
+                    formatId,
                   })
                 }
               >

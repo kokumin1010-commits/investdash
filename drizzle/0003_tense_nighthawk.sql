@@ -1,0 +1,1 @@
+ALTER TABLE `holdings` ADD `broker` enum('moomoo_jp','rakuten_ispeed','futu','other') DEFAULT 'other' NOT NULL;
