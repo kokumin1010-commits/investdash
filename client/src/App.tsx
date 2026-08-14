@@ -5,6 +5,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import NotFound from "@/pages/NotFound";
 import { Route, Switch } from "wouter";
 import ErrorBoundary from "./components/ErrorBoundary";
+import { PasscodeProvider } from "./contexts/PasscodeContext";
 import { ThemeProvider } from "./contexts/ThemeContext";
 import Dashboard from "./pages/Dashboard";
 import HoldingDetail from "./pages/HoldingDetail";
@@ -36,11 +37,13 @@ function App() {
       <ThemeProvider defaultTheme="light" switchable>
         <TooltipProvider delayDuration={200}>
           <Toaster position="top-center" />
-          <SidebarProvider>
-            <DashboardLayout>
-              <Router />
-            </DashboardLayout>
-          </SidebarProvider>
+          <PasscodeProvider>
+            <SidebarProvider>
+              <DashboardLayout>
+                <Router />
+              </DashboardLayout>
+            </SidebarProvider>
+          </PasscodeProvider>
         </TooltipProvider>
       </ThemeProvider>
     </ErrorBoundary>
@@ -48,4 +51,3 @@ function App() {
 }
 
 export default App;
-

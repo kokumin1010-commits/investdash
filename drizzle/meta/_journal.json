@@ -15,6 +15,13 @@
       "when": 1786648677260,
       "tag": "0001_wide_thor_girl",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "5",
+      "when": 1786722744096,
+      "tag": "0002_zippy_wallow",
+      "breakpoints": true
     }
   ]
 }

@@ -1,4 +1,3 @@
-import { useAuth } from "@/_core/hooks/useAuth";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import {
   DropdownMenu,
@@ -19,12 +18,12 @@ import {
   SidebarTrigger,
   useSidebar,
 } from "@/components/ui/sidebar";
-import { startLogin } from "@/const";
 import { useIsMobile } from "@/hooks/useMobile";
+import { usePasscode } from "@/contexts/PasscodeContext";
 import {
   Eye,
   LayoutDashboard,
-  LogOut,
+  Lock,
   Newspaper,
   PanelLeft,
   ScanLine,
@@ -34,7 +33,7 @@ import {
 import { CSSProperties, useEffect, useRef, useState } from "react";
 import { useLocation } from "wouter";
 import { DashboardLayoutSkeleton } from './DashboardLayoutSkeleton';
-import { Button } from "./ui/button";
+import PasscodeGate from "./PasscodeGate";
 
 const menuItems = [
   { icon: LayoutDashboard, label: "ダッシュボード", path: "/" },
@@ -59,45 +58,19 @@ export default function DashboardLayout({
     const saved = localStorage.getItem(SIDEBAR_WIDTH_KEY);
     return saved ? parseInt(saved, 10) : DEFAULT_WIDTH;
   });
-  const { loading, user, error } = useAuth();
+  const { unlocked, checking } = usePasscode();
 
   useEffect(() => {
     localStorage.setItem(SIDEBAR_WIDTH_KEY, sidebarWidth.toString());
   }, [sidebarWidth]);
 
-  // 認証エラーが返っている場合は未ログイン扱いにし、スケルトンで固まらせない
-  if (loading && !error) {
+  // 保存済みトークンの有効性を確認している間だけスケルトンを出す
+  if (checking) {
     return <DashboardLayoutSkeleton />
   }
 
-  if (!user) {
-    return (
-      <div className="flex items-center justify-center min-h-screen bg-background">
-        <div className="flex flex-col items-center gap-8 p-8 max-w-md w-full">
-          <div className="flex flex-col items-center gap-5">
-            <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-primary text-primary-foreground">
-              <LayoutDashboard className="h-6 w-6" />
-            </div>
-            <div className="space-y-2 text-center">
-              <h1 className="text-2xl font-semibold tracking-tight">InvestDesk</h1>
-              <p className="text-sm text-muted-foreground">
-                保有銘柄・投資理由・ニュースを一元管理する意思決定支援ツールです。ご利用にはログインが必要です。
-              </p>
-            </div>
-          </div>
-          <Button
-            onClick={() => startLogin()}
-            size="lg"
-            className="w-full shadow-sm transition-all"
-          >
-            ログイン
-          </Button>
-          <p className="text-center text-xs leading-relaxed text-muted-foreground">
-            本アプリの分析結果は情報提供であり、投資助言ではありません。
-          </p>
-        </div>
-      </div>
-    );
+  if (!unlocked) {
+    return <PasscodeGate />;
   }
 
   return (
@@ -124,7 +97,7 @@ function DashboardLayoutContent({
   children,
   setSidebarWidth,
 }: DashboardLayoutContentProps) {
-  const { user, logout } = useAuth();
+  const { lock } = usePasscode();
   const [location, setLocation] = useLocation();
   const { state, toggleSidebar } = useSidebar();
   const isCollapsed = state === "collapsed";
@@ -225,26 +198,26 @@ function DashboardLayoutContent({
                 <button className="flex items-center gap-3 rounded-lg px-1 py-1 hover:bg-accent/50 transition-colors w-full text-left group-data-[collapsible=icon]:justify-center focus:outline-none focus-visible:ring-2 focus-visible:ring-ring">
                   <Avatar className="h-9 w-9 border shrink-0">
                     <AvatarFallback className="text-xs font-medium">
-                      {user?.name?.charAt(0).toUpperCase()}
+                      <Lock className="h-4 w-4" />
                     </AvatarFallback>
                   </Avatar>
                   <div className="flex-1 min-w-0 group-data-[collapsible=icon]:hidden">
                     <p className="text-sm font-medium truncate leading-none">
-                      {user?.name || "-"}
+                      解錠済み
                     </p>
                     <p className="text-xs text-muted-foreground truncate mt-1.5">
-                      {user?.email || "-"}
+                      パスコードで保護
                     </p>
                   </div>
                 </button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="w-48">
                 <DropdownMenuItem
-                  onClick={logout}
+                  onClick={lock}
                   className="cursor-pointer text-destructive focus:text-destructive"
                 >
-                  <LogOut className="mr-2 h-4 w-4" />
-                  <span>ログアウト</span>
+                  <Lock className="mr-2 h-4 w-4" />
+                  <span>ロックする</span>
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>

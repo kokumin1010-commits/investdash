@@ -1,4 +1,5 @@
 import { DisclaimerNote } from "@/components/investing/DisclaimerNote";
+import PasscodeSettings from "@/components/PasscodeSettings";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -69,9 +70,11 @@ export default function SettingsPage() {
       <header className="space-y-1">
         <h1 className="text-2xl font-semibold tracking-tight">設定</h1>
         <p className="text-sm text-muted-foreground">
-          為替レート、アラートのしきい値、表示テーマを設定します。
+          パスコード、為替レート、アラートのしきい値、表示テーマを設定します。
         </p>
       </header>
+
+      <PasscodeSettings />
 
       <Card>
         <CardHeader>
@@ -260,4 +263,3 @@ export default function SettingsPage() {
     </div>
   );
 }
-

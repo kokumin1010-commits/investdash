@@ -303,3 +303,32 @@ export const userSettings = mysqlTable("userSettings", {
 
 export type UserSettings = typeof userSettings.$inferSelect;
 export type InsertUserSettings = typeof userSettings.$inferInsert;
+
+/**
+ * 簡易パスコード認証。
+ *
+ * Manus OAuth の代わりに、4〜6 桁の数字だけでアクセスできるようにする。
+ * 単一オーナー専用のツールなので 1 行のみを想定し、`ownerUserId` で
+ * 既存の users 行（データの所有者）に紐付ける。
+ *
+ * パスコードは平文では保存せず、ソルト付き SHA-256 ハッシュで保持する。
+ */
+export const passcodeAuth = mysqlTable("passcodeAuth", {
+  id: int("id").autoincrement().primaryKey(),
+  /** このパスコードでアクセスできるデータの所有者（users.id） */
+  ownerUserId: int("ownerUserId").notNull().unique(),
+  /** ソルト付き SHA-256 ハッシュ（hex） */
+  passcodeHash: varchar("passcodeHash", { length: 128 }).notNull(),
+  /** ハッシュ計算に使うソルト（hex） */
+  passcodeSalt: varchar("passcodeSalt", { length: 64 }).notNull(),
+  /** 連続失敗回数。成功時に 0 に戻す */
+  failedAttempts: int("failedAttempts").default(0).notNull(),
+  /** ロック解除時刻。これを過ぎるまで検証を拒否する */
+  lockedUntil: timestamp("lockedUntil"),
+  lastUnlockedAt: timestamp("lastUnlockedAt"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
+export type PasscodeAuth = typeof passcodeAuth.$inferSelect;
+export type InsertPasscodeAuth = typeof passcodeAuth.$inferInsert;
