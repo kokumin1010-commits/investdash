@@ -53,7 +53,8 @@ export async function fetchQuote(symbol: string): Promise<Quote | null> {
         region: "US",
         interval: "1d",
         range: "5d",
-        includeAdjustedClose: true,
+        // Data API のクエリ値は文字列である必要がある（真偽値を渡すと 400 になる）
+        includeAdjustedClose: "true",
       },
     })) as ChartResponse;
 
@@ -93,7 +94,7 @@ export async function fetchPriceHistory(
 ): Promise<PriceBar[]> {
   try {
     const res = (await callDataApi("YahooFinance/get_stock_chart", {
-      query: { symbol, region: "US", interval, range, includeAdjustedClose: true },
+      query: { symbol, region: "US", interval, range, includeAdjustedClose: "true" },
     })) as ChartResponse;
 
     const result = res?.chart?.result?.[0];

@@ -222,8 +222,147 @@ export default function Holdings() {
           </CardContent>
         </Card>
       ) : (
-        <Card className="overflow-hidden">
-          <div className="overflow-x-auto">
+        <>
+          {/* スマホ: 1 銘柄 1 カード。横スクロールせずすべての数字が読める */}
+          <div className="space-y-2.5 lg:hidden">
+            {rows.map(p => (
+              <Card key={`m-${p.id}`} className="overflow-hidden">
+                <CardContent className="p-3.5">
+                  {/* 上段: 銘柄名とシグナル */}
+                  <div className="flex items-start justify-between gap-2">
+                    <Link href={`/holdings/${p.id}`} className="min-w-0 flex-1 space-y-0.5">
+                      <div className="flex items-center gap-1.5">
+                        <span className="truncate font-medium">{p.name}</span>
+                        {p.hasCard ? <FileText className="h-3.5 w-3.5 shrink-0 text-primary" /> : null}
+                        {p.negativeNewsCount > 0 ? (
+                          <span className="flex shrink-0 items-center gap-0.5 text-loss">
+                            <Newspaper className="h-3.5 w-3.5" />
+                            <span className="tabular text-[10px] font-semibold">
+                              {p.negativeNewsCount}
+                            </span>
+                          </span>
+                        ) : null}
+                      </div>
+                      <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+                        <span className="tabular">{p.tickerCode}</span>
+                        <span>·</span>
+                        <span>{marketLabel(p.market)}</span>
+                        {p.sector ? (
+                          <>
+                            <span>·</span>
+                            <span className="truncate">{sectorJa(p.sector)}</span>
+                          </>
+                        ) : null}
+                      </div>
+                    </Link>
+                    <div className="shrink-0">
+                      {p.signal ? <SignalBadge action={p.signal.action} /> : <SignalPlaceholder />}
+                    </div>
+                  </div>
+
+                  {/* 中段: 評価額と損益を大きく */}
+                  <div className="mt-3 flex items-end justify-between gap-3 border-t pt-2.5">
+                    <div className="space-y-0.5">
+                      <p className="text-[11px] text-muted-foreground">評価額</p>
+                      <MoneyText
+                        value={p.marketValue}
+                        currency={p.currency}
+                        className="text-base font-semibold"
+                      />
+                    </div>
+                    <div className="space-y-0.5 text-right">
+                      <p className="text-[11px] text-muted-foreground">評価損益</p>
+                      <PnlText
+                        value={p.pnl}
+                        currency={p.currency}
+                        className="text-base font-semibold"
+                      />
+                      <div className="text-xs">
+                        <PctText value={p.pnlPct} />
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* 下段: 明細 */}
+                  <div className="mt-2.5 grid grid-cols-4 gap-2 border-t pt-2.5 text-center">
+                    <div>
+                      <p className="text-[10px] text-muted-foreground">株数</p>
+                      <p className="tabular text-xs font-medium">{formatNumber(p.quantity, 0)}</p>
+                    </div>
+                    <div>
+                      <p className="text-[10px] text-muted-foreground">取得単価</p>
+                      <MoneyText
+                        value={p.avgCost}
+                        currency={p.currency}
+                        className="block text-xs font-medium"
+                      />
+                    </div>
+                    <div>
+                      <p className="text-[10px] text-muted-foreground">現在値</p>
+                      <MoneyText
+                        value={p.currentPrice}
+                        currency={p.currency}
+                        className="block text-xs font-medium"
+                      />
+                    </div>
+                    <div>
+                      <p className="text-[10px] text-muted-foreground">構成比</p>
+                      <p className="tabular text-xs font-medium">
+                        {p.weightPct !== null ? `${p.weightPct.toFixed(1)}%` : "—"}
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* 操作 */}
+                  <div className="mt-2 flex items-center justify-end gap-1 border-t pt-2">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-8 px-2 text-xs"
+                      disabled={signalBusyId !== null}
+                      onClick={() => {
+                        setSignalBusyId(p.id);
+                        regenSignal.mutate({ id: p.id });
+                      }}
+                    >
+                      <Brain
+                        className={`mr-1 h-3.5 w-3.5 ${signalBusyId === p.id ? "animate-pulse" : ""}`}
+                      />
+                      シグナル
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-8 px-2 text-xs"
+                      onClick={() => setEditTarget(p.id)}
+                    >
+                      <FileText className="mr-1 h-3.5 w-3.5" />
+                      編集
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-8 w-8 text-muted-foreground hover:text-destructive"
+                      onClick={() => setDeleteTarget({ id: p.id, name: p.name })}
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
+            ))}
+            {rows.length === 0 ? (
+              <Card>
+                <CardContent className="py-10 text-center text-sm text-muted-foreground">
+                  条件に一致する銘柄がありません
+                </CardContent>
+              </Card>
+            ) : null}
+          </div>
+
+          {/* デスクトップ: 一覧性の高い表 */}
+          <Card className="hidden overflow-hidden lg:block">
+            <div className="overflow-x-auto">
             <Table>
               <TableHeader>
                 <TableRow className="hover:bg-transparent">
@@ -391,6 +530,7 @@ export default function Holdings() {
             </Table>
           </div>
         </Card>
+        </>
       )}
 
       <DisclaimerNote />

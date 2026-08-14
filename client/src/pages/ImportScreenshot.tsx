@@ -384,7 +384,131 @@ export default function ImportScreenshot() {
             </Alert>
           ) : null}
 
-          <Card className="overflow-hidden">
+          {/* スマホ: 1 銘柄 1 カード。横スクロールせずすべての項目が見える */}
+          <div className="space-y-3 lg:hidden">
+            {rows.map((r, i) => (
+              <Card
+                key={`m-${r.symbol}-${i}`}
+                className={r.mode === "SKIP" ? "opacity-50" : ""}
+              >
+                <CardContent className="space-y-3 p-4">
+                  {/* 銘柄名と削除 */}
+                  <div className="flex items-start gap-2">
+                    <div className="min-w-0 flex-1 space-y-1">
+                      <Input
+                        value={r.name}
+                        onChange={e => updateRow(i, { name: e.target.value })}
+                        className="h-10 text-base font-medium"
+                      />
+                      <div className="flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
+                        <span className="tabular">{r.symbol}</span>
+                        <span>·</span>
+                        <span>{marketLabel(r.market)}</span>
+                        {r.existingQuantity !== null ? (
+                          <Badge variant="secondary" className="h-4 px-1 text-[10px]">
+                            登録済
+                          </Badge>
+                        ) : null}
+                        <Badge
+                          variant="outline"
+                          className={`h-4 px-1 text-[10px] ${
+                            r.confidence >= 90
+                              ? "border-gain/40 text-gain"
+                              : r.confidence >= 60
+                                ? "border-amber-500/40 text-amber-600 dark:text-amber-400"
+                                : "border-loss/40 text-loss"
+                          }`}
+                        >
+                          確信度 {r.confidence}
+                        </Badge>
+                      </div>
+                    </div>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-10 w-10 shrink-0 text-muted-foreground hover:text-destructive"
+                      onClick={() => setRows(prev => prev?.filter((_, idx) => idx !== i) ?? null)}
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  </div>
+
+                  {/* 株数・取得単価を横並びで大きく表示 */}
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="space-y-1">
+                      <Label className="text-xs text-muted-foreground">株数</Label>
+                      <Input
+                        type="number"
+                        inputMode="decimal"
+                        value={r.quantity ?? ""}
+                        onChange={e =>
+                          updateRow(i, {
+                            quantity: e.target.value === "" ? null : Number(e.target.value),
+                          })
+                        }
+                        className={`tabular h-11 text-base ${r.quantity === null ? "border-destructive" : ""}`}
+                      />
+                      {r.existingQuantity !== null && r.existingQuantity !== r.quantity ? (
+                        <p className="tabular text-[11px] text-muted-foreground">
+                          現在: {r.existingQuantity}
+                        </p>
+                      ) : null}
+                    </div>
+                    <div className="space-y-1">
+                      <Label className="text-xs text-muted-foreground">取得単価</Label>
+                      <Input
+                        type="number"
+                        inputMode="decimal"
+                        value={r.avgCost ?? ""}
+                        onChange={e =>
+                          updateRow(i, {
+                            avgCost: e.target.value === "" ? null : Number(e.target.value),
+                          })
+                        }
+                        className={`tabular h-11 text-base ${r.avgCost === null ? "border-destructive" : ""}`}
+                      />
+                      {r.existingAvgCost !== null && r.existingAvgCost !== r.avgCost ? (
+                        <p className="tabular text-[11px] text-muted-foreground">
+                          現在: {r.existingAvgCost}
+                        </p>
+                      ) : null}
+                    </div>
+                  </div>
+
+                  {/* 読取時の現在値と処理方法 */}
+                  <div className="flex items-end gap-3">
+                    <div className="flex-1 space-y-1">
+                      <Label className="text-xs text-muted-foreground">処理</Label>
+                      <Select
+                        value={r.mode}
+                        onValueChange={v => updateRow(i, { mode: v as Row["mode"] })}
+                      >
+                        <SelectTrigger className="h-10 w-full text-sm">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="NEW">新規追加</SelectItem>
+                          <SelectItem value="UPDATE">既存を更新</SelectItem>
+                          <SelectItem value="SKIP">取り込まない</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-1 text-right">
+                      <Label className="text-xs text-muted-foreground">読取時の現在値</Label>
+                      <MoneyText
+                        value={r.currentPrice}
+                        currency={r.market === "JP" ? "JPY" : "USD"}
+                        className="block pb-2.5 text-sm text-muted-foreground"
+                      />
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+
+          {/* デスクトップ: 一覧性の高い表 */}
+          <Card className="hidden overflow-hidden lg:block">
             <div className="overflow-x-auto">
               <Table>
                 <TableHeader>
@@ -533,15 +657,16 @@ export default function ImportScreenshot() {
           </Card>
 
           <div className="flex flex-wrap items-center justify-between gap-3">
-            <p className="text-sm text-muted-foreground">
+            <p className="w-full text-sm text-muted-foreground sm:w-auto">
               {activeRows.length} 件を保存します
               {(rows.length ?? 0) - activeRows.length > 0
                 ? `（${rows.length - activeRows.length} 件はスキップ）`
                 : ""}
             </p>
-            <div className="flex gap-2">
+            <div className="flex w-full gap-2 sm:w-auto">
               <Button
                 variant="outline"
+                className="flex-1 sm:flex-none"
                 onClick={() => {
                   setRows(null);
                   setWarnings([]);
@@ -551,6 +676,7 @@ export default function ImportScreenshot() {
                 やり直す
               </Button>
               <Button
+                className="flex-1 sm:flex-none"
                 disabled={apply.isPending || activeRows.length === 0}
                 onClick={() =>
                   apply.mutate({
