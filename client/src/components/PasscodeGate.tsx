@@ -26,7 +26,16 @@ export default function PasscodeGate() {
       setSubmitting(true);
       setError(null);
       try {
-        await unlock(passcode);
+        // 万一サーバー応答が返らない場合でも操作不能にならないよう上限を設ける
+        await Promise.race([
+          unlock(passcode),
+          new Promise<never>((_, reject) =>
+            window.setTimeout(
+              () => reject(new Error("応答がありません。通信状況を確認して再度お試しください。")),
+              30_000
+            )
+          ),
+        ]);
         // 成功時はこのコンポーネントがアンマウントされる
       } catch (err) {
         setError(err instanceof Error ? err.message : "解錠できませんでした");

@@ -23,6 +23,9 @@ const PasscodeContext = createContext<PasscodeContextValue | null>(null);
 
 export function PasscodeProvider({ children }: { children: ReactNode }) {
   const [token, setToken] = useState<string | null>(() => getStoredToken());
+  // 解錠操作を経た直後は auth.me の検証結果を待たずに解錠済みとして扱う。
+  // トークンはサーバーが発行した直後なので有効性は確定している。
+  const [justUnlocked, setJustUnlocked] = useState(false);
   const utils = trpc.useUtils();
 
   // トークンがある場合のみ有効性を確認する
@@ -39,8 +42,10 @@ export function PasscodeProvider({ children }: { children: ReactNode }) {
       const res = await unlockMutation.mutateAsync({ passcode });
       storeToken(res.token);
       setToken(res.token);
-      // ヘッダに新しいトークンが載った状態で全クエリを取り直す
-      await utils.invalidate();
+      setJustUnlocked(true);
+      // 全クエリの再取得完了を待つと、いずれかのクエリが遅い場合に
+      // ロック画面が解除されないため、待たずに投げるだけにする。
+      void utils.invalidate();
     },
     [unlockMutation, utils]
   );
@@ -48,6 +53,7 @@ export function PasscodeProvider({ children }: { children: ReactNode }) {
   const lock = useCallback(() => {
     clearToken();
     setToken(null);
+    setJustUnlocked(false);
     utils.invalidate();
   }, [utils]);
 
@@ -55,6 +61,10 @@ export function PasscodeProvider({ children }: { children: ReactNode }) {
     // トークンが無い → 未解錠（確認不要）
     if (token === null) {
       return { unlocked: false, checking: false, unlock, lock };
+    }
+    // 解錠直後は検証を待たずに通す
+    if (justUnlocked) {
+      return { unlocked: true, checking: false, unlock, lock };
     }
     // トークンはあるが検証中
     if (me.isLoading) {
@@ -65,7 +75,7 @@ export function PasscodeProvider({ children }: { children: ReactNode }) {
       return { unlocked: false, checking: false, unlock, lock };
     }
     return { unlocked: true, checking: false, unlock, lock };
-  }, [token, me.isLoading, me.isError, me.data, unlock, lock]);
+  }, [token, justUnlocked, me.isLoading, me.isError, me.data, unlock, lock]);
 
   return <PasscodeContext.Provider value={value}>{children}</PasscodeContext.Provider>;
 }
