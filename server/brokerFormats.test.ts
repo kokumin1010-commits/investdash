@@ -30,8 +30,66 @@ describe("getBrokerFormat", () => {
   });
 
   it("未検証のフォーマットは layoutPrompt が null", () => {
-    expect(getBrokerFormat("rakuten_ispeed").layoutPrompt).toBeNull();
     expect(getBrokerFormat("futu").layoutPrompt).toBeNull();
+    expect(getBrokerFormat("generic").layoutPrompt).toBeNull();
+  });
+});
+
+describe("楽天証券 iSPEED のレイアウト定義", () => {
+  const prompt = getBrokerFormat("rakuten_ispeed").layoutPrompt ?? "";
+
+  it("検証済みなので layoutPrompt を持つ", () => {
+    expect(prompt).not.toBe("");
+    expect(getBrokerFormat("rakuten_ispeed").currency).toBe("JPY");
+  });
+
+  it("横スクロールで変わる 3 つのビューを説明している", () => {
+    // A=取得単価 / B=評価額 / C=指標。どのビューかで抽出できる項目が変わる
+    expect(prompt).toContain("平均取得価額(円)");
+    expect(prompt).toContain("時価評価額(円)");
+    expect(prompt).toContain("PER");
+  });
+
+  it("1 銘柄が 2 行構成であることを明示している", () => {
+    // 上下段を別銘柄と誤認すると銘柄数が倍になるため最重要
+    expect(prompt).toContain("2 行で構成される");
+  });
+
+  it("「（執行中）」を保有数量と誤認しないよう警告している", () => {
+    expect(prompt).toContain("（執行中）");
+    expect(prompt).toContain("保有数量ではない");
+  });
+
+  it("省略された銘柄名の補完表を含む", () => {
+    // 実画面で確認した 5 件はすべて例示しておく
+    expect(prompt).toContain("3249");
+    expect(prompt).toContain("4661");
+    expect(prompt).toContain("4689");
+    expect(prompt).toContain("4751");
+    expect(prompt).toContain("4816");
+  });
+
+  it("純資産・預り金が無い画面なので cash を null にすると定めている", () => {
+    expect(prompt).toContain("cash は必ず null");
+  });
+
+  it("moomoo と逆の配色（赤=プラス）を明示している", () => {
+    expect(prompt).toContain("赤字がプラス");
+  });
+
+  it("指標ビューを取り込まない方針を明記している", () => {
+    // PER 0.00 表示（赤字企業・REIT）を取り込むと判定が歪むため
+    expect(prompt).toContain("パターン C は取り込まない");
+  });
+
+  it("貸株中バッジと投資口の扱いを説明している", () => {
+    expect(prompt).toContain("貸株中");
+    expect(prompt).toContain("投資口");
+  });
+
+  it("読み取れない行を推測で埋めないよう指示している", () => {
+    expect(prompt).toContain("推測して埋めてはならない");
+    expect(prompt).toContain("読み取れない銘柄は出力に含めない");
   });
 });
 
@@ -66,7 +124,11 @@ describe("BROKER_FORMAT_OPTIONS", () => {
     expect(moomoo?.verified).toBe(true);
 
     const ispeed = BROKER_FORMAT_OPTIONS.find(o => o.id === "rakuten_ispeed");
-    expect(ispeed?.verified).toBe(false);
+    expect(ispeed?.label).toBe("楽天証券 iSPEED");
+    expect(ispeed?.verified).toBe(true);
+
+    // 富途は実画面の提供待ちなので未検証のまま
+    expect(BROKER_FORMAT_OPTIONS.find(o => o.id === "futu")?.verified).toBe(false);
   });
 
   it("すべてのフォーマットが含まれる", () => {
