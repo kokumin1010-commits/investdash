@@ -70,6 +70,10 @@ export type PortfolioSummary = {
   totalPnlPct: number | null;
   dayChangeBase: number | null;
   dayChangePct: number | null;
+  /**
+   * 保有している「銘柄」の数。同一銘柄を複数の証券口座で持っていても 1 と数える。
+   * 口座ごとのレコード数は positions.length を参照する。
+   */
   positionCount: number;
   cashBalance: number;
   totalAssets: number;
@@ -213,6 +217,12 @@ export async function buildPortfolio(userId: number): Promise<{
   const dayChangeBase = prevValueBase > 0 ? totalValueBase - prevValueBase : null;
   const cashBalance = n(settings.cashBalance) ?? 0;
 
+  /**
+   * 同一銘柄を複数の証券口座で保有している場合の合計ビュー。
+   * 銘柄数の表示やシグナル判定はこちらを基準にする。
+   */
+  const groups = groupPositionsBySymbol(positions, totalValueBase);
+
   const summary: PortfolioSummary = {
     totalValueBase,
     totalCostBase,
@@ -222,7 +232,8 @@ export async function buildPortfolio(userId: number): Promise<{
     dayChangeBase,
     dayChangePct:
       dayChangeBase !== null && prevValueBase > 0 ? (dayChangeBase / prevValueBase) * 100 : null,
-    positionCount: positions.length,
+    // 同一銘柄を複数口座で持つ場合、レコード数ではなく銘柄数を表示する
+    positionCount: groups.length,
     cashBalance,
     totalAssets: totalValueBase + cashBalance,
     baseCurrency: settings.baseCurrency,
@@ -275,8 +286,6 @@ export async function buildPortfolio(userId: number): Promise<{
 
   // 集中リスクは口座をまたいだ合計で判定する。
   // 口座別に見ると個々は小さくても、同一銘柄の合計では大きな比率になることがある。
-  const groups = groupPositionsBySymbol(positions, totalValueBase);
-
   for (const g of groups) {
     if (g.weightPct !== null && g.weightPct >= posThreshold) {
       const accountNote = g.isSplit ? `${g.entries.length} 口座の合計で` : "";

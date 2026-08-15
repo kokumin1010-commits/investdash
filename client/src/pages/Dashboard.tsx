@@ -235,7 +235,12 @@ export default function Dashboard() {
               sub={
                 summary?.cashBalance
                   ? `現金 ${formatMoney(summary.cashBalance, summary.baseCurrency)} を含めた総資産 ${formatMoney(summary.totalAssets, summary.baseCurrency)}`
-                  : `${summary?.positionCount ?? 0} 銘柄`
+                  : `${summary?.positionCount ?? 0} 銘柄${
+                      // 同一銘柄を複数口座で持つ場合は口座レコード数も添える
+                      (data?.positions.length ?? 0) > (summary?.positionCount ?? 0)
+                        ? `（${data?.positions.length} 口座分）`
+                        : ""
+                    }`
               }
               icon={<Wallet className="h-4 w-4" />}
             />
