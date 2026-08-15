@@ -36,6 +36,7 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { trpc } from "@/lib/trpc";
+import { parseBrokerFilter } from "@shared/brokerFilter";
 import {
   BROKERS,
   BROKER_LABELS,
@@ -59,7 +60,7 @@ import {
 } from "lucide-react";
 import { Fragment, useMemo, useState } from "react";
 import { toast } from "sonner";
-import { Link } from "wouter";
+import { Link, useLocation, useSearch } from "wouter";
 
 type SortKey = "value" | "pnlPct" | "weight" | "name" | "day";
 
@@ -69,7 +70,16 @@ export default function Holdings() {
   const [query, setQuery] = useState("");
   const [sortKey, setSortKey] = useState<SortKey>("value");
   const [signalFilter, setSignalFilter] = useState<"ALL" | SignalAction | "NONE">("ALL");
-  const [brokerFilter, setBrokerFilter] = useState<"ALL" | Broker>("ALL");
+  /**
+   * 口座フィルタは URL クエリ（?broker=moomoo_jp）でも指定できる。
+   * ダッシュボードの「証券口座別の資産」カードから遷移してくるため。
+   */
+  const search = useSearch();
+  const [, navigate] = useLocation();
+  const brokerFromUrl = useMemo(() => parseBrokerFilter(search), [search]);
+  const [brokerFilterState, setBrokerFilter] = useState<"ALL" | Broker>("ALL");
+  // URL 指定があればそれを優先する（リンクで直接開いた場合に効かせるため）
+  const brokerFilter: "ALL" | Broker = brokerFromUrl ?? brokerFilterState;
   const [addOpen, setAddOpen] = useState(false);
   const [editTarget, setEditTarget] = useState<number | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<{ id: number; name: string } | null>(null);
@@ -157,6 +167,26 @@ export default function Holdings() {
     return BROKERS.filter(b => set.has(b));
   }, [positions]);
 
+  /**
+   * 口座で絞り込んでいるときは、その口座分だけの合計を出す。
+   * 複数口座で持つ銘柄は合計値のままだと「絞り込んだのに数字が減らない」ことになり
+   * 混乱するため、該当口座のレコードだけを足し合わせる。
+   */
+  const brokerSummary = useMemo(() => {
+    if (brokerFilter === "ALL") return null;
+    const mine = positions.filter(p => p.broker === brokerFilter);
+    const value = mine.reduce((s, p) => s + (p.marketValueBase ?? 0), 0);
+    const cost = mine.reduce((s, p) => s + p.costValueBase, 0);
+    const pnl = value - cost;
+    return {
+      count: mine.length,
+      value,
+      cost,
+      pnl,
+      pnlPct: cost > 0 ? (pnl / cost) * 100 : null,
+    };
+  }, [positions, brokerFilter]);
+
   const editing = positions.find(p => p.id === editTarget) ?? null;
 
   if (overview.isLoading) {
@@ -174,9 +204,20 @@ export default function Holdings() {
         <div className="space-y-1">
           <h1 className="text-2xl font-semibold tracking-tight">保有銘柄</h1>
           <p className="text-sm text-muted-foreground">
-            {groups.length} 銘柄
-            {/* 同一銘柄を複数口座で持つ場合、行数と銘柄数がずれるので明示する */}
-            {positions.length !== groups.length ? `（${positions.length} 口座分）` : ""}
+            {/**
+             * 口座で絞り込んでいるときに全体の銘柄数を出すと
+             * 「絞り込んだのに数字が変わらない」と誤解されるため、
+             * 絞り込み中は表示中の件数に切り替える。
+             */}
+            {brokerFilter === "ALL" ? (
+              <>
+                {groups.length} 銘柄
+                {/* 同一銘柄を複数口座で持つ場合、行数と銘柄数がずれるので明示する */}
+                {positions.length !== groups.length ? `（${positions.length} 口座分）` : ""}
+              </>
+            ) : (
+              `${rows.length} 銘柄を表示中（全 ${groups.length} 銘柄）`
+            )}
             {summary?.lastPriceSyncAt
               ? ` ・ 株価最終更新 ${new Date(summary.lastPriceSyncAt).toLocaleString("ja-JP", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" })}`
               : ""}
@@ -204,6 +245,51 @@ export default function Holdings() {
       {/* シグナルの読み方。用語の説明がないと機能が伝わらないため一覧の手前に置く */}
       <SignalGuide />
 
+      {/* 口座で絞り込んでいるときは、その口座の合計をここに出す */}
+      {brokerFilter !== "ALL" && brokerSummary ? (
+        <Card>
+          <CardContent className="flex flex-wrap items-center justify-between gap-3 py-3">
+            <div className="flex items-center gap-2.5">
+              <BrokerBadge broker={brokerFilter} />
+              <span className="text-sm text-muted-foreground">
+                この口座の {brokerSummary.count} 銘柄
+              </span>
+            </div>
+            <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1">
+              <span className="flex items-baseline gap-1.5">
+                <span className="text-[11px] text-muted-foreground">評価額</span>
+                <MoneyText
+                  value={brokerSummary.value}
+                  currency={summary?.baseCurrency}
+                  className="text-base font-semibold"
+                />
+              </span>
+              <span className="flex items-baseline gap-1.5">
+                <span className="text-[11px] text-muted-foreground">評価損益</span>
+                <PnlText
+                  value={brokerSummary.pnl}
+                  currency={summary?.baseCurrency}
+                  className="text-base font-semibold"
+                />
+                <PctText value={brokerSummary.pnlPct} className="text-xs" />
+              </span>
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-8"
+                onClick={() => {
+                  // URL 指定で来た場合はクエリを外す必要がある
+                  setBrokerFilter("ALL");
+                  if (brokerFromUrl) navigate("/holdings");
+                }}
+              >
+                絞り込みを解除
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      ) : null}
+
       {/* フィルタ */}
       <div className="flex flex-wrap items-center gap-2">
         <div className="relative min-w-[200px] flex-1 max-w-xs">
@@ -230,7 +316,18 @@ export default function Holdings() {
           </SelectContent>
         </Select>
         {usedBrokers.length > 1 ? (
-          <Select value={brokerFilter} onValueChange={v => setBrokerFilter(v as typeof brokerFilter)}>
+          <Select
+            value={brokerFilter}
+            onValueChange={v => {
+              const next = v as "ALL" | Broker;
+              setBrokerFilter(next);
+              /**
+               * URL クエリで来ている場合、state だけ変えても URL 優先のままになるので
+               * URL 側も合わせて書き換える。
+               */
+              if (brokerFromUrl) navigate(next === "ALL" ? "/holdings" : `/holdings?broker=${next}`);
+            }}
+          >
             <SelectTrigger className="h-9 w-[170px]">
               <SelectValue />
             </SelectTrigger>

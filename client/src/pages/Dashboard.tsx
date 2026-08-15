@@ -22,6 +22,7 @@ import {
   AlertTriangle,
   ArrowUpRight,
   Brain,
+  ChevronRight,
   Landmark,
   RefreshCw,
   ScanLine,
@@ -251,7 +252,7 @@ export default function Dashboard() {
                 <PnlText
                   value={summary?.totalPnl ?? null}
                   currency={summary?.baseCurrency}
-                  className="text-2xl font-semibold"
+                  className="whitespace-nowrap text-2xl font-semibold"
                 />
               }
               sub={
@@ -271,10 +272,11 @@ export default function Dashboard() {
                       {(data?.brokers ?? []).map(b => (
                         <span key={b.key} className="flex items-center justify-between gap-2">
                           <BrokerBadge broker={b.key} short />
-                          <span className="flex items-baseline gap-1.5">
+                          <span className="flex items-baseline gap-1.5 whitespace-nowrap">
                             <PnlText
                               value={b.pnl}
                               currency={summary?.baseCurrency}
+                              compact
                               className="text-xs font-medium"
                             />
                             <PctText value={b.pnlPct} className="text-[10px]" />
@@ -339,15 +341,21 @@ export default function Dashboard() {
               <CardContent>
                 <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
                   {(data?.brokers ?? []).map(b => (
-                    <div
+                    <Link
                       key={b.key}
-                      className="rounded-lg border p-3"
+                      href={`/holdings?broker=${b.key}`}
+                      /**
+                       * タップするとその口座の保有銘柄だけを一覧で見られる。
+                       * 押せることが分かるよう hover / active の反応を付ける。
+                       */
+                      className="block rounded-lg border p-3 transition-all hover:bg-accent/50 hover:shadow-sm active:scale-[0.99]"
                       style={{ borderLeft: `3px solid ${brokerHex(b.key)}` }}
                     >
                       <div className="flex items-center justify-between gap-2">
                         <BrokerBadge broker={b.key} />
-                        <span className="tabular text-xs text-muted-foreground">
-                          {b.count} 銘柄
+                        <span className="flex items-center gap-0.5 text-xs text-muted-foreground">
+                          <span className="tabular">{b.count} 銘柄</span>
+                          <ChevronRight className="h-3.5 w-3.5" />
                         </span>
                       </div>
                       <div className="mt-2">
@@ -380,7 +388,7 @@ export default function Dashboard() {
                           }}
                         />
                       </div>
-                    </div>
+                    </Link>
                   ))}
                 </div>
               </CardContent>
