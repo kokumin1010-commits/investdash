@@ -83,7 +83,8 @@ export default function News() {
 
   const holdingIdBySymbol = useMemo(() => {
     const map = new Map<string, number>();
-    (overview.data?.positions ?? []).forEach(p => map.set(p.symbol, p.id));
+    // 複数口座で保有する銘柄は代表 1 件（評価額が最大の口座）へリンクする
+    (overview.data?.groups ?? []).forEach(p => map.set(p.symbol, p.entries[0].id));
     return map;
   }, [overview.data]);
 

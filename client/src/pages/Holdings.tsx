@@ -1,5 +1,6 @@
 import { DisclaimerNote } from "@/components/investing/DisclaimerNote";
 import { BrokerBadge } from "@/components/investing/BrokerBadge";
+import { BrokerBreakdown } from "@/components/investing/BrokerBreakdown";
 import { MoneyText, PctText, PnlText } from "@/components/investing/Figures";
 import { SignalBadge, SignalPlaceholder } from "@/components/investing/SignalBadge";
 import { SignalGuide } from "@/components/investing/SignalGuide";
@@ -105,10 +106,15 @@ export default function Holdings() {
   });
 
   const positions = overview.data?.positions ?? [];
+  /**
+   * 同一銘柄を複数口座で保有している場合は 1 行にまとめて合計を表示する。
+   * 口座ごとの明細は entries に入っており、カード内の内訳として展開する。
+   */
+  const groups = overview.data?.groups ?? [];
   const summary = overview.data?.summary;
 
   const rows = useMemo(() => {
-    let list = positions;
+    let list = groups;
     if (query.trim()) {
       const q = query.trim().toLowerCase();
       list = list.filter(
@@ -124,7 +130,8 @@ export default function Holdings() {
       );
     }
     if (brokerFilter !== "ALL") {
-      list = list.filter(p => p.broker === brokerFilter);
+      // どの口座で保有していても、その口座を含む銘柄を残す
+      list = list.filter(p => p.brokers.includes(brokerFilter));
     }
     const sorted = [...list];
     sorted.sort((a, b) => {
@@ -142,7 +149,7 @@ export default function Holdings() {
       }
     });
     return sorted;
-  }, [positions, query, signalFilter, brokerFilter, sortKey]);
+  }, [groups, query, signalFilter, brokerFilter, sortKey]);
 
   /** 実際に保有がある口座だけを絞り込みの選択肢にする */
   const usedBrokers = useMemo(() => {
@@ -167,7 +174,9 @@ export default function Holdings() {
         <div className="space-y-1">
           <h1 className="text-2xl font-semibold tracking-tight">保有銘柄</h1>
           <p className="text-sm text-muted-foreground">
-            {positions.length} 銘柄
+            {groups.length} 銘柄
+            {/* 同一銘柄を複数口座で持つ場合、行数と銘柄数がずれるので明示する */}
+            {positions.length !== groups.length ? `（${positions.length} 口座分）` : ""}
             {summary?.lastPriceSyncAt
               ? ` ・ 株価最終更新 ${new Date(summary.lastPriceSyncAt).toLocaleString("ja-JP", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" })}`
               : ""}
@@ -269,11 +278,14 @@ export default function Holdings() {
           {/* スマホ: 1 銘柄 1 カード。横スクロールせずすべての数字が読める */}
           <div className="space-y-2.5 lg:hidden">
             {rows.map(p => (
-              <Card key={`m-${p.id}`} className="overflow-hidden">
+              <Card key={`m-${p.symbol}`} className="overflow-hidden">
                 <CardContent className="p-3.5">
                   {/* 上段: 銘柄名とシグナル */}
                   <div className="flex items-start justify-between gap-2">
-                    <Link href={`/holdings/${p.id}`} className="min-w-0 flex-1 space-y-0.5">
+                    <Link
+                      href={`/holdings/${p.entries[0].id}`}
+                      className="min-w-0 flex-1 space-y-0.5"
+                    >
                       <div className="flex items-center gap-1.5">
                         <span className="truncate font-medium">{p.name}</span>
                         {p.hasCard ? <FileText className="h-3.5 w-3.5 shrink-0 text-primary" /> : null}
@@ -300,7 +312,12 @@ export default function Holdings() {
                     </Link>
                     <div className="flex shrink-0 flex-col items-end gap-1">
                       {p.signal ? <SignalBadge action={p.signal.action} /> : <SignalPlaceholder />}
-                      <BrokerBadge broker={p.broker} short />
+                      {/* 複数口座にまたがる場合はすべてのバッジを並べる */}
+                      <div className="flex flex-wrap justify-end gap-1">
+                        {p.brokers.map(b => (
+                          <BrokerBadge key={b} broker={b} short />
+                        ))}
+                      </div>
                     </div>
                   </div>
 
@@ -334,7 +351,9 @@ export default function Holdings() {
                       <p className="tabular text-xs font-medium">{formatNumber(p.quantity, 0)}</p>
                     </div>
                     <div>
-                      <p className="text-[10px] text-muted-foreground">取得単価</p>
+                      <p className="text-[10px] text-muted-foreground">
+                        {p.isSplit ? "平均取得" : "取得単価"}
+                      </p>
                       <MoneyText
                         value={p.avgCost}
                         currency={p.currency}
@@ -357,6 +376,16 @@ export default function Holdings() {
                     </div>
                   </div>
 
+                  {/* 複数口座で保有している場合の内訳 */}
+                  <BrokerBreakdown
+                    entries={p.entries}
+                    onEdit={id => setEditTarget(id)}
+                    onDelete={id => {
+                      const target = p.entries.find(e => e.id === id);
+                      if (target) setDeleteTarget({ id, name: p.name });
+                    }}
+                  />
+
                   {/* 操作 */}
                   <div className="mt-2 flex items-center justify-end gap-1 border-t pt-2">
                     <Button
@@ -365,32 +394,40 @@ export default function Holdings() {
                       className="h-8 px-2 text-xs"
                       disabled={signalBusyId !== null}
                       onClick={() => {
-                        setSignalBusyId(p.id);
-                        regenSignal.mutate({ id: p.id });
+                        // シグナルは銘柄単位。どの口座の行で呼んでも同じ結果になる
+                        setSignalBusyId(p.entries[0].id);
+                        regenSignal.mutate({ id: p.entries[0].id });
                       }}
                     >
                       <Brain
-                        className={`mr-1 h-3.5 w-3.5 ${signalBusyId === p.id ? "animate-spin" : ""}`}
+                        className={`mr-1 h-3.5 w-3.5 ${
+                          signalBusyId === p.entries[0].id ? "animate-spin" : ""
+                        }`}
                       />
-                      {signalBusyId === p.id ? "分析中…" : "AI分析"}
+                      {signalBusyId === p.entries[0].id ? "分析中…" : "AI分析"}
                     </Button>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="h-8 px-2 text-xs"
-                      onClick={() => setEditTarget(p.id)}
-                    >
-                      <FileText className="mr-1 h-3.5 w-3.5" />
-                      編集
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="h-8 w-8 text-muted-foreground hover:text-destructive"
-                      onClick={() => setDeleteTarget({ id: p.id, name: p.name })}
-                    >
-                      <Trash2 className="h-3.5 w-3.5" />
-                    </Button>
+                    {/* 複数口座の場合は内訳側に編集・削除を出すため、ここでは 1 口座のときだけ表示 */}
+                    {!p.isSplit ? (
+                      <>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-8 px-2 text-xs"
+                          onClick={() => setEditTarget(p.entries[0].id)}
+                        >
+                          <FileText className="mr-1 h-3.5 w-3.5" />
+                          編集
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-8 w-8 text-muted-foreground hover:text-destructive"
+                          onClick={() => setDeleteTarget({ id: p.entries[0].id, name: p.name })}
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </Button>
+                      </>
+                    ) : null}
                   </div>
                 </CardContent>
               </Card>
@@ -425,9 +462,9 @@ export default function Holdings() {
               </TableHeader>
               <TableBody>
                 {rows.map(p => (
-                  <TableRow key={p.id} className="group">
+                  <TableRow key={p.symbol} className="group">
                     <TableCell>
-                      <Link href={`/holdings/${p.id}`} className="block space-y-0.5">
+                      <Link href={`/holdings/${p.entries[0].id}`} className="block space-y-0.5">
                         <div className="flex items-center gap-1.5">
                           <span className="font-medium hover:underline">{p.name}</span>
                           {p.hasCard ? (
@@ -468,13 +505,48 @@ export default function Holdings() {
                       </Link>
                     </TableCell>
                     <TableCell>
-                      <BrokerBadge broker={p.broker} />
+                      {/* 複数口座にまたがる場合はすべての口座を表示し、株数の内訳も添える */}
+                      <div className="space-y-1">
+                        <div className="flex flex-wrap gap-1">
+                          {p.brokers.map(b => (
+                            <BrokerBadge key={b} broker={b} />
+                          ))}
+                        </div>
+                        {p.isSplit ? (
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <p className="cursor-help text-[10px] text-muted-foreground">
+                                {p.entries.length} 口座の合計
+                              </p>
+                            </TooltipTrigger>
+                            <TooltipContent>
+                              <div className="space-y-1 text-xs">
+                                {p.entries.map(e => (
+                                  <div key={e.id} className="flex items-center gap-2">
+                                    <span>{BROKER_LABELS[e.broker]}</span>
+                                    <span className="tabular">
+                                      {formatNumber(e.quantity, 0)}株 @{" "}
+                                      {formatNumber(e.avgCost, 2)}
+                                    </span>
+                                    <PctText value={e.pnlPct} />
+                                  </div>
+                                ))}
+                              </div>
+                            </TooltipContent>
+                          </Tooltip>
+                        ) : null}
+                      </div>
                     </TableCell>
                     <TableCell className="tabular text-right">
                       {formatNumber(p.quantity, 0)}
                     </TableCell>
                     <TableCell className="text-right">
-                      <MoneyText value={p.avgCost} currency={p.currency} />
+                      <div className="space-y-0.5">
+                        <MoneyText value={p.avgCost} currency={p.currency} />
+                        {p.isSplit ? (
+                          <p className="text-[10px] text-muted-foreground">加重平均</p>
+                        ) : null}
+                      </div>
                     </TableCell>
                     <TableCell className="text-right">
                       <MoneyText value={p.currentPrice} currency={p.currency} />
@@ -526,45 +598,59 @@ export default function Holdings() {
                               className="h-8 w-8"
                               disabled={signalBusyId !== null}
                               onClick={() => {
-                                setSignalBusyId(p.id);
-                                regenSignal.mutate({ id: p.id });
+                                // シグナルは銘柄単位なので先頭の口座の ID で呼ぶ
+                                setSignalBusyId(p.entries[0].id);
+                                regenSignal.mutate({ id: p.entries[0].id });
                               }}
                             >
                               <Brain
-                                className={`h-3.5 w-3.5 ${signalBusyId === p.id ? "animate-spin" : ""}`}
+                                className={`h-3.5 w-3.5 ${
+                                  signalBusyId === p.entries[0].id ? "animate-spin" : ""
+                                }`}
                               />
                             </Button>
                           </TooltipTrigger>
                           <TooltipContent>
-                            {signalBusyId === p.id ? "分析中…" : "AI分析でシグナルを生成"}
+                            {signalBusyId === p.entries[0].id ? "分析中…" : "AI分析でシグナルを生成"}
                           </TooltipContent>
                         </Tooltip>
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              className="h-8 w-8"
-                              onClick={() => setEditTarget(p.id)}
-                            >
-                              <FileText className="h-3.5 w-3.5" />
-                            </Button>
-                          </TooltipTrigger>
-                          <TooltipContent>株数・取得単価を編集</TooltipContent>
-                        </Tooltip>
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              className="h-8 w-8 text-muted-foreground hover:text-destructive"
-                              onClick={() => setDeleteTarget({ id: p.id, name: p.name })}
-                            >
-                              <Trash2 className="h-3.5 w-3.5" />
-                            </Button>
-                          </TooltipTrigger>
-                          <TooltipContent>削除</TooltipContent>
-                        </Tooltip>
+                        {/* 複数口座の銘柄はどの口座を編集するか選ぶ必要があるため個別に並べる */}
+                        {p.entries.map(e => (
+                          <Tooltip key={`edit-${e.id}`}>
+                            <TooltipTrigger asChild>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-8 w-8"
+                                onClick={() => setEditTarget(e.id)}
+                              >
+                                <FileText className="h-3.5 w-3.5" />
+                              </Button>
+                            </TooltipTrigger>
+                            <TooltipContent>
+                              {p.isSplit
+                                ? `${BROKER_LABELS[e.broker]}の株数・取得単価を編集`
+                                : "株数・取得単価を編集"}
+                            </TooltipContent>
+                          </Tooltip>
+                        ))}
+                        {p.entries.map(e => (
+                          <Tooltip key={`del-${e.id}`}>
+                            <TooltipTrigger asChild>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-8 w-8 text-muted-foreground hover:text-destructive"
+                                onClick={() => setDeleteTarget({ id: e.id, name: p.name })}
+                              >
+                                <Trash2 className="h-3.5 w-3.5" />
+                              </Button>
+                            </TooltipTrigger>
+                            <TooltipContent>
+                              {p.isSplit ? `${BROKER_LABELS[e.broker]}の保有を削除` : "削除"}
+                            </TooltipContent>
+                          </Tooltip>
+                        ))}
                       </div>
                     </TableCell>
                   </TableRow>

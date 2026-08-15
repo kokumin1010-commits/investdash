@@ -1,0 +1,1 @@
+CREATE INDEX `holdings_user_symbol_broker_idx` ON `holdings` (`userId`,`symbol`,`broker`);

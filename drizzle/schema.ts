@@ -79,6 +79,15 @@ export const holdings = mysqlTable(
   },
   table => ({
     userSymbolIdx: index("holdings_user_symbol_idx").on(table.userId, table.symbol),
+    /**
+     * 同一銘柄を複数の証券口座で保有できる（例: ヤクルトを moomoo と楽天の両方で持つ）。
+     * 保有の一意性は「ユーザー + シンボル + 口座」で判断するため、この組み合わせで引く。
+     */
+    userSymbolBrokerIdx: index("holdings_user_symbol_broker_idx").on(
+      table.userId,
+      table.symbol,
+      table.broker
+    ),
   })
 );
 

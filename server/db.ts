@@ -10,6 +10,7 @@ import {
   userSettings,
   users,
   watchlist,
+  type Holding,
   type InsertHolding,
   type InsertImportJob,
   type InsertInvestmentCard,
@@ -199,6 +200,41 @@ export async function getHoldingBySymbol(userId: number, symbol: string) {
     .where(and(eq(holdings.userId, userId), eq(holdings.symbol, symbol)))
     .limit(1);
   return rows[0];
+}
+
+/**
+ * 銘柄 × 証券口座で 1 件を特定する。
+ *
+ * 同一銘柄を複数の証券口座で保有するケース（例: ヤクルトを moomoo と楽天の
+ * 両方で持つ）に対応するため、保有の一意性は「シンボル + 口座」で判断する。
+ * 取込や手動追加で既存行を更新するか新規作成するかを決める際にはこちらを使う。
+ */
+export async function getHoldingBySymbolAndBroker(
+  userId: number,
+  symbol: string,
+  broker: Holding["broker"]
+) {
+  const db = await requireDb();
+  const rows = await db
+    .select()
+    .from(holdings)
+    .where(
+      and(eq(holdings.userId, userId), eq(holdings.symbol, symbol), eq(holdings.broker, broker))
+    )
+    .limit(1);
+  return rows[0];
+}
+
+/**
+ * 同一シンボルの保有をすべて返す（口座をまたぐ）。
+ * 合計ポジションの算出や、削除時の関連データ整理に使う。
+ */
+export async function listHoldingsBySymbol(userId: number, symbol: string) {
+  const db = await requireDb();
+  return db
+    .select()
+    .from(holdings)
+    .where(and(eq(holdings.userId, userId), eq(holdings.symbol, symbol)));
 }
 
 export async function insertHolding(values: InsertHolding) {

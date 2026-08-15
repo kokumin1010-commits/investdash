@@ -1,6 +1,7 @@
 import { invokeLLM } from "../_core/llm";
 import type { RawNews } from "./news";
 import { parseLlmJson } from "./jsonExtract";
+import { BROKER_LABELS, type Broker } from "../../shared/investing";
 
 /**
  * ニュースのセンチメント判定と意思決定シグナル生成。
@@ -143,6 +144,18 @@ export type SignalContext = {
   /** 直近 3 か月・1 か月の騰落率（%） */
   return1m: number | null;
   return3m: number | null;
+  /**
+   * 同一銘柄を複数の証券口座で保有している場合の内訳。
+   * 判定自体は合計ポジションに対して 1 つ出すが、
+   * 「片方の口座は含み損」という状況は判断材料になるため渡す。
+   * 1 口座のみの場合は null。
+   */
+  accountBreakdown?: Array<{
+    broker: string;
+    quantity: number;
+    avgCost: number;
+    pnlPct: number | null;
+  }> | null;
   /** 投資カードの記録内容 */
   card: {
     buyReason: string | null;
@@ -295,6 +308,20 @@ export function buildSignalPrompt(ctx: SignalContext): string {
         ).toFixed(0)}%（0%が年初来安値、100%が年初来高値）`
       : "データ未取得";
 
+  /** 複数口座にまたがる場合のみ内訳を添える */
+  const breakdownBlock =
+    ctx.accountBreakdown && ctx.accountBreakdown.length > 1
+      ? `\n## 口座別の内訳（判定は合計ポジションに対して 1 つ出すこと）\n${ctx.accountBreakdown
+          .map(
+            a =>
+              `- ${BROKER_LABELS[a.broker as Broker] ?? a.broker}: ${fmt(a.quantity)} 株／取得単価 ${fmt(
+                a.avgCost,
+                ` ${ctx.currency}`
+              )}／損益率 ${a.pnlPct === null ? "データ未取得" : `${a.pnlPct.toFixed(2)}%`}`
+          )
+          .join("\n")}\n`
+      : "";
+
   return `## 銘柄
 ${ctx.name}（${ctx.symbol}）／セクター: ${ctx.sector ?? "未取得"}／業種: ${ctx.industry ?? "未取得"}
 
@@ -304,7 +331,7 @@ ${ctx.name}（${ctx.symbol}）／セクター: ${ctx.sector ?? "未取得"}／�
 - 現在値: ${fmt(ctx.currentPrice, ` ${ctx.currency}`)}
 - 損益率: ${ctx.pnlPct === null ? "データ未取得" : `${ctx.pnlPct.toFixed(2)}%`}
 - ポートフォリオ構成比: ${ctx.weightPct === null ? "データ未取得" : `${ctx.weightPct.toFixed(1)}%`}
-
+${breakdownBlock}
 ## 価格の位置
 - 52週高値: ${fmt(ctx.fiftyTwoWeekHigh, ` ${ctx.currency}`)}／52週安値: ${fmt(ctx.fiftyTwoWeekLow, ` ${ctx.currency}`)}
 - 52週レンジ内の位置: ${rangePos}

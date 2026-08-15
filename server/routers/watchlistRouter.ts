@@ -153,6 +153,7 @@ export const watchlistRouter = router({
         id: z.number().int().positive(),
         quantity: z.number().positive(),
         avgCost: z.number().min(0),
+        broker: z.enum(["moomoo_jp", "rakuten_ispeed", "futu", "other"]).optional(),
         keepInWatchlist: z.boolean().default(false),
       })
     )
@@ -160,9 +161,14 @@ export const watchlistRouter = router({
       const item = await db.getWatchItem(ctx.user.id, input.id);
       if (!item) throw new TRPCError({ code: "NOT_FOUND", message: "銘柄が見つかりません" });
 
-      const existing = await db.getHoldingBySymbol(ctx.user.id, item.symbol);
+      // 同一銘柄でも証券口座が違えば別ポジションになるため、口座まで見て判定する
+      const broker = input.broker ?? "other";
+      const existing = await db.getHoldingBySymbolAndBroker(ctx.user.id, item.symbol, broker);
       if (existing) {
-        throw new TRPCError({ code: "CONFLICT", message: "この銘柄は既に保有一覧にあります" });
+        throw new TRPCError({
+          code: "CONFLICT",
+          message: "この銘柄は同じ証券口座の保有一覧に既にあります",
+        });
       }
 
       const holdingId = await db.insertHolding({
@@ -172,6 +178,7 @@ export const watchlistRouter = router({
         name: item.name,
         market: item.market,
         currency: item.currency,
+        broker,
         quantity: String(input.quantity),
         avgCost: String(input.avgCost),
         currentPrice: item.currentPrice ?? undefined,
@@ -207,4 +214,3 @@ export const watchlistRouter = router({
       return regenerateWatchSignal(ctx.user.id, item);
     }),
 });
-

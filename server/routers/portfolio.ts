@@ -91,11 +91,14 @@ export const portfolioRouter = router({
       const { symbol, tickerCode, market } = normalizeSymbol(input.code);
       if (!symbol) throw new TRPCError({ code: "BAD_REQUEST", message: "銘柄コードが不正です" });
 
-      const existing = await db.getHoldingBySymbol(ctx.user.id, symbol);
+      // 同一銘柄でも証券口座が違えば別ポジションとして登録できる
+      // （例: ヤクルトを moomoo と楽天 iSPEED の両方で保有）
+      const broker = input.broker ?? "other";
+      const existing = await db.getHoldingBySymbolAndBroker(ctx.user.id, symbol, broker);
       if (existing) {
         throw new TRPCError({
           code: "CONFLICT",
-          message: `${symbol} は既に登録されています。保有一覧から編集してください。`,
+          message: `${symbol} は同じ証券口座に既に登録されています。保有一覧から編集してください。`,
         });
       }
 
@@ -109,7 +112,7 @@ export const portfolioRouter = router({
         name: input.name || quote?.longName || quote?.shortName || tickerCode,
         market,
         currency: quote?.currency ?? (market === "JP" ? "JPY" : "USD"),
-        broker: input.broker ?? "other",
+        broker,
         quantity: String(input.quantity),
         avgCost: String(input.avgCost),
         currentPrice: quote?.price !== null && quote?.price !== undefined ? String(quote.price) : undefined,
@@ -292,8 +295,18 @@ export const portfolioRouter = router({
     )
     .mutation(async ({ ctx, input }) => {
       const hs = await db.listHoldings(ctx.user.id);
-      const total = hs.length;
-      const batch = hs.slice(input.offset, input.offset + input.batchSize);
+      /**
+       * シグナルは銘柄単位。同一銘柄を複数の証券口座で保有している場合、
+       * 口座ごとに分析すると同じ内容を 2 回生成して AI 利用枠を無駄に消費するため、
+       * シンボルごとに 1 件だけを代表として分析する。
+       */
+      const bySymbol = new Map<string, (typeof hs)[number]>();
+      for (const h of hs) {
+        if (!bySymbol.has(h.symbol)) bySymbol.set(h.symbol, h);
+      }
+      const targets = Array.from(bySymbol.values());
+      const total = targets.length;
+      const batch = targets.slice(input.offset, input.offset + input.batchSize);
 
       let ok = 0;
       const failed: string[] = [];

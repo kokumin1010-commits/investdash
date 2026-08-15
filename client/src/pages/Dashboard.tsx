@@ -140,7 +140,8 @@ export default function Dashboard() {
 
   const signalCounts = useMemo(() => {
     const counts = new Map<SignalAction, number>();
-    (data?.positions ?? []).forEach(p => {
+    // 同一銘柄を複数口座で持つ場合、口座ごとに数えると二重計上になるため銘柄単位で数える
+    (data?.groups ?? []).forEach(p => {
       if (p.signal) counts.set(p.signal.action, (counts.get(p.signal.action) ?? 0) + 1);
     });
     return counts;
@@ -148,7 +149,7 @@ export default function Dashboard() {
 
   const attention = useMemo(
     () =>
-      (data?.positions ?? [])
+      (data?.groups ?? [])
         .filter(p => p.signal && ["EXIT", "REDUCE", "WATCH"].includes(p.signal.action))
         .sort((a, b) => {
           const order: Record<string, number> = { EXIT: 0, REDUCE: 1, WATCH: 2 };
@@ -172,7 +173,7 @@ export default function Dashboard() {
     );
   }
 
-  const isEmpty = (data?.positions.length ?? 0) === 0;
+  const isEmpty = (data?.groups.length ?? 0) === 0;
 
   return (
     <div className="mx-auto max-w-[1400px] space-y-6 pb-10">
@@ -554,8 +555,8 @@ export default function Dashboard() {
                 ) : (
                   attention.map(p => (
                     <Link
-                      key={p.id}
-                      href={`/holdings/${p.id}`}
+                      key={p.symbol}
+                      href={`/holdings/${p.entries[0].id}`}
                       className="block rounded-lg border border-border/70 p-3 transition-colors hover:bg-accent/50"
                     >
                       <div className="flex items-start justify-between gap-3">
@@ -618,8 +619,9 @@ export default function Dashboard() {
                   <CardTitle className="text-base">構成比上位</CardTitle>
                 </CardHeader>
                 <CardContent className="space-y-2">
-                  {(data?.positions ?? []).slice(0, 5).map(p => (
-                    <div key={p.id} className="flex items-center justify-between gap-2 text-xs">
+                  {/* 構成比は口座をまたいだ合計で見る */}
+                  {(data?.groups ?? []).slice(0, 5).map(p => (
+                    <div key={p.symbol} className="flex items-center justify-between gap-2 text-xs">
                       <span className="min-w-0 flex-1 truncate">{p.name}</span>
                       <MoneyText
                         value={p.marketValueBase}

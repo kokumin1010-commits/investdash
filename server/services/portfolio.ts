@@ -8,6 +8,7 @@ import {
 } from "./analysis";
 import { fetchCompanyProfile, fetchPriceHistory, fetchQuotes } from "./marketData";
 import { buildNewsQuery, filterNoise, searchNews } from "./news";
+import { groupPositionsBySymbol, type GroupedPosition } from "./groupPositions";
 import { BROKER_LABELS, type Broker } from "../../shared/investing";
 
 /**
@@ -99,6 +100,8 @@ export type ConcentrationAlert = {
  */
 export async function buildPortfolio(userId: number): Promise<{
   positions: PositionView[];
+  /** 同一銘柄を複数口座で保有する場合にまとめた合計ビュー */
+  groups: GroupedPosition[];
   summary: PortfolioSummary;
   sectors: SectorSlice[];
   currencies: SectorSlice[];
@@ -270,15 +273,20 @@ export async function buildPortfolio(userId: number): Promise<{
   const posThreshold = settings.concentrationThreshold;
   const secThreshold = settings.sectorConcentrationThreshold;
 
-  for (const p of positions) {
-    if (p.weightPct !== null && p.weightPct >= posThreshold) {
+  // 集中リスクは口座をまたいだ合計で判定する。
+  // 口座別に見ると個々は小さくても、同一銘柄の合計では大きな比率になることがある。
+  const groups = groupPositionsBySymbol(positions, totalValueBase);
+
+  for (const g of groups) {
+    if (g.weightPct !== null && g.weightPct >= posThreshold) {
+      const accountNote = g.isSplit ? `${g.entries.length} 口座の合計で` : "";
       alerts.push({
-        level: p.weightPct >= posThreshold * 1.5 ? "HIGH" : "MEDIUM",
+        level: g.weightPct >= posThreshold * 1.5 ? "HIGH" : "MEDIUM",
         kind: "POSITION",
-        label: p.name,
-        pct: p.weightPct,
+        label: g.name,
+        pct: g.weightPct,
         threshold: posThreshold,
-        message: `${p.name} が資産の ${p.weightPct.toFixed(1)}% を占めています（しきい値 ${posThreshold}%）。単一銘柄への集中リスクを確認してください。`,
+        message: `${g.name} が${accountNote}資産の ${g.weightPct.toFixed(1)}% を占めています（しきい値 ${posThreshold}%）。単一銘柄への集中リスクを確認してください。`,
       });
     }
   }
@@ -298,6 +306,7 @@ export async function buildPortfolio(userId: number): Promise<{
 
   return {
     positions,
+    groups,
     summary,
     sectors: toSlices(sectorMap),
     currencies: toSlices(currencyMap),
@@ -325,7 +334,12 @@ export async function syncPrices(userId: number): Promise<{
   failed: string[];
 }> {
   const [hs, ws] = await Promise.all([db.listHoldings(userId), db.listWatchlist(userId)]);
-  const symbols = [...hs.map(h => h.symbol), ...ws.map(w => w.symbol)];
+  /**
+   * 同一銘柄を複数の証券口座で保有している場合、株価は 1 回だけ取得すればよい。
+   * 重複を排除して外部 API への無駄なリクエストを避ける。
+   * 更新自体はレコードごとに行うため、全口座に反映される。
+   */
+  const symbols = Array.from(new Set([...hs.map(h => h.symbol), ...ws.map(w => w.symbol)]));
   if (symbols.length === 0) {
     await db.updateSettings(userId, { lastPriceSyncAt: new Date() });
     return { updated: 0, failed: [] };
@@ -501,10 +515,18 @@ export async function syncNewsForUser(
   nextOffset: number | null;
 }> {
   const [hs, ws] = await Promise.all([db.listHoldings(userId), db.listWatchlist(userId)]);
-  const targets: NewsTarget[] = [
-    ...hs.map(h => ({ symbol: h.symbol, name: h.name, tickerCode: h.tickerCode, market: h.market })),
-    ...ws.map(w => ({ symbol: w.symbol, name: w.name, tickerCode: w.tickerCode, market: w.market })),
-  ];
+  /**
+   * ニュースは銘柄単位。同一銘柄を複数の証券口座で保有していても
+   * 検索・分析は 1 回で足りるため、シンボルで重複を排除する。
+   * 重複したまま処理すると AI 利用枠を二重に消費してしまう。
+   */
+  const seen = new Set<string>();
+  const targets: NewsTarget[] = [];
+  for (const x of [...hs, ...ws]) {
+    if (seen.has(x.symbol)) continue;
+    seen.add(x.symbol);
+    targets.push({ symbol: x.symbol, name: x.name, tickerCode: x.tickerCode, market: x.market });
+  }
 
   const total = targets.length;
   const offset = options?.offset ?? 0;
@@ -535,9 +557,22 @@ export async function regenerateSignal(userId: number, holding: Holding) {
     buildPortfolio(userId),
     fetchPriceHistory(holding.symbol, "6mo", "1d"),
   ]);
-
-  const view = portfolio.positions.find(p => p.id === holding.id);
-
+  /**
+   * シグナルは銘柄単位。同一銘柄を複数の証券口座で保有している場合は
+   * 口座ごとに別々の判断が出ると混乱するため、口座をまたいだ合計ポジションで判定する。
+   * 株数・取得単価・損益率・構成比はすべて合計値を使う。
+   */
+  const view = portfolio.groups.find(g => g.symbol === holding.symbol);
+  /** 口座をまたいでいる場合は、AI に口座別の状況も伝える */
+  const accountBreakdown =
+    view && view.isSplit
+      ? view.entries.map(e => ({
+          broker: e.broker,
+          quantity: e.quantity,
+          avgCost: e.avgCost,
+          pnlPct: e.pnlPct,
+        }))
+      : null;
   const returnOver = (days: number): number | null => {
     if (history.length < 2) return null;
     const last = history[history.length - 1];
@@ -551,8 +586,9 @@ export async function regenerateSignal(userId: number, holding: Holding) {
     name: holding.name,
     symbol: holding.symbol,
     currency: holding.currency,
-    quantity: Number(holding.quantity),
-    avgCost: Number(holding.avgCost),
+    // 合計株数・加重平均取得単価。取得できない場合は当該レコードの値にフォールバック
+    quantity: view?.quantity ?? Number(holding.quantity),
+    avgCost: view?.avgCost ?? Number(holding.avgCost),
     currentPrice: view?.currentPrice ?? null,
     pnlPct: view?.pnlPct ?? null,
     weightPct: view?.weightPct ?? null,
@@ -562,6 +598,7 @@ export async function regenerateSignal(userId: number, holding: Holding) {
     fiftyTwoWeekLow: view?.fiftyTwoWeekLow ?? null,
     return1m: returnOver(30),
     return3m: returnOver(90),
+    accountBreakdown,
     card: card
       ? {
           buyReason: card.buyReason,

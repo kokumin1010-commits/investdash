@@ -209,7 +209,9 @@ export const importRouter = router({
         }
 
         const quote = await fetchQuote(row.symbol);
-        const existing = await db.getHoldingBySymbol(userId, row.symbol);
+        // 同一銘柄を複数口座で保有できるため、口座まで一致した行だけを更新対象にする。
+        // シンボルだけで引くと、別口座の保有を上書きして株数が消えてしまう。
+        const existing = await db.getHoldingBySymbolAndBroker(userId, row.symbol, broker);
 
         const priceFields = {
           currentPrice:
