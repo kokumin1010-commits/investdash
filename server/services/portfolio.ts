@@ -15,6 +15,7 @@ import {
 import { buildNewsQuery, filterNoise, searchNews } from "./news";
 import { groupPositionsBySymbol, type GroupedPosition } from "./groupPositions";
 import { buildMarketSlices, type MarketSlice } from "./marketSlices";
+import { computePeriodChange, type PeriodChange } from "./periodChange";
 import { BROKER_LABELS, type Broker } from "../../shared/investing";
 
 /**
@@ -93,6 +94,11 @@ export type PortfolioSummary = {
   lastNewsSyncAt: Date | null;
   /** 価格未取得の銘柄数 */
   missingPriceCount: number;
+  /**
+   * 前回記録からの変化。長期保有では前日比よりこちらが判断に役立つ。
+   * スナップショットが 2 件未満の場合は null。
+   */
+  periodChange: PeriodChange | null;
 };
 
 export type SectorSlice = { key: string; label: string; value: number; pct: number; count: number };
@@ -124,12 +130,14 @@ export async function buildPortfolio(userId: number): Promise<{
   brokers: BrokerSlice[];
   alerts: ConcentrationAlert[];
 }> {
-  const [rows, settings, signalMap, cards, allNews] = await Promise.all([
+  const [rows, settings, signalMap, cards, allNews, snapshots] = await Promise.all([
     db.listHoldings(userId),
     db.getSettings(userId),
     db.latestSignals(userId),
     db.listCards(userId),
     db.listNews(userId, { limit: 500 }),
+    // 前回記録からの変化を出すために履歴を読む
+    db.listSnapshots(userId, 120),
   ]);
 
   const usdJpy = n(settings.usdJpyRate) ?? 150;
@@ -255,6 +263,18 @@ export async function buildPortfolio(userId: number): Promise<{
     lastPriceSyncAt: settings.lastPriceSyncAt,
     lastNewsSyncAt: settings.lastNewsSyncAt,
     missingPriceCount: positions.filter(p => p.currentPrice === null).length,
+    /**
+     * 長期保有では前日比より「前回記録からの変化」が判断に役立つ。
+     * 買い増しによる増加と株価変動による増加を分けて持つ。
+     */
+    periodChange: computePeriodChange(
+      snapshots.map(s => ({
+        totalValue: n(s.totalValue) ?? 0,
+        totalCost: n(s.totalCost) ?? 0,
+        positionCount: s.positionCount,
+        capturedAt: s.capturedAt,
+      }))
+    ),
   };
 
   /* --- 分布集計 --- */

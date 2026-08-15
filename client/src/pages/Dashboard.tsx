@@ -118,6 +118,15 @@ export default function Dashboard() {
 
   const data = overview.data;
   const summary = data?.summary;
+  /**
+   * 前回記録からの変化。長期保有では前日比より判断に役立つ。
+   * スナップショットが 2 件未満なら null。
+   */
+  const periodChange = summary?.periodChange ?? null;
+  /**
+   * 資産推移の粒度。長期保有では月次のほうが傾向が読みやすいので既定を月次にする。
+   */
+  const [trendScale, setTrendScale] = useState<"day" | "month">("month");
 
   // どれか 1 つが動いている間は他の一括処理を止める（AI 利用枠と DB 競合を避ける）
   const anyBusy = busy !== null || newsRun.progress.running || signalRun.progress.running;
@@ -137,12 +146,37 @@ export default function Dashboard() {
 
   const trend = useMemo(() => {
     const rows = snapshots.data ?? [];
-    return rows.map(r => ({
-      date: new Date(r.capturedAt).toLocaleDateString("ja-JP", { month: "numeric", day: "numeric" }),
-      value: Number(r.totalValue),
-      cost: Number(r.totalCost),
-    }));
-  }, [snapshots.data]);
+    /**
+     * 株価更新は 1 日に複数回走るため、日次のままだと同じ日の点が並んで
+     * 長期の推移が読みづらい。粒度を選べるようにし、各期間の最終値を代表値にする。
+     */
+    const bucketOf = (d: Date) =>
+      trendScale === "month"
+        ? `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`
+        : `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+
+    // 期間ごとに最後の記録を残す（その時点の資産を表すため）
+    const byBucket = new Map<string, { at: Date; value: number; cost: number }>();
+    for (const r of rows) {
+      const at = new Date(r.capturedAt);
+      const key = bucketOf(at);
+      const cur = byBucket.get(key);
+      if (!cur || at.getTime() > cur.at.getTime()) {
+        byBucket.set(key, { at, value: Number(r.totalValue), cost: Number(r.totalCost) });
+      }
+    }
+
+    return Array.from(byBucket.values())
+      .sort((a, b) => a.at.getTime() - b.at.getTime())
+      .map(r => ({
+        date:
+          trendScale === "month"
+            ? r.at.toLocaleDateString("ja-JP", { year: "2-digit", month: "numeric" })
+            : r.at.toLocaleDateString("ja-JP", { month: "numeric", day: "numeric" }),
+        value: r.value,
+        cost: r.cost,
+      }));
+  }, [snapshots.data, trendScale]);
 
   const signalCounts = useMemo(() => {
     const counts = new Map<SignalAction, number>();
@@ -293,16 +327,69 @@ export default function Dashboard() {
               }
               icon={<TrendingUp className="h-4 w-4" />}
             />
+            {/*
+              長期保有が前提のため、前日比ではなく「前回記録からの変化」を出す。
+              日々の値動きは判断材料にならず、むしろ長期の判断を乱すため。
+              銘柄の追加があった期間は株価変動分を分離できないので明示する。
+            */}
             <StatCard
-              label="前日比"
+              label="前回記録からの変化"
               valueNode={
-                <PnlText
-                  value={summary?.dayChangeBase ?? null}
-                  currency={summary?.baseCurrency}
-                  className="text-2xl font-semibold"
-                />
+                periodChange ? (
+                  <PnlText
+                    value={periodChange.gainDelta ?? periodChange.totalDelta}
+                    currency={summary?.baseCurrency}
+                    className="text-2xl font-semibold"
+                  />
+                ) : (
+                  <span className="text-2xl font-semibold text-muted-foreground">—</span>
+                )
               }
-              sub={<PctText value={summary?.dayChangePct ?? null} />}
+              sub={
+                periodChange ? (
+                  <span className="block space-y-1">
+                    <span className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+                      {periodChange.gainDelta !== null ? (
+                        <>
+                          <PctText value={periodChange.gainPct} />
+                          <span className="text-muted-foreground">株価変動による増減</span>
+                        </>
+                      ) : (
+                        <span className="text-muted-foreground">評価額の増減（合計）</span>
+                      )}
+                    </span>
+                    <span className="block text-[11px] text-muted-foreground">
+                      {new Date(periodChange.fromAt).toLocaleDateString("ja-JP", {
+                        month: "numeric",
+                        day: "numeric",
+                      })}{" "}
+                      →{" "}
+                      {new Date(periodChange.toAt).toLocaleDateString("ja-JP", {
+                        month: "numeric",
+                        day: "numeric",
+                      })}
+                      {periodChange.days > 0 ? `（${periodChange.days}日間）` : "（同日中）"}
+                    </span>
+                    {/*
+                      銘柄を追加した期間は、追加した銘柄が元々持っていた含み損益が
+                      混ざるため「株価がいくら動いたか」を分離できない。
+                      誤解を防ぐため、その旨をはっきり書く。
+                    */}
+                    {periodChange.compositionChanged ? (
+                      <span className="block text-[11px] text-amber-600 dark:text-amber-400">
+                        {periodChange.countDelta !== 0
+                          ? `この期間に ${periodChange.countDelta > 0 ? "+" : ""}${periodChange.countDelta} 銘柄の変動があったため、`
+                          : "この期間に買い増し・売却があったため、"}
+                        株価変動分は分けて出せません
+                      </span>
+                    ) : null}
+                  </span>
+                ) : (
+                  <span className="text-[11px] text-muted-foreground">
+                    記録が 2 回以上たまると変化を表示します
+                  </span>
+                )
+              }
               icon={<ArrowUpRight className="h-4 w-4" />}
             />
             <Card>
@@ -520,10 +607,36 @@ export default function Dashboard() {
             {/* 資産推移 */}
             <Card className="lg:col-span-2">
               <CardHeader>
-                <CardTitle className="text-base">資産推移</CardTitle>
-                <CardDescription className="text-xs">
-                  株価更新のたびにスナップショットを記録します
-                </CardDescription>
+                <div className="flex flex-wrap items-start justify-between gap-2">
+                  <div>
+                    <CardTitle className="text-base">資産推移</CardTitle>
+                    <CardDescription className="text-xs">
+                      株価更新のたびにスナップショットを記録します
+                    </CardDescription>
+                  </div>
+                  {/* 長期の傾向を見たいときは月次、直近の動きを見たいときは日次 */}
+                  <div className="flex overflow-hidden rounded-md border">
+                    {(
+                      [
+                        { key: "month" as const, label: "月次" },
+                        { key: "day" as const, label: "日次" },
+                      ]
+                    ).map(opt => (
+                      <button
+                        key={opt.key}
+                        type="button"
+                        onClick={() => setTrendScale(opt.key)}
+                        className={`px-2.5 py-1 text-xs transition-colors ${
+                          trendScale === opt.key
+                            ? "bg-accent font-medium text-accent-foreground"
+                            : "text-muted-foreground hover:bg-accent/50"
+                        }`}
+                      >
+                        {opt.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
               </CardHeader>
               <CardContent>
                 {trend.length < 2 ? (
