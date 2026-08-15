@@ -40,11 +40,15 @@ import { parseBrokerFilter } from "@shared/brokerFilter";
 import {
   BROKERS,
   BROKER_LABELS,
+  MARKETS,
   SIGNAL_ACTIONS,
   formatNumber,
+  marketHex,
   marketLabel,
+  parseMarketFilter,
   sectorJa,
   type Broker,
+  type Market,
   type SignalAction,
 } from "@shared/investing";
 import {
@@ -80,6 +84,16 @@ export default function Holdings() {
   const [brokerFilterState, setBrokerFilter] = useState<"ALL" | Broker>("ALL");
   // URL 指定があればそれを優先する（リンクで直接開いた場合に効かせるため）
   const brokerFilter: "ALL" | Broker = brokerFromUrl ?? brokerFilterState;
+  /**
+   * 市場フィルタ。口座フィルタと同じ仕組みで、URL 指定を優先する。
+   * 両方を同時に指定できる（例: 楽天の米国株だけを見る）。
+   */
+  const marketFromUrl = useMemo(() => {
+    const params = new URLSearchParams(search.startsWith("?") ? search.slice(1) : search);
+    return parseMarketFilter(params.get("market"));
+  }, [search]);
+  const [marketFilterState, setMarketFilter] = useState<"ALL" | Market>("ALL");
+  const marketFilter: "ALL" | Market = marketFromUrl ?? marketFilterState;
   const [addOpen, setAddOpen] = useState(false);
   const [editTarget, setEditTarget] = useState<number | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<{ id: number; name: string } | null>(null);
@@ -143,6 +157,9 @@ export default function Holdings() {
       // どの口座で保有していても、その口座を含む銘柄を残す
       list = list.filter(p => p.brokers.includes(brokerFilter));
     }
+    if (marketFilter !== "ALL") {
+      list = list.filter(p => p.market === marketFilter);
+    }
     const sorted = [...list];
     sorted.sort((a, b) => {
       switch (sortKey) {
@@ -159,7 +176,7 @@ export default function Holdings() {
       }
     });
     return sorted;
-  }, [groups, query, signalFilter, brokerFilter, sortKey]);
+  }, [groups, query, signalFilter, brokerFilter, marketFilter, sortKey]);
 
   /** 実際に保有がある口座だけを絞り込みの選択肢にする */
   const usedBrokers = useMemo(() => {
@@ -167,25 +184,41 @@ export default function Holdings() {
     return BROKERS.filter(b => set.has(b));
   }, [positions]);
 
+  /** 実際に保有がある市場だけを絞り込みの選択肢にする */
+  const usedMarkets = useMemo(() => {
+    const set = new Set(positions.map(p => p.market));
+    return MARKETS.filter(m => set.has(m));
+  }, [positions]);
+
   /**
    * 口座で絞り込んでいるときは、その口座分だけの合計を出す。
    * 複数口座で持つ銘柄は合計値のままだと「絞り込んだのに数字が減らない」ことになり
    * 混乱するため、該当口座のレコードだけを足し合わせる。
    */
-  const brokerSummary = useMemo(() => {
-    if (brokerFilter === "ALL") return null;
-    const mine = positions.filter(p => p.broker === brokerFilter);
+  /**
+   * 絞り込み中は、その条件に該当する分だけの合計を出す。
+   * 複数口座で持つ銘柄は合計値のままだと「絞り込んだのに数字が減らない」ことになり
+   * 混乱するため、該当レコードだけを足し合わせる。
+   */
+  const filterSummary = useMemo(() => {
+    if (brokerFilter === "ALL" && marketFilter === "ALL") return null;
+    let mine = positions;
+    if (brokerFilter !== "ALL") mine = mine.filter(p => p.broker === brokerFilter);
+    if (marketFilter !== "ALL") mine = mine.filter(p => p.market === marketFilter);
     const value = mine.reduce((s, p) => s + (p.marketValueBase ?? 0), 0);
     const cost = mine.reduce((s, p) => s + p.costValueBase, 0);
     const pnl = value - cost;
+    // 同一銘柄を複数口座で持つ場合を 1 銘柄として数える
+    const symbols = new Set(mine.map(p => p.symbol));
     return {
-      count: mine.length,
+      count: symbols.size,
+      recordCount: mine.length,
       value,
       cost,
       pnl,
       pnlPct: cost > 0 ? (pnl / cost) * 100 : null,
     };
-  }, [positions, brokerFilter]);
+  }, [positions, brokerFilter, marketFilter]);
 
   const editing = positions.find(p => p.id === editTarget) ?? null;
 
@@ -209,7 +242,7 @@ export default function Holdings() {
              * 「絞り込んだのに数字が変わらない」と誤解されるため、
              * 絞り込み中は表示中の件数に切り替える。
              */}
-            {brokerFilter === "ALL" ? (
+            {brokerFilter === "ALL" && marketFilter === "ALL" ? (
               <>
                 {groups.length} 銘柄
                 {/* 同一銘柄を複数口座で持つ場合、行数と銘柄数がずれるので明示する */}
@@ -245,21 +278,36 @@ export default function Holdings() {
       {/* シグナルの読み方。用語の説明がないと機能が伝わらないため一覧の手前に置く */}
       <SignalGuide />
 
-      {/* 口座で絞り込んでいるときは、その口座の合計をここに出す */}
-      {brokerFilter !== "ALL" && brokerSummary ? (
+      {/* 絞り込み中は、その条件に該当する分の合計をここに出す */}
+      {filterSummary ? (
         <Card>
           <CardContent className="flex flex-wrap items-center justify-between gap-3 py-3">
             <div className="flex items-center gap-2.5">
-              <BrokerBadge broker={brokerFilter} />
+              {brokerFilter !== "ALL" ? <BrokerBadge broker={brokerFilter} /> : null}
+              {marketFilter !== "ALL" ? (
+                <span
+                  className="rounded-md border px-2 py-0.5 text-xs font-medium"
+                  style={{
+                    borderColor: `${marketHex(marketFilter)}55`,
+                    color: marketHex(marketFilter),
+                    background: `${marketHex(marketFilter)}14`,
+                  }}
+                >
+                  {marketLabel(marketFilter)}
+                </span>
+              ) : null}
               <span className="text-sm text-muted-foreground">
-                この口座の {brokerSummary.count} 銘柄
+                {filterSummary.count} 銘柄
+                {filterSummary.recordCount !== filterSummary.count
+                  ? `（${filterSummary.recordCount} 口座分）`
+                  : ""}
               </span>
             </div>
             <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1">
               <span className="flex items-baseline gap-1.5">
                 <span className="text-[11px] text-muted-foreground">評価額</span>
                 <MoneyText
-                  value={brokerSummary.value}
+                  value={filterSummary.value}
                   currency={summary?.baseCurrency}
                   className="text-base font-semibold"
                 />
@@ -267,11 +315,11 @@ export default function Holdings() {
               <span className="flex items-baseline gap-1.5">
                 <span className="text-[11px] text-muted-foreground">評価損益</span>
                 <PnlText
-                  value={brokerSummary.pnl}
+                  value={filterSummary.pnl}
                   currency={summary?.baseCurrency}
                   className="text-base font-semibold"
                 />
-                <PctText value={brokerSummary.pnlPct} className="text-xs" />
+                <PctText value={filterSummary.pnlPct} className="text-xs" />
               </span>
               <Button
                 variant="outline"
@@ -280,7 +328,8 @@ export default function Holdings() {
                 onClick={() => {
                   // URL 指定で来た場合はクエリを外す必要がある
                   setBrokerFilter("ALL");
-                  if (brokerFromUrl) navigate("/holdings");
+                  setMarketFilter("ALL");
+                  if (brokerFromUrl || marketFromUrl) navigate("/holdings");
                 }}
               >
                 絞り込みを解除
@@ -336,6 +385,29 @@ export default function Holdings() {
               {usedBrokers.map(b => (
                 <SelectItem key={b} value={b}>
                   {BROKER_LABELS[b]}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        ) : null}
+        {usedMarkets.length > 1 ? (
+          <Select
+            value={marketFilter}
+            onValueChange={v => {
+              const next = v as "ALL" | Market;
+              setMarketFilter(next);
+              // URL クエリで来ている場合は URL 側も合わせて書き換える
+              if (marketFromUrl) navigate(next === "ALL" ? "/holdings" : `/holdings?market=${next}`);
+            }}
+          >
+            <SelectTrigger className="h-9 w-[140px]">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="ALL">すべての市場</SelectItem>
+              {usedMarkets.map(m => (
+                <SelectItem key={m} value={m}>
+                  {marketLabel(m)}
                 </SelectItem>
               ))}
             </SelectContent>

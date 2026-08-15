@@ -14,6 +14,7 @@ import {
   SIGNAL_ACTIONS,
   brokerHex,
   formatMoney,
+  marketHex,
   sectorJa,
   type SignalAction,
 } from "@shared/investing";
@@ -23,6 +24,7 @@ import {
   ArrowUpRight,
   Brain,
   ChevronRight,
+  Globe,
   Landmark,
   RefreshCw,
   ScanLine,
@@ -329,6 +331,90 @@ export default function Dashboard() {
           </div>
 
           {/* 証券口座別の内訳。開いた瞬間に「どこにいくら置いているか」が分かるよう上部に配置する */}
+          {/* 国・市場別の内訳。米国株は円換算後の損益に為替変動が混ざるため現地通貨でも併記する */}
+          {(data?.markets ?? []).length > 0 ? (
+            <Card>
+              <CardHeader className="pb-3">
+                <CardTitle className="flex items-center gap-1.5 text-base">
+                  <Globe className="h-4 w-4" />
+                  国・市場別の資産
+                </CardTitle>
+                <CardDescription className="text-xs">
+                  どの国の株にいくら置いているか
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+                  {(data?.markets ?? []).map(m => (
+                    <Link
+                      key={m.key}
+                      href={`/holdings?market=${m.key}`}
+                      className="block rounded-lg border p-3 transition-all hover:bg-accent/50 hover:shadow-sm active:scale-[0.99]"
+                      style={{ borderLeft: `3px solid ${marketHex(m.key)}` }}
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-sm font-medium">{m.label}</span>
+                        <span className="flex items-center gap-0.5 text-xs text-muted-foreground">
+                          <span className="tabular">{m.count} 銘柄</span>
+                          <ChevronRight className="h-3.5 w-3.5" />
+                        </span>
+                      </div>
+                      <div className="mt-2">
+                        <MoneyText
+                          value={m.value}
+                          currency={summary?.baseCurrency}
+                          className="text-xl font-semibold"
+                        />
+                      </div>
+                      <div className="mt-1 flex items-baseline justify-between gap-2">
+                        <span className="flex items-baseline gap-1.5">
+                          <span className="text-xs text-muted-foreground">
+                            {pnlLabel(m.pnl)}
+                          </span>
+                          <PnlText
+                            value={m.pnl}
+                            currency={summary?.baseCurrency}
+                            compact
+                            className="text-xs"
+                          />
+                          <PctText value={m.pnlPct} className="text-xs" />
+                        </span>
+                        <span className="tabular text-xs text-muted-foreground">
+                          全体の {m.pct.toFixed(1)}%
+                        </span>
+                      </div>
+                      {/*
+                        外国株は円換算後の損益に為替変動が混ざる。
+                        現地通貨での損益も出して「株価がいくら動いたか」を分かるようにする。
+                      */}
+                      {m.isForeign ? (
+                        <div className="mt-1.5 border-t pt-1.5 text-xs text-muted-foreground">
+                          {m.currency} ベース{" "}
+                          <span className="tabular font-medium">
+                            {m.localPnl >= 0 ? "+" : "−"}
+                            {Math.abs(Math.round(m.localPnl)).toLocaleString()} {m.currency}
+                          </span>{" "}
+                          <span className="tabular">
+                            ({m.localPnlPct !== null ? `${m.localPnlPct >= 0 ? "+" : ""}${m.localPnlPct.toFixed(2)}%` : "-"})
+                          </span>
+                        </div>
+                      ) : null}
+                      <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-muted">
+                        <div
+                          className="h-full rounded-full transition-all"
+                          style={{
+                            width: `${Math.min(100, m.pct)}%`,
+                            background: marketHex(m.key),
+                          }}
+                        />
+                      </div>
+                    </Link>
+                  ))}
+                </div>
+              </CardContent>
+            </Card>
+          ) : null}
+
           {(data?.brokers ?? []).length > 0 ? (
             <Card>
               <CardHeader className="pb-3">

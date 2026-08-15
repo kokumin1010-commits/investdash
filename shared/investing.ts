@@ -212,6 +212,34 @@ export function marketLabel(market: Market): string {
   return market === "JP" ? "日本株" : market === "US" ? "米国株" : "その他";
 }
 
+/**
+ * 国・市場別の表示色。証券口座の色（オレンジ・赤・青）と混同しないよう、
+ * 意図的に別の色相（緑系・藍系）を選んでいる。
+ */
+export const MARKET_HEX: Record<Market, string> = {
+  JP: "#0f766e",
+  US: "#4338ca",
+  OTHER: "#94a3b8",
+};
+
+export function marketHex(market?: string | null): string {
+  if (!market) return MARKET_HEX.OTHER;
+  return MARKET_HEX[market as Market] ?? MARKET_HEX.OTHER;
+}
+
+/** 市場フィルタの選択肢。null は「すべて」 */
+export const MARKETS: readonly Market[] = ["JP", "US", "OTHER"] as const;
+
+/**
+ * URL クエリの market パラメータを検証して市場コードに変換する。
+ * 不正な値や未指定は null（すべて表示）とする。
+ */
+export function parseMarketFilter(value: string | null | undefined): Market | null {
+  if (!value) return null;
+  const upper = value.toUpperCase();
+  return (MARKETS as readonly string[]).includes(upper) ? (upper as Market) : null;
+}
+
 /** 通貨付きで金額を整形する */
 export function formatMoney(
   value: number | null | undefined,

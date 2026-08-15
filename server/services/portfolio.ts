@@ -14,6 +14,7 @@ import {
 } from "./marketData";
 import { buildNewsQuery, filterNoise, searchNews } from "./news";
 import { groupPositionsBySymbol, type GroupedPosition } from "./groupPositions";
+import { buildMarketSlices, type MarketSlice } from "./marketSlices";
 import { BROKER_LABELS, type Broker } from "../../shared/investing";
 
 /**
@@ -118,6 +119,8 @@ export async function buildPortfolio(userId: number): Promise<{
   summary: PortfolioSummary;
   sectors: SectorSlice[];
   currencies: SectorSlice[];
+  /** 国・市場別の内訳。米国株は為替影響を切り分けられるようにしている */
+  markets: MarketSlice[];
   brokers: BrokerSlice[];
   alerts: ConcentrationAlert[];
 }> {
@@ -330,6 +333,11 @@ export async function buildPortfolio(userId: number): Promise<{
     summary,
     sectors: toSlices(sectorMap),
     currencies: toSlices(currencyMap),
+    /**
+     * 国・市場別の内訳。銘柄単位（groups）を集計対象にすることで、
+     * 同一銘柄を複数口座で持っていても銘柄数を二重に数えない。
+     */
+    markets: buildMarketSlices(groups, totalValueBase),
     brokers: Array.from(brokerMap.entries())
       .map(([key, v]) => ({
         key,
