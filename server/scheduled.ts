@@ -41,12 +41,18 @@ export async function syncPricesHandler(req: Request, res: Response) {
 
   try {
     const userIds = await db.listAllUserIds();
-    const results: { userId: number; updated: number; failed: number }[] = [];
+    // 為替レートも syncPrices の中で更新されるため、結果に含めて確認できるようにする
+    const results: {
+      userId: number;
+      updated: number;
+      failed: number;
+      fxRate?: number | null;
+    }[] = [];
 
     for (const userId of userIds) {
       try {
         const r = await syncPrices(userId);
-        results.push({ userId, updated: r.updated, failed: r.failed.length });
+        results.push({ userId, updated: r.updated, failed: r.failed.length, fxRate: r.fxRate });
       } catch (error) {
         console.error(`[cron:syncPrices] user ${userId} failed:`, error);
         results.push({ userId, updated: 0, failed: -1 });

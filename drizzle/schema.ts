@@ -301,6 +301,13 @@ export const userSettings = mysqlTable("userSettings", {
   baseCurrency: varchar("baseCurrency", { length: 8 }).default("JPY").notNull(),
   /** USD/JPY レート（手動または自動取得） */
   usdJpyRate: decimal("usdJpyRate", { precision: 12, scale: 4 }).default("150.0000").notNull(),
+  /**
+   * 為替レートを株価更新と同時に自動取得するか。
+   * false にすると usdJpyRate の手動設定値を使い続ける。
+   */
+  fxAutoUpdate: boolean("fxAutoUpdate").default(true).notNull(),
+  /** 為替レートを最後に自動取得できた時刻。null なら未取得（手動値のまま） */
+  fxRateUpdatedAt: timestamp("fxRateUpdatedAt"),
   /** 単一銘柄の集中度アラートしきい値（%） */
   concentrationThreshold: int("concentrationThreshold").default(20).notNull(),
   /** 単一セクターの集中度アラートしきい値（%） */

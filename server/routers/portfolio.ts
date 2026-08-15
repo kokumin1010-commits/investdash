@@ -8,6 +8,7 @@ import {
   buildPortfolio,
   enrichProfiles,
   regenerateSignal,
+  syncFxRate,
   syncPrices,
 } from "../services/portfolio";
 import { normalizeSymbol } from "../../shared/investing";
@@ -30,6 +31,7 @@ export const portfolioRouter = router({
         sectorConcentrationThreshold: z.number().int().min(1).max(100).optional(),
         cashBalance: z.number().min(0).optional(),
         autoNewsEnabled: z.boolean().optional(),
+        fxAutoUpdate: z.boolean().optional(),
       })
     )
     .mutation(async ({ ctx, input }) => {
@@ -39,8 +41,27 @@ export const portfolioRouter = router({
         sectorConcentrationThreshold: input.sectorConcentrationThreshold,
         cashBalance: input.cashBalance !== undefined ? String(input.cashBalance) : undefined,
         autoNewsEnabled: input.autoNewsEnabled,
+        fxAutoUpdate: input.fxAutoUpdate,
+        // 手動でレートを入れたときは、自動取得の時刻表示が実態と合わなくなるため消す
+        ...(input.usdJpyRate !== undefined ? { fxRateUpdatedAt: undefined } : {}),
       });
     }),
+
+  /**
+   * 為替レートだけを今すぐ取得し直す。
+   * 株価更新は 27 銘柄以上あると時間がかかるため、レートだけ直したい場合の入口。
+   */
+  syncFxRate: protectedProcedure.mutation(async ({ ctx }) => {
+    const rate = await syncFxRate(ctx.user.id, true);
+    if (rate === null) {
+      throw new TRPCError({
+        code: "INTERNAL_SERVER_ERROR",
+        message:
+          "為替レートを取得できませんでした。時間をおいて再度お試しください。設定画面から手動で入力することもできます。",
+      });
+    }
+    return { rate };
+  }),
 
   /** 銘柄コードから相場情報を照会（追加フォームのプレビュー用） */
   lookup: protectedProcedure

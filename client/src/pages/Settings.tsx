@@ -23,6 +23,7 @@ export default function SettingsPage() {
   const [secThreshold, setSecThreshold] = useState("");
   const [cash, setCash] = useState("");
   const [autoNews, setAutoNews] = useState(true);
+  const [fxAuto, setFxAuto] = useState(true);
   const [dirty, setDirty] = useState(false);
 
   useEffect(() => {
@@ -32,6 +33,7 @@ export default function SettingsPage() {
     setSecThreshold(String(settings.data.sectorConcentrationThreshold));
     setCash(settings.data.cashBalance ?? "0");
     setAutoNews(settings.data.autoNewsEnabled);
+    setFxAuto(settings.data.fxAutoUpdate);
     setDirty(false);
   }, [settings.data]);
 
@@ -50,6 +52,14 @@ export default function SettingsPage() {
       toast.success(
         res.count > 0 ? `${res.count} 銘柄の業種情報を更新しました` : "更新対象はありませんでした"
       );
+    },
+    onError: e => toast.error(e.message),
+  });
+
+  const syncFx = trpc.portfolio.syncFxRate.useMutation({
+    onSuccess: async res => {
+      await utils.portfolio.invalidate();
+      toast.success(`為替レートを更新しました（${res.rate.toFixed(2)} 円/ドル）`);
     },
     onError: e => toast.error(e.message),
   });
@@ -80,10 +90,41 @@ export default function SettingsPage() {
         <CardHeader>
           <CardTitle className="text-base">資産計算</CardTitle>
           <CardDescription className="text-xs">
-            米国株の評価額は、この為替レートで円換算されます。
+            米国株の評価額は、この為替レートで円換算されます。自動取得を有効にすると、株価更新のたびに最新レートへ更新されます。
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
+          <div className="flex items-start justify-between gap-4 rounded-lg border p-3">
+            <div className="space-y-0.5">
+              <Label htmlFor="fx-auto" className="text-sm">
+                為替レートを自動取得する
+              </Label>
+              <p className="text-xs text-muted-foreground">
+                {settings.data?.fxRateUpdatedAt
+                  ? `最終取得: ${new Date(settings.data.fxRateUpdatedAt).toLocaleString("ja-JP")}`
+                  : "まだ自動取得していません（下の入力値を使用中）"}
+              </p>
+            </div>
+            <div className="flex shrink-0 items-center gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                disabled={syncFx.isPending}
+                onClick={() => syncFx.mutate()}
+              >
+                {syncFx.isPending ? "取得中…" : "今すぐ取得"}
+              </Button>
+              <Switch
+                id="fx-auto"
+                checked={fxAuto}
+                onCheckedChange={v => {
+                  setFxAuto(v);
+                  mark();
+                }}
+              />
+            </div>
+          </div>
           <div className="grid gap-4 sm:grid-cols-2">
             <div className="space-y-2">
               <Label htmlFor="usdjpy">USD/JPY レート</Label>
@@ -98,6 +139,11 @@ export default function SettingsPage() {
                 }}
                 className="tabular"
               />
+              {fxAuto ? (
+                <p className="text-xs text-muted-foreground">
+                  自動取得が有効なため、株価更新のたびに上書きされます
+                </p>
+              ) : null}
             </div>
             <div className="space-y-2">
               <Label htmlFor="cash-setting">現金残高（JPY）</Label>
@@ -245,12 +291,15 @@ export default function SettingsPage() {
           disabled={update.isPending || !dirty}
           onClick={() =>
             update.mutate({
-              usdJpyRate: Number(usdJpy) > 0 ? Number(usdJpy) : undefined,
+              // 自動取得が有効なときに手動値を送ると fxRateUpdatedAt が消えて
+              // 「まだ自動取得していません」と表示されてしまうため、手動時のみ送る
+              usdJpyRate: !fxAuto && Number(usdJpy) > 0 ? Number(usdJpy) : undefined,
               concentrationThreshold: Number(posThreshold) > 0 ? Number(posThreshold) : undefined,
               sectorConcentrationThreshold:
                 Number(secThreshold) > 0 ? Number(secThreshold) : undefined,
               cashBalance: cash === "" ? undefined : Number(cash),
               autoNewsEnabled: autoNews,
+              fxAutoUpdate: fxAuto,
             })
           }
         >

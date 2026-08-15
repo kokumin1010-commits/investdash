@@ -167,6 +167,8 @@ export async function updateSettings(
     autoNewsEnabled: boolean;
     lastPriceSyncAt: Date;
     lastNewsSyncAt: Date;
+    fxAutoUpdate: boolean;
+    fxRateUpdatedAt: Date;
   }>
 ) {
   const db = await requireDb();

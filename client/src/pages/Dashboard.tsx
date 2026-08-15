@@ -53,10 +53,12 @@ export default function Dashboard() {
   const syncPrices = trpc.portfolio.syncPrices.useMutation({
     onSuccess: async res => {
       await utils.portfolio.invalidate();
+      // 為替レートも同時に更新しているので、更新できたときは併せて知らせる
+      const fx = res.fxRate !== null ? `／為替 ${res.fxRate.toFixed(2)} 円/ドル` : "";
       toast.success(
         res.failed.length > 0
-          ? `${res.updated} 銘柄を更新しました（${res.failed.length} 銘柄は取得できませんでした）`
-          : `${res.updated} 銘柄の株価を更新しました`
+          ? `${res.updated} 銘柄を更新しました（${res.failed.length} 銘柄は取得できませんでした）${fx}`
+          : `${res.updated} 銘柄の株価を更新しました${fx}`
       );
     },
     onError: e => toast.error(e.message),

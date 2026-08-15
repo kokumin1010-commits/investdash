@@ -6,7 +6,12 @@ import {
   generateWatchSignal,
   type SignalContext,
 } from "./analysis";
-import { fetchCompanyProfile, fetchPriceHistory, fetchQuotes } from "./marketData";
+import {
+  fetchCompanyProfile,
+  fetchPriceHistory,
+  fetchQuotes,
+  fetchUsdJpyRate,
+} from "./marketData";
 import { buildNewsQuery, filterNoise, searchNews } from "./news";
 import { groupPositionsBySymbol, type GroupedPosition } from "./groupPositions";
 import { BROKER_LABELS, type Broker } from "../../shared/investing";
@@ -79,6 +84,10 @@ export type PortfolioSummary = {
   totalAssets: number;
   baseCurrency: string;
   usdJpyRate: number;
+  /** 為替レートを自動取得しているか。false なら手動設定値 */
+  fxAutoUpdate: boolean;
+  /** 為替レートを最後に自動取得できた時刻。null なら手動値のまま */
+  fxRateUpdatedAt: Date | null;
   lastPriceSyncAt: Date | null;
   lastNewsSyncAt: Date | null;
   /** 価格未取得の銘柄数 */
@@ -238,6 +247,8 @@ export async function buildPortfolio(userId: number): Promise<{
     totalAssets: totalValueBase + cashBalance,
     baseCurrency: settings.baseCurrency,
     usdJpyRate: usdJpy,
+    fxAutoUpdate: settings.fxAutoUpdate,
+    fxRateUpdatedAt: settings.fxRateUpdatedAt,
     lastPriceSyncAt: settings.lastPriceSyncAt,
     lastNewsSyncAt: settings.lastNewsSyncAt,
     missingPriceCount: positions.filter(p => p.currentPrice === null).length,
@@ -341,8 +352,21 @@ export async function buildPortfolio(userId: number): Promise<{
 export async function syncPrices(userId: number): Promise<{
   updated: number;
   failed: string[];
+  fxRate: number | null;
 }> {
-  const [hs, ws] = await Promise.all([db.listHoldings(userId), db.listWatchlist(userId)]);
+  const [hs, ws, settings] = await Promise.all([
+    db.listHoldings(userId),
+    db.listWatchlist(userId),
+    db.getSettings(userId),
+  ]);
+
+  /**
+   * 為替レートは株価と同じタイミングで更新する。
+   * 手動で固定したい場合に備えて fxAutoUpdate で切れるようにし、
+   * 取得に失敗しても既存の設定値を維持する（0 で上書きして評価額を壊さない）。
+   */
+  const fxRate = await syncFxRate(userId, settings?.fxAutoUpdate ?? true);
+
   /**
    * 同一銘柄を複数の証券口座で保有している場合、株価は 1 回だけ取得すればよい。
    * 重複を排除して外部 API への無駄なリクエストを避ける。
@@ -351,7 +375,7 @@ export async function syncPrices(userId: number): Promise<{
   const symbols = Array.from(new Set([...hs.map(h => h.symbol), ...ws.map(w => w.symbol)]));
   if (symbols.length === 0) {
     await db.updateSettings(userId, { lastPriceSyncAt: new Date() });
-    return { updated: 0, failed: [] };
+    return { updated: 0, failed: [], fxRate };
   }
 
   const quotes = await fetchQuotes(symbols);
@@ -408,7 +432,37 @@ export async function syncPrices(userId: number): Promise<{
     console.warn("[portfolio] snapshot failed:", error);
   }
 
-  return { updated, failed: Array.from(new Set(failed)) };
+  return { updated, failed: Array.from(new Set(failed)), fxRate };
+}
+
+/**
+ * USD/JPY レートを取得して設定に保存する。
+ *
+ * 失敗時は既存の設定値を保持したまま null を返す。為替レートは評価額の
+ * 計算に直接使われるため、取得できなかったときに 0 や既定値で上書きすると
+ * 米国株の評価額が一気に壊れる。そのため「更新しない」を安全側の挙動とする。
+ *
+ * @param enabled false の場合は取得せず、手動設定値をそのまま使う
+ */
+export async function syncFxRate(userId: number, enabled = true): Promise<number | null> {
+  if (!enabled) return null;
+
+  try {
+    const rate = await fetchUsdJpyRate();
+    // 明らかに異常な値は採用しない（API 仕様変更やパース失敗の検知）
+    if (rate === null || !Number.isFinite(rate) || rate < 50 || rate > 500) {
+      console.warn(`[portfolio] 為替レートが想定範囲外のため更新をスキップ: ${rate}`);
+      return null;
+    }
+    await db.updateSettings(userId, {
+      usdJpyRate: rate.toFixed(4),
+      fxRateUpdatedAt: new Date(),
+    });
+    return rate;
+  } catch (error) {
+    console.warn("[portfolio] 為替レートの取得に失敗:", error);
+    return null;
+  }
 }
 
 /**
