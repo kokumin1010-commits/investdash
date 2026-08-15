@@ -20,6 +20,7 @@ import {
   AlertTriangle,
   ArrowUpRight,
   Brain,
+  Landmark,
   RefreshCw,
   ScanLine,
   TrendingUp,
@@ -75,13 +76,22 @@ export default function Dashboard() {
   const regenAll = trpc.portfolio.regenerateAllSignals.useMutation({
     onSuccess: async res => {
       await utils.portfolio.invalidate();
+      // 利用枠切れで途中打ち切りになった場合は、成功件数だけ伝えると誤解を招く
+      if (res.quotaExhausted) {
+        toast.warning(`${res.ok} 銘柄まで生成しました`, {
+          description:
+            "AI の利用枠を使い切ったため中断しました。時間をおいて再実行すると残りの銘柄も生成されます。",
+          duration: 8000,
+        });
+        return;
+      }
       toast.success(
         res.failed.length > 0
           ? `${res.ok} 銘柄のシグナルを生成しました（${res.failed.length} 銘柄は失敗）`
           : `${res.ok} 銘柄のシグナルを生成しました`
       );
     },
-    onError: e => toast.error(e.message),
+    onError: e => toast.error("AI分析を実行できませんでした", { description: e.message, duration: 8000 }),
     onSettled: () => setBusy(null),
   });
 
@@ -267,6 +277,69 @@ export default function Dashboard() {
               </CardContent>
             </Card>
           </div>
+
+          {/* 証券口座別の内訳。開いた瞬間に「どこにいくら置いているか」が分かるよう上部に配置する */}
+          {(data?.brokers ?? []).length > 0 ? (
+            <Card>
+              <CardHeader className="pb-3">
+                <CardTitle className="flex items-center gap-1.5 text-base">
+                  <Landmark className="h-4 w-4" />
+                  証券口座別の資産
+                </CardTitle>
+                <CardDescription className="text-xs">
+                  どのプラットフォームにいくら置いているか
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+                  {(data?.brokers ?? []).map(b => (
+                    <div
+                      key={b.key}
+                      className="rounded-lg border p-3"
+                      style={{ borderLeft: `3px solid ${brokerHex(b.key)}` }}
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <BrokerBadge broker={b.key} />
+                        <span className="tabular text-xs text-muted-foreground">
+                          {b.count} 銘柄
+                        </span>
+                      </div>
+                      <div className="mt-2">
+                        <MoneyText
+                          value={b.value}
+                          currency={summary?.baseCurrency}
+                          className="text-xl font-semibold"
+                        />
+                      </div>
+                      <div className="mt-1 flex items-baseline justify-between gap-2">
+                        <span className="flex items-baseline gap-1.5">
+                          <PnlText
+                            value={b.pnl}
+                            currency={summary?.baseCurrency}
+                            compact
+                            className="text-xs"
+                          />
+                          <PctText value={b.pnlPct} className="text-xs" />
+                        </span>
+                        <span className="tabular text-xs text-muted-foreground">
+                          全体の {b.pct.toFixed(1)}%
+                        </span>
+                      </div>
+                      <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-muted">
+                        <div
+                          className="h-full rounded-full transition-all"
+                          style={{
+                            width: `${Math.min(100, b.pct)}%`,
+                            background: brokerHex(b.key),
+                          }}
+                        />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </CardContent>
+            </Card>
+          ) : null}
 
           {/* アラート */}
           {(data?.alerts.length ?? 0) > 0 ? (
@@ -497,57 +570,6 @@ export default function Dashboard() {
 
             {/* 通貨別分布 + 構成比上位 */}
             <div className="space-y-4">
-              {/* 証券口座別の内訳。どのプラットフォームにいくら置いているかを把握する */}
-              <Card>
-                <CardHeader className="pb-3">
-                  <CardTitle className="text-base">証券口座別</CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-3">
-                  {(data?.brokers ?? []).map(b => (
-                    <div key={b.key} className="space-y-1.5">
-                      <div className="flex items-center justify-between gap-2">
-                        <BrokerBadge broker={b.key} />
-                        <span className="tabular text-xs text-muted-foreground">
-                          {b.pct.toFixed(1)}% / {b.count}銘柄
-                        </span>
-                      </div>
-                      <div className="flex items-baseline justify-between gap-2">
-                        <MoneyText
-                          value={b.value}
-                          currency={summary?.baseCurrency}
-                          className="text-sm font-semibold"
-                        />
-                        <div className="text-right">
-                          <PnlText
-                            value={b.pnl}
-                            currency={summary?.baseCurrency}
-                            compact
-                            className="text-xs"
-                          />
-                          <div className="text-[10px]">
-                            <PctText value={b.pnlPct} />
-                          </div>
-                        </div>
-                      </div>
-                      <div className="h-1.5 overflow-hidden rounded-full bg-muted">
-                        <div
-                          className="h-full rounded-full transition-all"
-                          style={{
-                            width: `${Math.min(100, b.pct)}%`,
-                            background: brokerHex(b.key),
-                          }}
-                        />
-                      </div>
-                    </div>
-                  ))}
-                  {(data?.brokers ?? []).length === 0 ? (
-                    <p className="py-2 text-xs text-muted-foreground">
-                      保有銘柄がありません
-                    </p>
-                  ) : null}
-                </CardContent>
-              </Card>
-
               <Card>
                 <CardHeader className="pb-3">
                   <CardTitle className="text-base">通貨別分布</CardTitle>

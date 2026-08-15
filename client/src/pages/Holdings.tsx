@@ -2,6 +2,7 @@ import { DisclaimerNote } from "@/components/investing/DisclaimerNote";
 import { BrokerBadge } from "@/components/investing/BrokerBadge";
 import { MoneyText, PctText, PnlText } from "@/components/investing/Figures";
 import { SignalBadge, SignalPlaceholder } from "@/components/investing/SignalBadge";
+import { SignalGuide } from "@/components/investing/SignalGuide";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -84,9 +85,13 @@ export default function Holdings() {
   const regenSignal = trpc.portfolio.regenerateSignal.useMutation({
     onSuccess: async res => {
       await utils.portfolio.invalidate();
-      toast.success(`シグナルを生成しました: ${res.action}`);
+      toast.success(`シグナル: ${res.action}`, {
+        description: res.rationale ? res.rationale.slice(0, 120) : undefined,
+        duration: 6000,
+      });
     },
-    onError: e => toast.error(e.message),
+    onError: e =>
+      toast.error("AI分析を実行できませんでした", { description: e.message, duration: 8000 }),
     onSettled: () => setSignalBusyId(null),
   });
 
@@ -186,6 +191,9 @@ export default function Holdings() {
           </Button>
         </div>
       </header>
+
+      {/* シグナルの読み方。用語の説明がないと機能が伝わらないため一覧の手前に置く */}
+      <SignalGuide />
 
       {/* フィルタ */}
       <div className="flex flex-wrap items-center gap-2">
@@ -362,9 +370,9 @@ export default function Holdings() {
                       }}
                     >
                       <Brain
-                        className={`mr-1 h-3.5 w-3.5 ${signalBusyId === p.id ? "animate-pulse" : ""}`}
+                        className={`mr-1 h-3.5 w-3.5 ${signalBusyId === p.id ? "animate-spin" : ""}`}
                       />
-                      シグナル
+                      {signalBusyId === p.id ? "分析中…" : "AI分析"}
                     </Button>
                     <Button
                       variant="ghost"
@@ -523,11 +531,13 @@ export default function Holdings() {
                               }}
                             >
                               <Brain
-                                className={`h-3.5 w-3.5 ${signalBusyId === p.id ? "animate-pulse" : ""}`}
+                                className={`h-3.5 w-3.5 ${signalBusyId === p.id ? "animate-spin" : ""}`}
                               />
                             </Button>
                           </TooltipTrigger>
-                          <TooltipContent>AI シグナルを再生成</TooltipContent>
+                          <TooltipContent>
+                            {signalBusyId === p.id ? "分析中…" : "AI分析でシグナルを生成"}
+                          </TooltipContent>
                         </Tooltip>
                         <Tooltip>
                           <TooltipTrigger asChild>

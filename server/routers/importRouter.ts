@@ -5,6 +5,7 @@ import { protectedProcedure, router } from "../_core/trpc";
 import { storagePut } from "../storage";
 import { extractPositions, type ParsedPosition } from "../services/ocr";
 import { BROKER_FORMAT_OPTIONS, guessFormatFromBrokerName } from "../services/brokerFormats";
+import { toFriendlyAiError } from "../services/aiErrors";
 import { fetchCompanyProfile, fetchQuote } from "../services/marketData";
 import { brokerFromFormatId, normalizeSymbol } from "../../shared/investing";
 
@@ -159,17 +160,16 @@ export const importRouter = router({
         const message = error instanceof Error ? error.message : "読み取りに失敗しました";
         await patchJob({ status: "FAILED", errorMessage: message });
 
-        // AI の利用枠を使い切った場合は、原因が伝わる文言に置き換える。
-        // 生のエラー文（412 Precondition Failed ...）ではユーザーが対処を判断できない。
-        if (/usage exhausted|412/.test(message)) {
+        // 生のエラー文（412 Precondition Failed ...）ではユーザーが対処を判断できないため変換する
+        const friendly = toFriendlyAiError(error, message);
+        if (friendly.code === "TOO_MANY_REQUESTS") {
           throw new TRPCError({
             code: "TOO_MANY_REQUESTS",
             message:
-              "AI の利用枠を使い切ったため読み取りできませんでした。しばらく時間をおいてから再度お試しください。急ぎの場合は保有銘柄ページの「銘柄を追加」から手入力できます。",
+              "AI の利用枠を使い切ったため読み取りできませんでした。時間をおいてから再度お試しください。急ぎの場合は保有銘柄ページの「銘柄を追加」から手入力できます。",
           });
         }
-
-        throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message });
+        throw friendly;
       }
     }),
 

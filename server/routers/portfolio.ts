@@ -3,6 +3,7 @@ import { z } from "zod";
 import * as db from "../db";
 import { protectedProcedure, router } from "../_core/trpc";
 import { fetchCompanyProfile, fetchPriceHistory, fetchQuote } from "../services/marketData";
+import { isQuotaError, toFriendlyAiError } from "../services/aiErrors";
 import {
   buildPortfolio,
   enrichProfiles,
@@ -262,7 +263,12 @@ export const portfolioRouter = router({
     .mutation(async ({ ctx, input }) => {
       const holding = await db.getHolding(ctx.user.id, input.id);
       if (!holding) throw new TRPCError({ code: "NOT_FOUND", message: "銘柄が見つかりません" });
-      return regenerateSignal(ctx.user.id, holding);
+      try {
+        return await regenerateSignal(ctx.user.id, holding);
+      } catch (error) {
+        // 生の LLM エラーを返すと「押しても何も起きない」と受け取られてしまうため変換する
+        throw toFriendlyAiError(error, "シグナルの生成に失敗しました");
+      }
     }),
 
   /** 全銘柄のシグナルを順次再生成 */
@@ -270,6 +276,7 @@ export const portfolioRouter = router({
     const hs = await db.listHoldings(ctx.user.id);
     let ok = 0;
     const failed: string[] = [];
+    let quotaExhausted = false;
     for (const h of hs) {
       try {
         await regenerateSignal(ctx.user.id, h);
@@ -277,9 +284,24 @@ export const portfolioRouter = router({
       } catch (error) {
         console.warn(`[portfolio] signal failed for ${h.symbol}:`, error);
         failed.push(h.symbol);
+        // 利用枠切れは以降すべて失敗するため、残りを試さず即座に打ち切る。
+        // 27 銘柄分の無駄な待ち時間をユーザーに負わせないための判断。
+        if (isQuotaError(error)) {
+          quotaExhausted = true;
+          break;
+        }
       }
     }
-    return { ok, failed } as const;
+
+    if (quotaExhausted && ok === 0) {
+      throw new TRPCError({
+        code: "TOO_MANY_REQUESTS",
+        message:
+          "AI の利用枠を使い切ったため分析できませんでした。時間をおいてから再度お試しください（通常は数時間で回復します）。",
+      });
+    }
+
+    return { ok, failed, quotaExhausted } as const;
   }),
 
   snapshots: protectedProcedure.query(async ({ ctx }) => db.listSnapshots(ctx.user.id)),
