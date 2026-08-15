@@ -57,7 +57,7 @@ import {
   Search,
   Trash2,
 } from "lucide-react";
-import { useMemo, useState } from "react";
+import { Fragment, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { Link } from "wouter";
 
@@ -462,7 +462,8 @@ export default function Holdings() {
               </TableHeader>
               <TableBody>
                 {rows.map(p => (
-                  <TableRow key={p.symbol} className="group">
+                  <Fragment key={p.symbol}>
+                  <TableRow className={`group ${p.isSplit ? "border-b-0" : ""}`}>
                     <TableCell>
                       <Link href={`/holdings/${p.entries[0].id}`} className="block space-y-0.5">
                         <div className="flex items-center gap-1.5">
@@ -513,27 +514,9 @@ export default function Holdings() {
                           ))}
                         </div>
                         {p.isSplit ? (
-                          <Tooltip>
-                            <TooltipTrigger asChild>
-                              <p className="cursor-help text-[10px] text-muted-foreground">
-                                {p.entries.length} 口座の合計
-                              </p>
-                            </TooltipTrigger>
-                            <TooltipContent>
-                              <div className="space-y-1 text-xs">
-                                {p.entries.map(e => (
-                                  <div key={e.id} className="flex items-center gap-2">
-                                    <span>{BROKER_LABELS[e.broker]}</span>
-                                    <span className="tabular">
-                                      {formatNumber(e.quantity, 0)}株 @{" "}
-                                      {formatNumber(e.avgCost, 2)}
-                                    </span>
-                                    <PctText value={e.pnlPct} />
-                                  </div>
-                                ))}
-                              </div>
-                            </TooltipContent>
-                          </Tooltip>
+                          <p className="text-[10px] text-muted-foreground">
+                            {p.entries.length} 口座の合計
+                          </p>
                         ) : null}
                       </div>
                     </TableCell>
@@ -615,7 +598,8 @@ export default function Holdings() {
                           </TooltipContent>
                         </Tooltip>
                         {/* 複数口座の銘柄はどの口座を編集するか選ぶ必要があるため個別に並べる */}
-                        {p.entries.map(e => (
+                        {/* 複数口座の場合は内訳行に編集・削除を出すので、ここでは 1 口座のときだけ */}
+                        {(p.isSplit ? [] : p.entries).map(e => (
                           <Tooltip key={`edit-${e.id}`}>
                             <TooltipTrigger asChild>
                               <Button
@@ -634,7 +618,7 @@ export default function Holdings() {
                             </TooltipContent>
                           </Tooltip>
                         ))}
-                        {p.entries.map(e => (
+                        {(p.isSplit ? [] : p.entries).map(e => (
                           <Tooltip key={`del-${e.id}`}>
                             <TooltipTrigger asChild>
                               <Button
@@ -654,6 +638,79 @@ export default function Holdings() {
                       </div>
                     </TableCell>
                   </TableRow>
+                  {/**
+                   * 複数口座で保有している銘柄は、口座ごとの明細を合計行の直下に
+                   * そのまま並べる。以前はツールチップだったが、マウスを乗せないと
+                   * 見えずスマホでは開けないため常時表示にした。
+                   */}
+                  {p.isSplit
+                    ? p.entries.map((e, i) => (
+                        <TableRow
+                          key={`sub-${e.id}`}
+                          className={`bg-muted/25 hover:bg-muted/40 ${
+                            i === p.entries.length - 1 ? "" : "border-b-0"
+                          }`}
+                          data-testid="desktop-breakdown-row"
+                        >
+                          <TableCell className="py-1.5">
+                            <span className="pl-4 text-xs text-muted-foreground">
+                              {i === p.entries.length - 1 ? "└" : "├"} 内訳
+                            </span>
+                          </TableCell>
+                          <TableCell className="py-1.5">
+                            <BrokerBadge broker={e.broker} />
+                          </TableCell>
+                          <TableCell className="tabular py-1.5 text-right text-xs">
+                            {formatNumber(e.quantity, 0)}
+                          </TableCell>
+                          <TableCell className="py-1.5 text-right text-xs">
+                            <MoneyText value={e.avgCost} currency={e.currency} />
+                          </TableCell>
+                          {/* 現在値・前日比は口座によらず同じなので繰り返さない */}
+                          <TableCell className="py-1.5" />
+                          <TableCell className="py-1.5" />
+                          <TableCell className="py-1.5 text-right text-xs">
+                            <MoneyText value={e.marketValue} currency={e.currency} compact />
+                          </TableCell>
+                          <TableCell className="py-1.5 text-right">
+                            <div className="space-y-0.5">
+                              <PnlText
+                                value={e.pnl}
+                                currency={e.currency}
+                                compact
+                                className="text-xs"
+                              />
+                              <div className="text-[10px]">
+                                <PctText value={e.pnlPct} />
+                              </div>
+                            </div>
+                          </TableCell>
+                          <TableCell className="py-1.5" />
+                          <TableCell className="py-1.5" />
+                          <TableCell className="py-1.5">
+                            <div className="flex items-center justify-end gap-0.5">
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="h-7 px-2 text-xs"
+                                onClick={() => setEditTarget(e.id)}
+                              >
+                                編集
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="h-7 px-2 text-xs text-muted-foreground hover:text-destructive"
+                                onClick={() => setDeleteTarget({ id: e.id, name: p.name })}
+                              >
+                                削除
+                              </Button>
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                      ))
+                    : null}
+                  </Fragment>
                 ))}
                 {rows.length === 0 ? (
                   <TableRow>

@@ -34,7 +34,9 @@ export function BrokerBreakdown({
 
   return (
     <div className="mt-2 space-y-1.5 rounded-md bg-muted/40 p-2">
-      <p className="text-[10px] font-medium text-muted-foreground">口座別の内訳</p>
+      <p className="text-[10px] font-medium text-muted-foreground">
+        口座別の内訳（口座ごとの評価損益）
+      </p>
       {entries.map(e => (
         <div
           key={e.id}

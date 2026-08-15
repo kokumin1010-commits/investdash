@@ -17,6 +17,7 @@ import {
   sectorJa,
   type SignalAction,
 } from "@shared/investing";
+import { pnlLabel } from "@shared/pnlLabel";
 import {
   AlertTriangle,
   ArrowUpRight,
@@ -254,11 +255,34 @@ export default function Dashboard() {
                 />
               }
               sub={
-                <span className="flex items-center gap-1.5">
-                  <PctText value={summary?.totalPnlPct ?? null} />
-                  <span className="text-muted-foreground">
-                    / 取得原価 {formatMoney(summary?.totalCostBase, summary?.baseCurrency)}
+                <span className="block space-y-1.5">
+                  <span className="flex items-center gap-1.5">
+                    <PctText value={summary?.totalPnlPct ?? null} />
+                    <span className="text-muted-foreground">
+                      / 取得原価 {formatMoney(summary?.totalCostBase, summary?.baseCurrency)}
+                    </span>
                   </span>
+                  {/**
+                   * 口座が 2 つ以上ある場合は「どの口座でいくら儲かっているか」を
+                   * ここに明示する。口座別カードは略記なので、こちらは正確な金額を出す。
+                   */}
+                  {(data?.brokers ?? []).length > 1 ? (
+                    <span className="block space-y-1 border-t pt-1.5">
+                      {(data?.brokers ?? []).map(b => (
+                        <span key={b.key} className="flex items-center justify-between gap-2">
+                          <BrokerBadge broker={b.key} short />
+                          <span className="flex items-baseline gap-1.5">
+                            <PnlText
+                              value={b.pnl}
+                              currency={summary?.baseCurrency}
+                              className="text-xs font-medium"
+                            />
+                            <PctText value={b.pnlPct} className="text-[10px]" />
+                          </span>
+                        </span>
+                      ))}
+                    </span>
+                  ) : null}
                 </span>
               }
               icon={<TrendingUp className="h-4 w-4" />}
@@ -549,7 +573,8 @@ export default function Dashboard() {
               <CardHeader>
                 <CardTitle className="text-base">注意が必要な銘柄</CardTitle>
                 <CardDescription className="text-xs">
-                  EXIT / REDUCE / WATCH シグナルが出ている銘柄
+                  EXIT / REDUCE / WATCH シグナルが出ている銘柄。
+                  含み益が大きくても、決算悪化などで見直しが必要な場合はここに入ります。
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-2">
@@ -578,8 +603,17 @@ export default function Dashboard() {
                           </p>
                         </div>
                         <div className="shrink-0 text-right">
+                          {/**
+                           * 数字だけ並べると何の % か分からないためラベルを添える。
+                           * 含み益が大きい銘柄が WATCH 枠に入ることもあるので、
+                           * 「含み益」と明示して矛盾に見えないようにする。
+                           */}
+                          <p className="text-[10px] text-muted-foreground">
+                            {pnlLabel(p.pnlPct)}
+                          </p>
                           <PctText value={p.pnlPct} className="text-sm" />
-                          <p className="tabular mt-0.5 text-xs text-muted-foreground">
+                          <p className="mt-1 text-[10px] text-muted-foreground">構成比</p>
+                          <p className="tabular text-xs text-muted-foreground">
                             {p.weightPct !== null ? `${p.weightPct.toFixed(1)}%` : "—"}
                           </p>
                         </div>
@@ -622,6 +656,9 @@ export default function Dashboard() {
               <Card>
                 <CardHeader className="pb-3">
                   <CardTitle className="text-base">構成比上位</CardTitle>
+                  <CardDescription className="text-xs">
+                    総資産に占める割合が大きい銘柄
+                  </CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-2">
                   {/* 構成比は口座をまたいだ合計で見る */}
