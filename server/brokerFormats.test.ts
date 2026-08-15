@@ -40,14 +40,35 @@ describe("楽天証券 iSPEED のレイアウト定義", () => {
 
   it("検証済みなので layoutPrompt を持つ", () => {
     expect(prompt).not.toBe("");
-    expect(getBrokerFormat("rakuten_ispeed").currency).toBe("JPY");
+    // 日本株と米国株の両方を扱うため、通貨は画面の列見出しから判定する。
+    // ここを "JPY" 固定に戻すと米国株がドルとして扱われなくなる。
+    expect(getBrokerFormat("rakuten_ispeed").currency).toBeNull();
+    expect(getBrokerFormat("rakuten_ispeed").market).toBe("MIXED");
   });
 
-  it("横スクロールで変わる 3 つのビューを説明している", () => {
-    // A=取得単価 / B=評価額 / C=指標。どのビューかで抽出できる項目が変わる
+  it("横スクロールで変わる 4 つのビューを説明している", () => {
+    // A=取得単価 / B=評価額 / C=指標 / D=米国株。どのビューかで抽出できる項目が変わる
     expect(prompt).toContain("平均取得価額(円)");
     expect(prompt).toContain("時価評価額(円)");
     expect(prompt).toContain("PER");
+    expect(prompt).toContain("平均取得価額(ドル)");
+  });
+
+  it("日本株画面と米国株画面を列見出しで判別する指示がある", () => {
+    // 判定を誤ると円とドルが混ざり評価額が約 150 倍ずれる
+    expect(prompt).toContain("ティッカー");
+    expect(prompt).toContain("150 倍");
+  });
+
+  it("米国株の省略名をティッカーから補完する対応表がある", () => {
+    // 「アドバンス…」「バンガー…」のように省略されるため対応表が必要
+    expect(prompt).toContain("AAPL→アップル");
+    expect(prompt).toContain("VOO→バンガード");
+  });
+
+  it("同一ティッカーが 2 行に分かれる場合を説明している", () => {
+    // PYPL が 2 建玉で表示された実例。片方を捨てると株数が欠落する
+    expect(prompt).toContain("同じティッカーが 2 行");
   });
 
   it("1 銘柄が 2 行構成であることを明示している", () => {
