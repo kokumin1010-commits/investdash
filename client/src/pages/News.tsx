@@ -12,6 +12,7 @@ import {
 } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { trpc } from "@/lib/trpc";
+import { useBatchRun } from "@/hooks/useBatchRun";
 import { SENTIMENT_STYLES, impactLabel, sentimentLabel, type Sentiment } from "@shared/investing";
 import { ExternalLink, Newspaper, RefreshCw, Search } from "lucide-react";
 import { useMemo, useState } from "react";
@@ -27,16 +28,21 @@ export default function News() {
   const [symbolFilter, setSymbolFilter] = useState("ALL");
   const [minImpact, setMinImpact] = useState("0");
 
-  const sync = trpc.news.syncAll.useMutation({
-    onSuccess: async res => {
+  // 本番の 180 秒制限を超えるため、nextOffset を辿って小分けに実行する
+  const syncBatch = trpc.news.syncAll.useMutation();
+  const syncRun = useBatchRun({
+    runBatch: offset => syncBatch.mutateAsync({ offset, batchSize: 4 }),
+    onDone: async results => {
       await utils.invalidate();
+      const fetched = results.reduce((a, r) => a + r.fetched, 0);
+      const analyzed = results.reduce((a, r) => a + r.analyzed, 0);
       toast.success(
-        res.fetched > 0
-          ? `${res.fetched} 件を取得し、${res.analyzed} 件を分析しました`
+        fetched > 0
+          ? `${fetched} 件を取得し、${analyzed} 件を分析しました`
           : "新しいニュースはありませんでした"
       );
     },
-    onError: e => toast.error(e.message),
+    onError: e => toast.error(e instanceof Error ? e.message : "ニュースを取得できませんでした"),
   });
 
   const items = news.data ?? [];
@@ -102,9 +108,17 @@ export default function News() {
               : ""}
           </p>
         </div>
-        <Button size="sm" disabled={sync.isPending} onClick={() => sync.mutate()}>
-          <RefreshCw className={`mr-1.5 h-3.5 w-3.5 ${sync.isPending ? "animate-spin" : ""}`} />
-          ニュースを取得・分析
+        <Button
+          size="sm"
+          disabled={syncRun.progress.running}
+          onClick={() => void syncRun.start()}
+        >
+          <RefreshCw
+            className={`mr-1.5 h-3.5 w-3.5 ${syncRun.progress.running ? "animate-spin" : ""}`}
+          />
+          {syncRun.progress.running
+            ? `取得中 ${syncRun.progress.processed}/${syncRun.progress.total || "…"} 銘柄`
+            : "ニュースを取得・分析"}
         </Button>
       </header>
 
@@ -176,9 +190,13 @@ export default function News() {
                 保有銘柄とウォッチリスト銘柄に関するニュースを取得し、AI が内容と影響度を判定します。
               </p>
             </div>
-            <Button disabled={sync.isPending} onClick={() => sync.mutate()}>
-              <RefreshCw className={`mr-1.5 h-4 w-4 ${sync.isPending ? "animate-spin" : ""}`} />
-              ニュースを取得
+            <Button disabled={syncRun.progress.running} onClick={() => void syncRun.start()}>
+              <RefreshCw
+                className={`mr-1.5 h-4 w-4 ${syncRun.progress.running ? "animate-spin" : ""}`}
+              />
+              {syncRun.progress.running
+                ? `取得中 ${syncRun.progress.processed}/${syncRun.progress.total || "…"} 銘柄`
+                : "ニュースを取得"}
             </Button>
           </CardContent>
         </Card>
@@ -297,4 +315,3 @@ function StatChip({ label, value, tone }: { label: string; value: number; tone: 
     </Card>
   );
 }
-

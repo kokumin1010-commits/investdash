@@ -271,38 +271,64 @@ export const portfolioRouter = router({
       }
     }),
 
-  /** 全銘柄のシグナルを順次再生成 */
-  regenerateAllSignals: protectedProcedure.mutation(async ({ ctx }) => {
-    const hs = await db.listHoldings(ctx.user.id);
-    let ok = 0;
-    const failed: string[] = [];
-    let quotaExhausted = false;
-    for (const h of hs) {
-      try {
-        await regenerateSignal(ctx.user.id, h);
-        ok += 1;
-      } catch (error) {
-        console.warn(`[portfolio] signal failed for ${h.symbol}:`, error);
-        failed.push(h.symbol);
-        // 利用枠切れは以降すべて失敗するため、残りを試さず即座に打ち切る。
-        // 27 銘柄分の無駄な待ち時間をユーザーに負わせないための判断。
-        if (isQuotaError(error)) {
-          quotaExhausted = true;
-          break;
+  /**
+   * 全銘柄のシグナルを再生成する（1 リクエスト = 1 バッチ）。
+   *
+   * 本番（Autoscale / Cloud Run）のリクエスト上限は 180 秒。1 銘柄あたり
+   * 10〜16 秒かかるため 27 銘柄を 1 リクエストで処理すると 4〜5 分かかり必ず切断される。
+   * そこで `offset` から `batchSize` 件だけ処理して `nextOffset` を返し、
+   * クライアントが完了まで呼び出しを繰り返す方式にする。
+   *
+   * batchSize=6 なら最悪 6×16=96 秒で、180 秒に十分収まる。
+   */
+  regenerateAllSignals: protectedProcedure
+    .input(
+      z
+        .object({
+          offset: z.number().int().min(0).default(0),
+          batchSize: z.number().int().min(1).max(10).default(6),
+        })
+        .default({ offset: 0, batchSize: 6 })
+    )
+    .mutation(async ({ ctx, input }) => {
+      const hs = await db.listHoldings(ctx.user.id);
+      const total = hs.length;
+      const batch = hs.slice(input.offset, input.offset + input.batchSize);
+
+      let ok = 0;
+      const failed: string[] = [];
+      let quotaExhausted = false;
+
+      for (const h of batch) {
+        try {
+          await regenerateSignal(ctx.user.id, h);
+          ok += 1;
+        } catch (error) {
+          console.warn(`[portfolio] signal failed for ${h.symbol}:`, error);
+          failed.push(h.symbol);
+          // 利用枠切れは以降すべて失敗するため、残りを試さず即座に打ち切る。
+          // 無駄な待ち時間をユーザーに負わせないための判断。
+          if (isQuotaError(error)) {
+            quotaExhausted = true;
+            break;
+          }
         }
       }
-    }
 
-    if (quotaExhausted && ok === 0) {
-      throw new TRPCError({
-        code: "TOO_MANY_REQUESTS",
-        message:
-          "AI の利用枠を使い切ったため分析できませんでした。時間をおいてから再度お試しください（通常は数時間で回復します）。",
-      });
-    }
+      // 利用枠切れなら後続バッチも失敗するので打ち切る
+      const processed = input.offset + batch.length;
+      const nextOffset = quotaExhausted || processed >= total ? null : processed;
 
-    return { ok, failed, quotaExhausted } as const;
-  }),
+      if (quotaExhausted && ok === 0 && input.offset === 0) {
+        throw new TRPCError({
+          code: "TOO_MANY_REQUESTS",
+          message:
+            "AI の利用枠を使い切ったため分析できませんでした。時間をおいてから再度お試しください（通常は数時間で回復します）。",
+        });
+      }
+
+      return { ok, failed, quotaExhausted, total, processed, nextOffset } as const;
+    }),
 
   snapshots: protectedProcedure.query(async ({ ctx }) => db.listSnapshots(ctx.user.id)),
 

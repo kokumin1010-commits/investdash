@@ -124,7 +124,25 @@ describe("generateSignal", () => {
 
   it("LLM が文字列を返さない場合はエラーにする", async () => {
     invokeLLM.mockResolvedValue({ choices: [{ message: { content: null } }] });
-    await expect(generateSignal(baseContext())).rejects.toThrow("シグナルの生成に失敗");
+    await expect(generateSignal(baseContext())).rejects.toThrow("シグナルの応答が空でした");
+  });
+
+  it("Markdown で返ってきても JSON を取り出して処理する", async () => {
+    // claude 系がスキーマを無視して返す実際の形を再現
+    invokeLLM.mockResolvedValue({
+      choices: [
+        {
+          message: {
+            content:
+              '判定結果を提示します。\n```json\n{"action":"REDUCE","confidence":70,"rationale":"構成比が過大","factors":{}}\n```',
+          },
+        },
+      ],
+    });
+
+    const result = await generateSignal(baseContext());
+    expect(result.action).toBe("REDUCE");
+    expect(result.confidence).toBe(70);
   });
 
   it("LLM 側の失敗はそのまま伝播する（上位でメッセージ変換する設計）", async () => {

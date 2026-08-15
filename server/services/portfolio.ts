@@ -483,13 +483,46 @@ export async function syncNewsForTargets(
   return { fetched, analyzed };
 }
 
-export async function syncNewsForUser(userId: number): Promise<{ fetched: number; analyzed: number }> {
+/**
+ * ユーザーの保有＋ウォッチリスト銘柄のニュースを取得・分析する。
+ *
+ * 本番のリクエスト上限は 180 秒。27 銘柄では実測 12 分以上かかるため、
+ * `offset` / `batchSize` を渡して分割実行できるようにしている。
+ * `batchSize` 省略時は全件処理（定期実行 Heartbeat 用）。
+ */
+export async function syncNewsForUser(
+  userId: number,
+  options?: { offset?: number; batchSize?: number }
+): Promise<{
+  fetched: number;
+  analyzed: number;
+  total: number;
+  processed: number;
+  nextOffset: number | null;
+}> {
   const [hs, ws] = await Promise.all([db.listHoldings(userId), db.listWatchlist(userId)]);
   const targets: NewsTarget[] = [
     ...hs.map(h => ({ symbol: h.symbol, name: h.name, tickerCode: h.tickerCode, market: h.market })),
     ...ws.map(w => ({ symbol: w.symbol, name: w.name, tickerCode: w.tickerCode, market: w.market })),
   ];
-  return syncNewsForTargets(userId, targets);
+
+  const total = targets.length;
+  const offset = options?.offset ?? 0;
+  // batchSize 未指定なら全件（定期実行 Heartbeat はタイムアウト制約が緩いため）
+  const batch =
+    options?.batchSize === undefined
+      ? targets.slice(offset)
+      : targets.slice(offset, offset + options.batchSize);
+
+  const result = await syncNewsForTargets(userId, batch);
+  const processed = offset + batch.length;
+
+  return {
+    ...result,
+    total,
+    processed,
+    nextOffset: processed >= total ? null : processed,
+  };
 }
 
 /**

@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { trpc } from "@/lib/trpc";
+import { useBatchRun } from "@/hooks/useBatchRun";
 import {
   SECTOR_COLORS,
   SIGNAL_ACTIONS,
@@ -45,7 +46,7 @@ export default function Dashboard() {
   const utils = trpc.useUtils();
   const overview = trpc.portfolio.overview.useQuery();
   const snapshots = trpc.portfolio.snapshots.useQuery();
-  const [busy, setBusy] = useState<null | "price" | "news" | "signal">(null);
+  const [busy, setBusy] = useState<null | "price">(null);
 
   const syncPrices = trpc.portfolio.syncPrices.useMutation({
     onSuccess: async res => {
@@ -60,25 +61,36 @@ export default function Dashboard() {
     onSettled: () => setBusy(null),
   });
 
-  const syncNews = trpc.news.syncAll.useMutation({
-    onSuccess: async res => {
+  // 一括処理は本番の 180 秒制限を超えるため、サーバーが返す nextOffset を辿って
+  // 小分けに呼び出す。詳細は useBatchRun のコメント参照。
+  const syncNewsBatch = trpc.news.syncAll.useMutation();
+  const regenBatch = trpc.portfolio.regenerateAllSignals.useMutation();
+
+  const newsRun = useBatchRun({
+    runBatch: offset => syncNewsBatch.mutateAsync({ offset, batchSize: 4 }),
+    onDone: async results => {
       await utils.invalidate();
+      const fetched = results.reduce((a, r) => a + r.fetched, 0);
+      const analyzed = results.reduce((a, r) => a + r.analyzed, 0);
       toast.success(
-        res.fetched > 0
-          ? `${res.fetched} 件のニュースを取得し、${res.analyzed} 件を分析しました`
+        fetched > 0
+          ? `${fetched} 件のニュースを取得し、${analyzed} 件を分析しました`
           : "新しいニュースはありませんでした"
       );
     },
-    onError: e => toast.error(e.message),
-    onSettled: () => setBusy(null),
+    onError: e => toast.error(e instanceof Error ? e.message : "ニュースを取得できませんでした"),
   });
 
-  const regenAll = trpc.portfolio.regenerateAllSignals.useMutation({
-    onSuccess: async res => {
+  const signalRun = useBatchRun({
+    runBatch: offset => regenBatch.mutateAsync({ offset, batchSize: 6 }),
+    // 利用枠切れは後続バッチも必ず失敗するので、その時点で打ち切る
+    shouldStop: res => res.quotaExhausted,
+    onDone: async results => {
       await utils.portfolio.invalidate();
-      // 利用枠切れで途中打ち切りになった場合は、成功件数だけ伝えると誤解を招く
-      if (res.quotaExhausted) {
-        toast.warning(`${res.ok} 銘柄まで生成しました`, {
+      const ok = results.reduce((a, r) => a + r.ok, 0);
+      const failed = results.flatMap(r => r.failed);
+      if (results.some(r => r.quotaExhausted)) {
+        toast.warning(`${ok} 銘柄まで生成しました`, {
           description:
             "AI の利用枠を使い切ったため中断しました。時間をおいて再実行すると残りの銘柄も生成されます。",
           duration: 8000,
@@ -86,17 +98,23 @@ export default function Dashboard() {
         return;
       }
       toast.success(
-        res.failed.length > 0
-          ? `${res.ok} 銘柄のシグナルを生成しました（${res.failed.length} 銘柄は失敗）`
-          : `${res.ok} 銘柄のシグナルを生成しました`
+        failed.length > 0
+          ? `${ok} 銘柄のシグナルを生成しました（${failed.length} 銘柄は失敗）`
+          : `${ok} 銘柄のシグナルを生成しました`
       );
     },
-    onError: e => toast.error("AI分析を実行できませんでした", { description: e.message, duration: 8000 }),
-    onSettled: () => setBusy(null),
+    onError: e =>
+      toast.error("AI分析を実行できませんでした", {
+        description: e instanceof Error ? e.message : undefined,
+        duration: 8000,
+      }),
   });
 
   const data = overview.data;
   const summary = data?.summary;
+
+  // どれか 1 つが動いている間は他の一括処理を止める（AI 利用枠と DB 競合を避ける）
+  const anyBusy = busy !== null || newsRun.progress.running || signalRun.progress.running;
 
   const sectorChart = useMemo(() => {
     if (!data) return [];
@@ -171,7 +189,7 @@ export default function Dashboard() {
           <Button
             variant="outline"
             size="sm"
-            disabled={busy !== null || isEmpty}
+            disabled={anyBusy || isEmpty}
             onClick={() => {
               setBusy("price");
               syncPrices.mutate();
@@ -183,25 +201,23 @@ export default function Dashboard() {
           <Button
             variant="outline"
             size="sm"
-            disabled={busy !== null || isEmpty}
-            onClick={() => {
-              setBusy("news");
-              syncNews.mutate();
-            }}
+            disabled={anyBusy || isEmpty}
+            onClick={() => void newsRun.start()}
           >
-            <RefreshCw className={`mr-1.5 h-3.5 w-3.5 ${busy === "news" ? "animate-spin" : ""}`} />
-            ニュース取得
+            <RefreshCw
+              className={`mr-1.5 h-3.5 w-3.5 ${newsRun.progress.running ? "animate-spin" : ""}`}
+            />
+            {newsRun.progress.running
+              ? `ニュース取得中 ${newsRun.progress.processed}/${newsRun.progress.total || "…"}`
+              : "ニュース取得"}
           </Button>
-          <Button
-            size="sm"
-            disabled={busy !== null || isEmpty}
-            onClick={() => {
-              setBusy("signal");
-              regenAll.mutate();
-            }}
-          >
-            <Brain className={`mr-1.5 h-3.5 w-3.5 ${busy === "signal" ? "animate-pulse" : ""}`} />
-            全銘柄をAI分析
+          <Button size="sm" disabled={anyBusy || isEmpty} onClick={() => void signalRun.start()}>
+            <Brain
+              className={`mr-1.5 h-3.5 w-3.5 ${signalRun.progress.running ? "animate-pulse" : ""}`}
+            />
+            {signalRun.progress.running
+              ? `AI分析中 ${signalRun.progress.processed}/${signalRun.progress.total || "…"}`
+              : "全銘柄をAI分析"}
           </Button>
         </div>
       </header>

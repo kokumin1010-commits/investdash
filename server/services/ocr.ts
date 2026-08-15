@@ -1,4 +1,5 @@
 import { invokeLLM } from "../_core/llm";
+import { parseLlmJson } from "./jsonExtract";
 import { getBrokerFormat, type BrokerFormatId } from "./brokerFormats";
 
 /**
@@ -174,16 +175,8 @@ export async function extractPositions(
   });
 
   const text = res.choices?.[0]?.message?.content;
-  if (typeof text !== "string" || !text.trim()) {
-    throw new Error("AI が読み取り結果を返しませんでした。もう一度お試しください。");
-  }
-
-  let parsed: OcrResult;
-  try {
-    parsed = JSON.parse(text) as OcrResult;
-  } catch {
-    throw new Error("読み取り結果の解析に失敗しました。画像を変えてお試しください。");
-  }
+  // Markdown で返るモデルもあるため、コードフェンス/前置き文があっても JSON を取り出す
+  const parsed = parseLlmJson<OcrResult>(text, "読み取り結果");
 
   return {
     positions: (parsed.positions ?? []).filter(p => p.name && p.tickerCode).map(normalizePosition),

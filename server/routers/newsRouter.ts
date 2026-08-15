@@ -31,10 +31,26 @@ export const newsRouter = router({
       return items.map(it => ({ ...it, companyName: nameMap.get(it.symbol) ?? it.symbol }));
     }),
 
-  /** 全銘柄のニュースを取得・分析 */
-  syncAll: protectedProcedure.mutation(async ({ ctx }) => {
-    return syncNewsForUser(ctx.user.id);
-  }),
+  /**
+   * 全銘柄のニュースを取得・分析する（1 リクエスト = 1 バッチ）。
+   * 本番の 180 秒制限に収めるため分割実行する。1 銘柄あたり約 28 秒
+   * （検索 + AI 分析）なので batchSize=4 なら最悪 112 秒程度。
+   */
+  syncAll: protectedProcedure
+    .input(
+      z
+        .object({
+          offset: z.number().int().min(0).default(0),
+          batchSize: z.number().int().min(1).max(8).default(4),
+        })
+        .default({ offset: 0, batchSize: 4 })
+    )
+    .mutation(async ({ ctx, input }) => {
+      return syncNewsForUser(ctx.user.id, {
+        offset: input.offset,
+        batchSize: input.batchSize,
+      });
+    }),
 
   /** 特定銘柄のニュースを取得・分析 */
   syncOne: protectedProcedure

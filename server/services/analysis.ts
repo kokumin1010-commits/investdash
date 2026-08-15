@@ -1,10 +1,23 @@
 import { invokeLLM } from "../_core/llm";
 import type { RawNews } from "./news";
+import { parseLlmJson } from "./jsonExtract";
 
 /**
  * ニュースのセンチメント判定と意思決定シグナル生成。
  * 判定は必ず「与えられた材料の範囲内」で行い、根拠を日本語で明示させる。
  */
+
+/**
+ * 使用モデル。
+ *
+ * `response_format: json_schema` を指定しても、内蔵プロキシではモデルによって
+ * スキーマが無視され Markdown が返ることを実測で確認している。
+ *   - claude-sonnet-4-6 / claude-haiku-4-5 → Markdown を返す（NG）
+ *   - gpt-5-mini → JSON を返すが `max_completion_tokens` 必須、かつ 35 秒前後で遅い
+ *   - gemini-3-flash-preview → JSON を安定して返し 10〜16 秒（採用）
+ * 27 銘柄を一括分析する用途があるため、速度も重要な選定基準。
+ */
+const ANALYSIS_MODEL = "gemini-3-flash-preview";
 
 export type NewsVerdict = {
   urlHash: string;
@@ -75,7 +88,7 @@ export async function analyzeNewsBatch(
     .join("\n");
 
   const res = await invokeLLM({
-    model: "gpt-5-mini",
+    model: ANALYSIS_MODEL,
     messages: [
       { role: "system", content: NEWS_SYSTEM },
       {
@@ -88,12 +101,11 @@ export async function analyzeNewsBatch(
   });
 
   const text = res.choices?.[0]?.message?.content;
-  if (typeof text !== "string") return [];
 
   try {
-    const parsed = JSON.parse(text) as {
+    const parsed = parseLlmJson<{
       verdicts: Array<Omit<NewsVerdict, "urlHash"> & { index: number }>;
-    };
+    }>(text, "ニュース分析の応答");
     return (parsed.verdicts ?? [])
       .map(v => {
         const src = items[v.index - 1];
@@ -178,12 +190,24 @@ const SIGNAL_SYSTEM = `あなたは長期投資を前提とする個人投資家
 1. **含み損の大きさそれ自体を売却理由にしてはならない。** 逆に含み益の大きさを
    買い増し理由にしてもならない。判断の基準は常に「当初の投資ロジックが今も有効か」。
 2. 投資カードにエグジット条件が記録されている場合、それに該当するかを最優先で確認する。
-3. 投資カードが未記入の場合は、判断材料が不足しているため WATCH を基本とし、
-   rationale で「投資カードの記入を推奨」と明示する。
+3. **投資カードが未記入でも、WATCH に固定してはならない。** その場合は入手可能な
+   客観データ（ニュースの内容と影響度、52週レンジ内の位置、直近騰落率、構成比）から
+   最も妥当なシグナルを判定する。判断の指針:
+   - 影響度 70 以上の好材料が複数あり、ロジックを損なう悪材料がない → ADD または HOLD
+   - 影響度 70 以上の悪材料（業績下方修正、不祥事、事業環境の構造的悪化）がある → REDUCE または WATCH
+   - エグジット条件に該当する重大な悪材料がある → EXIT
+   - 構成比が 25% を超える → ロジックが健全でも REDUCE を検討する
+   - 好材料と悪材料が混在し方向性が定まらない、または材料そのものが乏しい → WATCH
+   投資カードが未記入であることは confidence を下げる要因として扱い、rationale の
+   最後に「投資カードを記入すると判定の精度が上がる」と 1 文で添える。
+   ただしこれを判定そのものの理由にしてはならない。
 4. ニュースは impactScore が高いものを重視する。低スコアのニュースを過度に重視しない。
 5. 構成比が 25% を超える銘柄は、ロジックが健全でも集中リスクに言及する。
 6. データが欠損している項目については推測せず、「データ未取得」と明記する。
-7. confidence は判断材料の充足度。投資カード未記入・ニュース 0 件なら 40 未満とする。
+7. confidence は判断材料の充足度を表す。目安:
+   - 投資カード記入済み + 影響度の高いニュースあり → 70〜90
+   - 投資カード未記入だが影響度の高いニュースあり → 45〜65
+   - 投資カード未記入・ニュースも乏しい → 40 未満
 
 rationale は日本語 3〜5 文。結論の理由と、次に確認すべき点を含める。
 断定的な売買推奨表現（「買うべき」「売却すべき」）は避け、「〜を検討する材料がある」
@@ -299,7 +323,7 @@ ${newsLines}
 
 export async function generateSignal(ctx: SignalContext): Promise<SignalResult> {
   const res = await invokeLLM({
-    model: "claude-sonnet-4-6",
+    model: ANALYSIS_MODEL,
     messages: [
       { role: "system", content: SIGNAL_SYSTEM },
       { role: "user", content: buildSignalPrompt(ctx) },
@@ -309,11 +333,7 @@ export async function generateSignal(ctx: SignalContext): Promise<SignalResult> 
   });
 
   const text = res.choices?.[0]?.message?.content;
-  if (typeof text !== "string") {
-    throw new Error("シグナルの生成に失敗しました。");
-  }
-
-  const parsed = JSON.parse(text) as SignalResult;
+  const parsed = parseLlmJson<SignalResult>(text, "シグナルの応答");
   return {
     ...parsed,
     confidence: Math.max(0, Math.min(100, Math.round(parsed.confidence))),
@@ -382,7 +402,7 @@ ${newsLines}
 以上の材料のみに基づいて判定してください。`;
 
   const res = await invokeLLM({
-    model: "claude-sonnet-4-6",
+    model: ANALYSIS_MODEL,
     messages: [
       { role: "system", content: WATCH_SYSTEM },
       { role: "user", content: prompt },
@@ -392,7 +412,6 @@ ${newsLines}
   });
 
   const text = res.choices?.[0]?.message?.content;
-  if (typeof text !== "string") throw new Error("シグナルの生成に失敗しました。");
-  const parsed = JSON.parse(text) as SignalResult;
+  const parsed = parseLlmJson<SignalResult>(text, "シグナルの応答");
   return { ...parsed, confidence: Math.max(0, Math.min(100, Math.round(parsed.confidence))) };
 }
