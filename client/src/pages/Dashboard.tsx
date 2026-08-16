@@ -1260,6 +1260,13 @@ export default function Dashboard() {
                           )}`
                         : "—"}
                     </div>
+                    {/* 詳しい確認は配当ページで行う（口座別・市場別の絞り込みがある） */}
+                    <Link
+                      href="/dividends"
+                      className="mt-1 inline-block text-[11px] text-primary hover:underline"
+                    >
+                      配当ページで詳しく見る
+                    </Link>
                   </div>
                 </div>
               </CardHeader>

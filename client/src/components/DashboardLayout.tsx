@@ -21,6 +21,7 @@ import {
 import { useIsMobile } from "@/hooks/useMobile";
 import { usePasscode } from "@/contexts/PasscodeContext";
 import {
+  Coins,
   Eye,
   LayoutDashboard,
   Lock,
@@ -38,6 +39,7 @@ import PasscodeGate from "./PasscodeGate";
 const menuItems = [
   { icon: LayoutDashboard, label: "ダッシュボード", path: "/" },
   { icon: Wallet, label: "保有銘柄", path: "/holdings" },
+  { icon: Coins, label: "配当", path: "/dividends" },
   { icon: Eye, label: "ウォッチリスト", path: "/watchlist" },
   { icon: Newspaper, label: "ニュース", path: "/news" },
   { icon: ScanLine, label: "スクショ取込", path: "/import" },
