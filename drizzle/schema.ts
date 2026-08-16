@@ -79,6 +79,29 @@ export const holdings = mysqlTable(
     /** 事業概要（プロファイル API から取得） */
     businessSummary: text("businessSummary"),
     website: varchar("website", { length: 255 }),
+    /**
+     * 1 株あたりの年間配当（現地通貨・税引前）。
+     * 直近 12 か月の支払実績を合計したもので、株式分割の補正済み。
+     * 0 は無配、null は未取得を意味するので区別して扱う。
+     */
+    annualDividend: decimal("annualDividend", { precision: 20, scale: 6 }),
+    /** 直近 12 か月の配当支払回数（年 4 回なら四半期配当と分かる） */
+    dividendCount: int("dividendCount"),
+    /**
+     * 特別配当（記念配当）が含まれているか。
+     * 含まれる場合、年間配当は一時的に多く、来期も続くとは限らない。
+     */
+    hasSpecialDividend: boolean("hasSpecialDividend").default(false),
+    /**
+     * 特別配当を除いた年間配当の推定（現地通貨）。
+     * 特別配当がなければ annualDividend と同じ値になる。
+     */
+    recurringDividend: decimal("recurringDividend", { precision: 20, scale: 6 }),
+    /** 最後に配当が支払われた日（権利落ち日） */
+    lastDividendDate: timestamp("lastDividendDate"),
+    /** 最後の 1 回あたりの配当額（現地通貨） */
+    lastDividendAmount: decimal("lastDividendAmount", { precision: 20, scale: 6 }),
+    dividendUpdatedAt: timestamp("dividendUpdatedAt"),
     priceUpdatedAt: timestamp("priceUpdatedAt"),
     profileUpdatedAt: timestamp("profileUpdatedAt"),
     notes: text("notes"),

@@ -7,6 +7,7 @@ import { isQuotaError, toFriendlyAiError } from "../services/aiErrors";
 import {
   buildPortfolio,
   enrichProfiles,
+  syncDividends,
   regenerateSignal,
   syncFxRate,
   syncPrices,
@@ -368,6 +369,31 @@ export const portfolioRouter = router({
     .mutation(async ({ ctx, input }) => {
       const count = await enrichProfiles(ctx.user.id, input?.force ?? false);
       return { count } as const;
+    }),
+
+  /**
+   * 配当情報の取得。
+   *
+   * 銘柄数が多いと本番の 180 秒制限に収まらないため、
+   * offset / batchSize で分割実行できるようにしている。
+   * 呼び出し側は nextOffset が null になるまで繰り返す。
+   */
+  syncDividends: protectedProcedure
+    .input(
+      z
+        .object({
+          force: z.boolean().default(false),
+          offset: z.number().int().min(0).default(0),
+          batchSize: z.number().int().min(1).max(40).default(20),
+        })
+        .optional()
+    )
+    .mutation(async ({ ctx, input }) => {
+      return await syncDividends(ctx.user.id, {
+        force: input?.force ?? false,
+        offset: input?.offset ?? 0,
+        batchSize: input?.batchSize ?? 20,
+      });
     }),
 
   /** シグナル再生成（1 銘柄） */

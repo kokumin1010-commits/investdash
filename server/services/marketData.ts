@@ -4,6 +4,7 @@ import { callDataApi } from "../_core/dataApi";
  * Yahoo Finance Data API から株価と企業プロファイルを取得する薄いラッパー。
  * レスポンス構造は実測に基づく（docs/research-notes.md 参照）。
  */
+import type { DividendEvent, SplitEvent } from "./dividend";
 
 export type Quote = {
   symbol: string;
@@ -29,6 +30,13 @@ type ChartResponse = {
       meta?: Record<string, unknown>;
       timestamp?: number[];
       indicators?: { quote?: Array<{ close?: (number | null)[] }> };
+      events?: {
+        dividends?: Record<string, { amount?: unknown; date?: unknown }>;
+        splits?: Record<
+          string,
+          { date?: unknown; numerator?: unknown; denominator?: unknown; splitRatio?: unknown }
+        >;
+      };
     }>;
     error?: unknown;
   };
@@ -40,6 +48,79 @@ function num(v: unknown): number | null {
 
 function str(v: unknown): string | null {
   return typeof v === "string" && v.length > 0 ? v : null;
+}
+
+/**
+ * 配当と株式分割の履歴。
+ * 分割は配当額の補正に必要（Yahoo の配当額は分割調整されていない）。
+ */
+export type DividendHistory = {
+  symbol: string;
+  currency: string;
+  price: number | null;
+  dividends: DividendEvent[];
+  splits: SplitEvent[];
+};
+
+/**
+ * 配当と分割の履歴を取得する。
+ *
+ * range は 2y を使う。1 年分では分割の検出に不足があり、
+ * 3y を指定すると配当イベントが空で返る銘柄があったため（5401.T で確認）。
+ */
+export async function fetchDividendHistory(symbol: string): Promise<DividendHistory | null> {
+  try {
+    const res = (await callDataApi("YahooFinance/get_stock_chart", {
+      query: {
+        symbol,
+        region: "US",
+        interval: "1d",
+        range: "2y",
+        events: "div,split",
+      },
+    })) as ChartResponse;
+
+    const result = res?.chart?.result?.[0];
+    if (!result?.meta) return null;
+
+    const dividends: DividendEvent[] = [];
+    for (const raw of Object.values(result.events?.dividends ?? {})) {
+      const amount = num(raw?.amount);
+      const date = num(raw?.date);
+      if (amount !== null && date !== null) dividends.push({ amount, date });
+    }
+
+    const splits: SplitEvent[] = [];
+    for (const raw of Object.values(result.events?.splits ?? {})) {
+      const date = num(raw?.date);
+      if (date === null) continue;
+      const numerator = num(raw?.numerator);
+      const denominator = num(raw?.denominator);
+      if (numerator !== null && denominator !== null && denominator !== 0) {
+        splits.push({ date, numerator, denominator });
+        continue;
+      }
+      // numerator/denominator が無い場合は "5:1" 形式の文字列から読む
+      const ratio = str(raw?.splitRatio);
+      if (ratio) {
+        const [a, b] = ratio.split(":").map(v => Number(v.trim()));
+        if (Number.isFinite(a) && Number.isFinite(b) && b !== 0) {
+          splits.push({ date, numerator: a, denominator: b });
+        }
+      }
+    }
+
+    return {
+      symbol: str(result.meta.symbol) ?? symbol,
+      currency: str(result.meta.currency) ?? "JPY",
+      price: num(result.meta.regularMarketPrice),
+      dividends,
+      splits,
+    };
+  } catch (error) {
+    console.warn(`[marketData] fetchDividendHistory failed for ${symbol}:`, error);
+    return null;
+  }
 }
 
 /**

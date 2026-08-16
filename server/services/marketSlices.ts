@@ -40,6 +40,10 @@ export type MarketSlice = {
    * 現在レートで逆算すると必ず 0 になり誤解を招く。
    */
   isForeign: boolean;
+  /** その市場から年間いくら配当が入るか（円換算・税引前） */
+  dividendIncomeBase: number;
+  /** その市場の配当利回り（%）。円換算の評価額に対する比率 */
+  dividendYieldPct: number | null;
 };
 
 type MarketInput = {
@@ -53,6 +57,8 @@ type MarketInput = {
   marketValue: number | null;
   /** 現地通貨の取得原価 */
   costValue: number;
+  /** 年間受取配当（円換算）。未取得なら null */
+  dividend?: { annualIncomeBase: number | null } | null;
 };
 
 /** 市場の表示順。日本株を先頭に、その他を末尾にする */
@@ -74,6 +80,7 @@ export function buildMarketSlices(items: MarketInput[], totalValueBase: number):
       localValue: number;
       localCost: number;
       currency: string;
+      dividendIncome: number;
     }
   >();
 
@@ -85,12 +92,14 @@ export function buildMarketSlices(items: MarketInput[], totalValueBase: number):
       localValue: 0,
       localCost: 0,
       currency: it.currency,
+      dividendIncome: 0,
     };
     cur.value += it.marketValueBase ?? 0;
     cur.cost += it.costValueBase;
     cur.count += 1;
     cur.localValue += it.marketValue ?? 0;
     cur.localCost += it.costValue;
+    cur.dividendIncome += it.dividend?.annualIncomeBase ?? 0;
     map.set(it.market, cur);
   }
 
@@ -111,6 +120,8 @@ export function buildMarketSlices(items: MarketInput[], totalValueBase: number):
         localPnl,
         localPnlPct: v.localCost > 0 ? (localPnl / v.localCost) * 100 : null,
         isForeign: v.currency !== "JPY",
+        dividendIncomeBase: v.dividendIncome,
+        dividendYieldPct: v.value > 0 ? (v.dividendIncome / v.value) * 100 : null,
       };
     })
     .sort((a, b) => MARKET_ORDER[a.key] - MARKET_ORDER[b.key]);

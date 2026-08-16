@@ -8,11 +8,21 @@ import {
 } from "./analysis";
 import {
   fetchCompanyProfile,
+  fetchDividendHistory,
   fetchPriceHistory,
   fetchQuotes,
   fetchUsdJpyRate,
   fetchSgdJpyRate,
 } from "./marketData";
+import {
+  annualIncome,
+  dividendYield,
+  estimateFrequency,
+  isImplausibleYield,
+  summarizeDividends,
+  yieldOnCost,
+  type DividendFrequency,
+} from "./dividend";
 import { buildNewsQuery, filterNoise, searchNews } from "./news";
 import { groupPositionsBySymbol, type GroupedPosition } from "./groupPositions";
 import { buildMarketSlices, type MarketSlice } from "./marketSlices";
@@ -76,6 +86,73 @@ export type PositionView = {
   } | null;
   newsCount: number;
   negativeNewsCount: number;
+  /** 配当情報。未取得なら null */
+  dividend: PositionDividendView | null;
+};
+
+/**
+ * 保有 1 件分の配当情報。
+ * 金額は税引前。実際の手取りは口座の所在国や個人の状況で変わるため、
+ * 一律の税率で引かずに額面のまま扱う。
+ */
+export type PositionDividendView = {
+  /** 1 株あたりの年間配当（現地通貨・直近 12 か月の実績・分割補正済み） */
+  perShare: number;
+  /** 年間受取額（現地通貨） */
+  annualIncome: number;
+  /** 年間受取額（円換算） */
+  annualIncomeBase: number | null;
+  /** 現在値に対する利回り（%） */
+  yieldPct: number | null;
+  /** 取得単価に対する利回り（%）。長期保有ではこちらが実感に近い */
+  yieldOnCostPct: number | null;
+  /** 直近 12 か月の支払回数 */
+  count: number;
+  frequency: DividendFrequency;
+  lastDate: Date | null;
+  lastAmount: number | null;
+  updatedAt: Date | null;
+  /**
+   * 特別配当（記念配当）が含まれているか。
+   * true なら年間配当は一時的に多く、来期も同額とは限らない。
+   */
+  hasSpecial: boolean;
+  /** 特別配当を除いた 1 株あたり年間配当の推定 */
+  recurringPerShare: number;
+  /** 特別配当を除いた場合の利回り（%） */
+  recurringYieldPct: number | null;
+  /**
+   * 利回りが実勢としてありえない水準（8% 超）か。
+   * 支払が年 2 回の銘柄では特別配当を検出できないため、最後の安全網として持つ。
+   */
+  yieldNeedsCheck: boolean;
+};
+
+/** 配当の全体集計 */
+export type DividendSummaryView = {
+  /** 年間の受取配当合計（円換算・税引前） */
+  annualIncomeBase: number;
+  /** 株式時価に対する全体利回り（%） */
+  yieldPct: number | null;
+  /** 取得原価に対する全体利回り（%） */
+  yieldOnCostPct: number | null;
+  /** 月あたりの平均受取額（円） */
+  monthlyAverageBase: number;
+  /** 配当を出している銘柄数 */
+  payingCount: number;
+  /** 無配の銘柄数 */
+  nonPayingCount: number;
+  /** 配当情報が未取得の銘柄数 */
+  unknownCount: number;
+  /** 配当情報を最後に取得した時刻 */
+  updatedAt: Date | null;
+  /**
+   * 特別配当を除いた年間受取額（円換算）。
+   * 来期も続くと見込める配当の水準を表す。
+   */
+  recurringIncomeBase: number;
+  /** 特別配当が含まれる銘柄数 */
+  specialCount: number;
 };
 
 export type PortfolioSummary = {
@@ -138,6 +215,10 @@ export type BrokerSlice = SectorSlice & {
    * 現物のみの口座では null。
    */
   leverage: BrokerLeverageView | null;
+  /** その口座から年間いくら配当が入るか（円換算・税引前） */
+  dividendIncomeBase: number;
+  /** その口座の配当利回り（%）。株式時価に対する比率 */
+  dividendYieldPct: number | null;
 };
 
 /**
@@ -189,6 +270,8 @@ export async function buildPortfolio(userId: number): Promise<{
   summary: PortfolioSummary;
   sectors: SectorSlice[];
   currencies: SectorSlice[];
+  /** 配当の全体集計 */
+  dividends: DividendSummaryView;
   /** 国・市場別の内訳。米国株は為替影響を切り分けられるようにしている */
   markets: MarketSlice[];
   brokers: BrokerSlice[];
@@ -243,6 +326,35 @@ export async function buildPortfolio(userId: number): Promise<{
     const sig = signalMap.get(h.symbol);
     const newsStat = newsBySymbol.get(h.symbol) ?? { total: 0, negative: 0 };
 
+    /*
+     * 配当。annualDividend が null なら未取得、0 なら無配として区別する。
+     * 利回りは Yahoo の値を使わず現在値から自分で計算する（基準日のずれを避ける）。
+     */
+    const perShare = n(h.annualDividend);
+    const income = annualIncome(perShare, quantity);
+    // 特別配当を除いた水準。列が無い古いレコードでは年間配当をそのまま使う
+    const recurringPerShare = n(h.recurringDividend) ?? perShare ?? 0;
+    const divYieldPct = dividendYield(perShare ?? 0, currentPrice);
+    const dividend: PositionDividendView | null =
+      perShare === null || income === null
+        ? null
+        : {
+            perShare,
+            annualIncome: income,
+            annualIncomeBase: toBase(income, h.currency),
+            yieldPct: divYieldPct,
+            yieldOnCostPct: yieldOnCost(perShare, avgCost),
+            count: h.dividendCount ?? 0,
+            frequency: estimateFrequency(h.dividendCount ?? 0),
+            lastDate: h.lastDividendDate,
+            lastAmount: n(h.lastDividendAmount),
+            updatedAt: h.dividendUpdatedAt,
+            hasSpecial: h.hasSpecialDividend ?? false,
+            recurringPerShare,
+            recurringYieldPct: dividendYield(recurringPerShare, currentPrice),
+            yieldNeedsCheck: isImplausibleYield(divYieldPct),
+          };
+
     return {
       id: h.id,
       symbol: h.symbol,
@@ -281,6 +393,7 @@ export async function buildPortfolio(userId: number): Promise<{
         : null,
       newsCount: newsStat.total,
       negativeNewsCount: newsStat.negative,
+      dividend,
     } satisfies PositionView;
   });
 
@@ -494,25 +607,114 @@ export async function buildPortfolio(userId: number): Promise<{
     sectors: toSlices(sectorMap),
     currencies: toSlices(currencyMap),
     /**
+     * 配当の全体集計。銘柄単位ではなく口座レコード単位で合計する
+     * （同一銘柄を複数口座で持っていれば、その分だけ配当も増えるため）。
+     */
+    dividends: buildDividendSummary(positions, groups, totalValueBase, totalCostBase),
+    /**
      * 国・市場別の内訳。銘柄単位（groups）を集計対象にすることで、
      * 同一銘柄を複数口座で持っていても銘柄数を二重に数えない。
      */
     markets: buildMarketSlices(groups, totalValueBase),
     brokers: Array.from(brokerMap.entries())
-      .map(([key, v]) => ({
-        key,
-        label: BROKER_LABELS[key as Broker] ?? key,
-        value: v.value,
-        pct: totalValueBase > 0 ? (v.value / totalValueBase) * 100 : 0,
-        count: v.count,
-        /** 口座単位の含み損益。口座ごとの成績を比較できるようにする */
-        pnl: v.value - v.cost,
-        pnlPct: v.cost > 0 ? ((v.value - v.cost) / v.cost) * 100 : null,
-        /** 借入がある口座のみ信用情報を付ける（現物口座は null） */
-        leverage: leverageByBroker.get(key) ?? null,
-      }))
+      .map(([key, v]) => {
+        /** その口座から年間いくら配当が入るか（円換算） */
+        const dividendIncomeBase = positions
+          .filter(p => p.broker === key)
+          .reduce((acc, p) => acc + (p.dividend?.annualIncomeBase ?? 0), 0);
+        return {
+          key,
+          label: BROKER_LABELS[key as Broker] ?? key,
+          value: v.value,
+          pct: totalValueBase > 0 ? (v.value / totalValueBase) * 100 : 0,
+          count: v.count,
+          /** 口座単位の含み損益。口座ごとの成績を比較できるようにする */
+          pnl: v.value - v.cost,
+          pnlPct: v.cost > 0 ? ((v.value - v.cost) / v.cost) * 100 : null,
+          /** 借入がある口座のみ信用情報を付ける（現物口座は null） */
+          leverage: leverageByBroker.get(key) ?? null,
+          dividendIncomeBase,
+          dividendYieldPct: v.value > 0 ? (dividendIncomeBase / v.value) * 100 : null,
+        };
+      })
       .sort((a, b) => b.value - a.value),
     alerts: alerts.sort((a, b) => b.pct - a.pct),
+  };
+}
+
+/**
+ * 配当の全体集計を作る。
+ *
+ * 銘柄数のカウントは銘柄単位（groups）で行い、金額は口座レコード単位で合計する。
+ * 「配当を出す銘柄が何件あるか」は銘柄で数えたいが、
+ * 「年間いくら入るか」は保有株数の合計に比例するため。
+ */
+function buildDividendSummary(
+  positions: PositionView[],
+  groups: GroupedPosition[],
+  totalValueBase: number,
+  totalCostBase: number
+): DividendSummaryView {
+  const annualIncomeBase = positions.reduce(
+    (acc, p) => acc + (p.dividend?.annualIncomeBase ?? 0),
+    0
+  );
+
+  /*
+   * 特別配当を除いた受取額。円換算は annualIncomeBase と同じ比率で按分する
+   * （為替レートを再計算せずに済むよう、1 株配当の比で割り戻す）。
+   */
+  let recurringIncomeBase = 0;
+  let specialCount = 0;
+  for (const p of positions) {
+    const d = p.dividend;
+    if (!d || d.annualIncomeBase === null) continue;
+    if (d.perShare > 0 && d.recurringPerShare !== d.perShare) {
+      recurringIncomeBase += d.annualIncomeBase * (d.recurringPerShare / d.perShare);
+    } else {
+      recurringIncomeBase += d.annualIncomeBase;
+    }
+  }
+  for (const g of groups) {
+    if (g.entries.some(e => e.dividend?.hasSpecial)) specialCount += 1;
+  }
+
+  /*
+   * 銘柄単位の分類。同一銘柄を複数口座で持っていても 1 件と数える。
+   * 配当情報は銘柄に紐づくので、どの口座のレコードを見ても同じ値になる。
+   */
+  let payingCount = 0;
+  let nonPayingCount = 0;
+  let unknownCount = 0;
+  for (const g of groups) {
+    const div = g.entries.find(e => e.dividend !== null)?.dividend;
+    if (!div) {
+      unknownCount += 1;
+    } else if (div.perShare > 0) {
+      payingCount += 1;
+    } else {
+      nonPayingCount += 1;
+    }
+  }
+
+  // 最後に取得した時刻は最も新しいものを採る
+  let updatedAt: Date | null = null;
+  for (const p of positions) {
+    const t = p.dividend?.updatedAt ?? null;
+    if (t && (updatedAt === null || t > updatedAt)) updatedAt = t;
+  }
+
+  return {
+    annualIncomeBase,
+    yieldPct: totalValueBase > 0 ? (annualIncomeBase / totalValueBase) * 100 : null,
+    yieldOnCostPct: totalCostBase > 0 ? (annualIncomeBase / totalCostBase) * 100 : null,
+    monthlyAverageBase: annualIncomeBase / 12,
+    payingCount,
+    nonPayingCount,
+    unknownCount,
+    updatedAt,
+    recurringIncomeBase,
+    specialCount,
   };
 }
 
@@ -935,4 +1137,97 @@ export async function regenerateWatchSignal(userId: number, item: WatchlistItem)
   });
 
   return result;
+}
+/**
+ * 配当情報を取得して保有銘柄に保存する。
+ *
+ * 配当は年に 1〜4 回しか変わらないため株価とは別サイクルで更新する。
+ * 同一銘柄を複数口座で持つ場合は API を 1 回だけ呼び、全レコードに反映する。
+ *
+ * @param force true なら取得済みの銘柄も再取得する
+ * @param offset 分割実行用の開始位置（本番の 180 秒制限対策）
+ * @param batchSize 1 回で処理する銘柄数
+ */
+export async function syncDividends(
+  userId: number,
+  options: { force?: boolean; offset?: number; batchSize?: number } = {}
+): Promise<{
+  updated: number;
+  failed: string[];
+  /** 処理した銘柄数（重複排除後） */
+  processed: number;
+  /** 対象の総銘柄数 */
+  total: number;
+  /** 次に渡すべき offset。null なら完了 */
+  nextOffset: number | null;
+}> {
+  const { force = false, offset = 0, batchSize = 20 } = options;
+  const hs = await db.listHoldings(userId);
+
+  /*
+   * 銘柄単位で重複排除する。同じ銘柄を複数口座で持っていても
+   * 配当額（1 株あたり）は同じなので API 呼び出しは 1 回で済む。
+   */
+  const bySymbol = new Map<string, typeof hs>();
+  for (const h of hs) {
+    const list = bySymbol.get(h.symbol) ?? [];
+    list.push(h);
+    bySymbol.set(h.symbol, list);
+  }
+
+  // 未取得のものを優先し、force 指定時は全件を対象にする
+  const allSymbols = Array.from(bySymbol.keys());
+  const targets = force
+    ? allSymbols
+    : allSymbols.filter(s => bySymbol.get(s)!.some(h => h.dividendUpdatedAt === null));
+
+  const total = targets.length;
+  const slice = targets.slice(offset, offset + batchSize);
+  if (slice.length === 0) {
+    return { updated: 0, failed: [], processed: 0, total, nextOffset: null };
+  }
+
+  const failed: string[] = [];
+  let updated = 0;
+  const now = new Date();
+
+  // Autoscale の 1 vCPU を考慮して同時実行を控えめにする
+  const concurrency = 4;
+  for (let i = 0; i < slice.length; i += concurrency) {
+    const batch = slice.slice(i, i + concurrency);
+    const histories = await Promise.all(
+      batch.map(async symbol => ({ symbol, history: await fetchDividendHistory(symbol) }))
+    );
+
+    for (const { symbol, history } of histories) {
+      if (!history) {
+        failed.push(symbol);
+        continue;
+      }
+      const summary = summarizeDividends(history.dividends, history.splits, now);
+      const rows = bySymbol.get(symbol) ?? [];
+      for (const h of rows) {
+        await db.updateHolding(userId, h.id, {
+          annualDividend: summary.annualDividend.toFixed(6),
+          dividendCount: summary.count,
+          hasSpecialDividend: summary.hasSpecialDividend,
+          recurringDividend: summary.recurringDividend.toFixed(6),
+          lastDividendDate: summary.lastDate ?? undefined,
+          lastDividendAmount:
+            summary.lastAmount === null ? undefined : summary.lastAmount.toFixed(6),
+          dividendUpdatedAt: now,
+        });
+        updated += 1;
+      }
+    }
+  }
+
+  const consumed = offset + slice.length;
+  return {
+    updated,
+    failed: Array.from(new Set(failed)),
+    processed: slice.length,
+    total,
+    nextOffset: consumed < total ? consumed : null,
+  };
 }

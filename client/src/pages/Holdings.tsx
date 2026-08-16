@@ -52,8 +52,10 @@ import {
   type SignalAction,
 } from "@shared/investing";
 import {
+  AlertTriangle,
   ArrowUpDown,
   Brain,
+  Coins,
   ExternalLink,
   FileText,
   Newspaper,
@@ -66,7 +68,7 @@ import { Fragment, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { Link, useLocation, useSearch } from "wouter";
 
-type SortKey = "value" | "pnlPct" | "weight" | "name" | "day";
+type SortKey = "value" | "pnlPct" | "weight" | "name" | "day" | "dividend" | "dividendYield";
 
 export default function Holdings() {
   const utils = trpc.useUtils();
@@ -171,6 +173,14 @@ export default function Holdings() {
           return (b.dayChangePct ?? -Infinity) - (a.dayChangePct ?? -Infinity);
         case "name":
           return a.name.localeCompare(b.name, "ja");
+        /*
+         * 配当額は円換算で比べる（銘柄ごとに通貨が違うため、
+         * 現地通貨のままだと SGD 5,586 と JPY 1,425,000 を正しく比較できない）。
+         */
+        case "dividend":
+          return (b.dividend?.annualIncomeBase ?? 0) - (a.dividend?.annualIncomeBase ?? 0);
+        case "dividendYield":
+          return (b.dividend?.yieldPct ?? -Infinity) - (a.dividend?.yieldPct ?? -Infinity);
         default:
           return (b.marketValueBase ?? 0) - (a.marketValueBase ?? 0);
       }
@@ -423,6 +433,8 @@ export default function Holdings() {
             <SelectItem value="pnlPct">損益率順</SelectItem>
             <SelectItem value="weight">構成比順</SelectItem>
             <SelectItem value="day">前日比順</SelectItem>
+            <SelectItem value="dividend">配当額順</SelectItem>
+            <SelectItem value="dividendYield">配当利回り順</SelectItem>
             <SelectItem value="name">銘柄名順</SelectItem>
           </SelectContent>
         </Select>
@@ -545,6 +557,59 @@ export default function Holdings() {
                     </div>
                   </div>
 
+                  {/*
+                    配当。長期保有では実質的な収入なので、年間受取額と
+                    「買った値段に対する利回り」を出す。後者は保有が長いほど
+                    高くなるため、長期保有の実感に近い。
+                  */}
+                  {p.dividend && p.dividend.annualIncome > 0 ? (
+                    <div className="mt-2.5 border-t pt-2.5">
+                      <div className="flex items-baseline justify-between gap-2">
+                        <span className="flex items-center gap-1 text-[11px] text-muted-foreground">
+                          <Coins className="h-3 w-3" />
+                          年間配当
+                        </span>
+                        <span className="flex items-baseline gap-2">
+                          <MoneyText
+                            value={p.dividend.annualIncome}
+                            currency={p.currency}
+                            className="text-xs font-semibold text-gain"
+                          />
+                          <span className="tabular text-[11px] text-muted-foreground">
+                            {p.dividend.yieldPct !== null
+                              ? `利回り ${p.dividend.yieldPct.toFixed(2)}%`
+                              : ""}
+                          </span>
+                        </span>
+                      </div>
+                      <div className="mt-1 flex items-baseline justify-between gap-2 text-[11px]">
+                        <span className="text-muted-foreground">買った値段に対する利回り</span>
+                        <span className="tabular font-medium text-gain">
+                          {p.dividend.yieldOnCostPct !== null
+                            ? `${p.dividend.yieldOnCostPct.toFixed(2)}%`
+                            : "—"}
+                        </span>
+                      </div>
+                      {/*
+                        一時的な配当や異常な利回りは「来年も同じ」と誤解しやすいので
+                        その場で理由を書く。
+                      */}
+                      {p.dividend.yieldNeedsCheck ? (
+                        <p className="mt-1 text-[11px] text-amber-600 dark:text-amber-400">
+                          利回りが高すぎます。特別配当（記念配当）が含まれている可能性があるため、
+                          来期も同額とは限りません
+                        </p>
+                      ) : p.dividend.hasSpecial ? (
+                        <p className="mt-1 text-[11px] text-amber-600 dark:text-amber-400">
+                          一時的な配当を含みます。それを除くと利回り{" "}
+                          {p.dividend.recurringYieldPct !== null
+                            ? `${p.dividend.recurringYieldPct.toFixed(2)}%`
+                            : "—"}
+                        </p>
+                      ) : null}
+                    </div>
+                  ) : null}
+
                   {/* 複数口座で保有している場合の内訳 */}
                   <BrokerBreakdown
                     entries={p.entries}
@@ -624,6 +689,7 @@ export default function Holdings() {
                   <TableHead className="text-right">前日比</TableHead>
                   <TableHead className="text-right">評価額</TableHead>
                   <TableHead className="text-right">評価損益</TableHead>
+                  <TableHead className="text-right">年間配当</TableHead>
                   <TableHead className="text-right">構成比</TableHead>
                   <TableHead className="min-w-[110px]">AIシグナル</TableHead>
                   <TableHead className="w-[120px] text-right">操作</TableHead>
@@ -716,6 +782,51 @@ export default function Holdings() {
                           <PctText value={p.pnlPct} />
                         </div>
                       </div>
+                    </TableCell>
+                    {/*
+                      配当。年間受取額と現在値ベースの利回りを並べる。
+                      無配や未取得は「—」で区別せず空欄にせず、意味が伝わる表記にする。
+                    */}
+                    <TableCell className="text-right">
+                      {p.dividend && p.dividend.annualIncome > 0 ? (
+                        <div className="space-y-0.5">
+                          <MoneyText
+                            value={p.dividend.annualIncome}
+                            currency={p.currency}
+                            compact
+                            className="text-sm font-medium text-gain"
+                          />
+                          <div className="flex items-center justify-end gap-1">
+                            <span className="tabular text-xs text-muted-foreground">
+                              {p.dividend.yieldPct !== null
+                                ? `${p.dividend.yieldPct.toFixed(2)}%`
+                                : "—"}
+                            </span>
+                            {p.dividend.yieldNeedsCheck || p.dividend.hasSpecial ? (
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <AlertTriangle className="h-3 w-3 cursor-help text-amber-500" />
+                                </TooltipTrigger>
+                                <TooltipContent className="max-w-xs">
+                                  <p className="text-xs leading-relaxed">
+                                    {p.dividend.yieldNeedsCheck
+                                      ? "利回りが高すぎます。特別配当（記念配当）が含まれている可能性があり、来期も同額とは限りません。"
+                                      : `一時的な配当を含みます。それを除くと利回り ${
+                                          p.dividend.recurringYieldPct !== null
+                                            ? `${p.dividend.recurringYieldPct.toFixed(2)}%`
+                                            : "—"
+                                        } です。`}
+                                  </p>
+                                </TooltipContent>
+                              </Tooltip>
+                            ) : null}
+                          </div>
+                        </div>
+                      ) : (
+                        <span className="text-xs text-muted-foreground">
+                          {p.dividend ? "無配" : "未取得"}
+                        </span>
+                      )}
                     </TableCell>
                     <TableCell className="tabular text-right text-sm text-muted-foreground">
                       {p.weightPct !== null ? `${p.weightPct.toFixed(1)}%` : "—"}
@@ -854,6 +965,17 @@ export default function Holdings() {
                               </div>
                             </div>
                           </TableCell>
+                          {/* 口座ごとの年間配当。株数が違えば受取額も変わる */}
+                          <TableCell className="py-1.5 text-right">
+                            {e.dividend && e.dividend.annualIncome > 0 ? (
+                              <MoneyText
+                                value={e.dividend.annualIncome}
+                                currency={e.currency}
+                                compact
+                                className="text-xs text-gain"
+                              />
+                            ) : null}
+                          </TableCell>
                           <TableCell className="py-1.5" />
                           <TableCell className="py-1.5" />
                           <TableCell className="py-1.5">
@@ -883,7 +1005,7 @@ export default function Holdings() {
                 ))}
                 {rows.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={11} className="py-10 text-center text-sm text-muted-foreground">
+                    <TableCell colSpan={12} className="py-10 text-center text-sm text-muted-foreground">
                       条件に一致する銘柄がありません
                     </TableCell>
                   </TableRow>

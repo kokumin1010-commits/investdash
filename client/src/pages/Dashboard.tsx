@@ -26,6 +26,7 @@ import {
   ArrowUpRight,
   Brain,
   ChevronRight,
+  Coins,
   Globe,
   Landmark,
   RefreshCw,
@@ -121,6 +122,26 @@ export default function Dashboard() {
       }),
   });
 
+  /*
+   * 配当の取得。銘柄数が多いと本番の 180 秒制限を超えるため
+   * 株価更新と同じく分割実行する。
+   */
+  const syncDividendsBatch = trpc.portfolio.syncDividends.useMutation();
+  const dividendRun = useBatchRun({
+    runBatch: offset => syncDividendsBatch.mutateAsync({ offset, batchSize: 20, force: true }),
+    onDone: async results => {
+      await utils.portfolio.invalidate();
+      const updated = results.reduce((a, r) => a + r.updated, 0);
+      const failed = results.flatMap(r => r.failed);
+      toast.success(
+        failed.length > 0
+          ? `配当情報を更新しました（${failed.length} 銘柄は取得できませんでした）`
+          : `${updated} 件の配当情報を更新しました`
+      );
+    },
+    onError: e => toast.error(e instanceof Error ? e.message : "配当情報を取得できませんでした"),
+  });
+
   const data = overview.data;
   const summary = data?.summary;
   /**
@@ -128,13 +149,19 @@ export default function Dashboard() {
    * スナップショットが 2 件未満なら null。
    */
   const periodChange = summary?.periodChange ?? null;
+  /** 配当の全体集計。長期保有では実質的な収入になるので目立つ位置に出す */
+  const dividends = data?.dividends ?? null;
   /**
    * 資産推移の粒度。長期保有では月次のほうが傾向が読みやすいので既定を月次にする。
    */
   const [trendScale, setTrendScale] = useState<"day" | "month">("month");
 
   // どれか 1 つが動いている間は他の一括処理を止める（AI 利用枠と DB 競合を避ける）
-  const anyBusy = busy !== null || newsRun.progress.running || signalRun.progress.running;
+  const anyBusy =
+    busy !== null ||
+    newsRun.progress.running ||
+    signalRun.progress.running ||
+    dividendRun.progress.running;
 
   const sectorChart = useMemo(() => {
     if (!data) return [];
@@ -264,6 +291,19 @@ export default function Dashboard() {
               ? `ニュース取得中 ${newsRun.progress.processed}/${newsRun.progress.total || "…"}`
               : "ニュース取得"}
           </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={anyBusy || isEmpty}
+            onClick={() => void dividendRun.start()}
+          >
+            <Coins
+              className={`mr-1.5 h-3.5 w-3.5 ${dividendRun.progress.running ? "animate-spin" : ""}`}
+            />
+            {dividendRun.progress.running
+              ? `配当取得中 ${dividendRun.progress.processed}/${dividendRun.progress.total || "…"}`
+              : "配当更新"}
+          </Button>
           <Button size="sm" disabled={anyBusy || isEmpty} onClick={() => void signalRun.start()}>
             <Brain
               className={`mr-1.5 h-3.5 w-3.5 ${signalRun.progress.running ? "animate-pulse" : ""}`}
@@ -280,7 +320,7 @@ export default function Dashboard() {
       ) : (
         <>
           {/* サマリーカード */}
-          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
             <StatCard
               /*
                * 借入がある場合、株式時価は「自分のお金」ではない。
@@ -432,6 +472,77 @@ export default function Dashboard() {
               }
               icon={<ArrowUpRight className="h-4 w-4" />}
             />
+          </div>
+
+          {/* 配当と AI シグナル */}
+          <div className="grid gap-4 sm:grid-cols-2">
+            {/*
+              長期保有では配当が実質的な収入になる。
+              「年間いくら入るか」を最初に出し、月あたりの平均も添える。
+            */}
+            <StatCard
+              label="年間配当（税引前）"
+              valueNode={
+                <span className="whitespace-nowrap text-2xl font-semibold text-gain">
+                  {dividends && dividends.annualIncomeBase > 0
+                    ? formatMoney(dividends.annualIncomeBase, summary?.baseCurrency)
+                    : "—"}
+                </span>
+              }
+              sub={
+                dividends && dividends.annualIncomeBase > 0 ? (
+                  <span className="block space-y-1">
+                    <span className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+                      <span className="tabular font-medium">
+                        月あたり {formatMoney(dividends.monthlyAverageBase, summary?.baseCurrency)}
+                      </span>
+                      <span className="text-muted-foreground">
+                        （年間を 12 で割った平均）
+                      </span>
+                    </span>
+                    <span className="flex items-center justify-between gap-2">
+                      <span className="text-muted-foreground">今の株価に対する利回り</span>
+                      <span className="tabular font-medium">
+                        {dividends.yieldPct !== null ? `${dividends.yieldPct.toFixed(2)}%` : "—"}
+                      </span>
+                    </span>
+                    <span className="flex items-center justify-between gap-2">
+                      <span className="text-muted-foreground">買った値段に対する利回り</span>
+                      <span className="tabular font-medium text-gain">
+                        {dividends.yieldOnCostPct !== null
+                          ? `${dividends.yieldOnCostPct.toFixed(2)}%`
+                          : "—"}
+                      </span>
+                    </span>
+                    <span className="block border-t pt-1 text-[11px] text-muted-foreground">
+                      配当あり {dividends.payingCount} 銘柄 / 無配 {dividends.nonPayingCount} 銘柄
+                      {dividends.unknownCount > 0 ? ` / 未取得 ${dividends.unknownCount} 銘柄` : ""}
+                    </span>
+                    {/*
+                      特別配当（記念配当）が含まれる銘柄があると、
+                      来年も同額もらえると誤解しやすいので除いた額も出す。
+                    */}
+                    {dividends.specialCount > 0 ? (
+                      <span className="block text-[11px] text-amber-600 dark:text-amber-400">
+                        {dividends.specialCount} 銘柄に一時的な配当（特別・記念配当）が含まれます。
+                        それを除くと年間{" "}
+                        {formatMoney(dividends.recurringIncomeBase, summary?.baseCurrency)}
+                      </span>
+                    ) : null}
+                    {dividends.updatedAt ? (
+                      <span className="block text-[11px] text-muted-foreground">
+                        配当情報の取得: {new Date(dividends.updatedAt).toLocaleDateString("ja-JP")}
+                      </span>
+                    ) : null}
+                  </span>
+                ) : (
+                  <span className="text-[11px] text-muted-foreground">
+                    「配当更新」を実行すると年間の受取額を計算します
+                  </span>
+                )
+              }
+              icon={<Coins className="h-4 w-4" />}
+            />
             <Card>
               <CardHeader className="pb-2">
                 <CardDescription className="flex items-center gap-1.5 text-xs font-medium">
@@ -526,6 +637,20 @@ export default function Dashboard() {
                           </span>
                         </div>
                       ) : null}
+                      {/* その市場から年間いくら配当が入るか。長期保有では重要な収入源 */}
+                      {m.dividendIncomeBase > 0 ? (
+                        <div className="mt-1.5 flex items-baseline justify-between gap-2 border-t pt-1.5 text-xs">
+                          <span className="text-muted-foreground">年間配当</span>
+                          <span className="flex items-baseline gap-1.5">
+                            <span className="tabular font-medium text-gain">
+                              {formatMoney(m.dividendIncomeBase, summary?.baseCurrency)}
+                            </span>
+                            <span className="tabular text-muted-foreground">
+                              {m.dividendYieldPct !== null ? `${m.dividendYieldPct.toFixed(2)}%` : ""}
+                            </span>
+                          </span>
+                        </div>
+                      ) : null}
                       <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-muted">
                         <div
                           className="h-full rounded-full transition-all"
@@ -603,6 +728,20 @@ export default function Dashboard() {
                           }}
                         />
                       </div>
+                      {/* その口座から年間いくら配当が入るか */}
+                      {b.dividendIncomeBase > 0 ? (
+                        <div className="mt-2 flex items-baseline justify-between gap-2 border-t pt-1.5 text-xs">
+                          <span className="text-muted-foreground">年間配当</span>
+                          <span className="flex items-baseline gap-1.5">
+                            <span className="tabular font-medium text-gain">
+                              {formatMoney(b.dividendIncomeBase, summary?.baseCurrency)}
+                            </span>
+                            <span className="tabular text-muted-foreground">
+                              {b.dividendYieldPct !== null ? `${b.dividendYieldPct.toFixed(2)}%` : ""}
+                            </span>
+                          </span>
+                        </div>
+                      ) : null}
                       {/*
                         信用取引を使っている口座のみ、借入・純資産・追証余地を出す。
                         現物口座では該当しない項目なので出さない。

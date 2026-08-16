@@ -52,6 +52,33 @@ export type GroupedPosition = {
   newsCount: number;
   negativeNewsCount: number;
   priceUpdatedAt: Date | null;
+  /**
+   * 配当の合算。1 株あたりの配当額は銘柄共通だが、
+   * 受取額は保有株数に比例するため口座をまたいで合計する。
+   * 未取得なら null。
+   */
+  dividend: GroupedDividend | null;
+};
+
+export type GroupedDividend = {
+  /** 1 株あたりの年間配当（現地通貨・税引前） */
+  perShare: number;
+  /** 全口座合計の年間受取額（現地通貨） */
+  annualIncome: number;
+  /** 全口座合計の年間受取額（円換算） */
+  annualIncomeBase: number | null;
+  /** 現在値に対する利回り（%） */
+  yieldPct: number | null;
+  /** 加重平均取得単価に対する利回り（%） */
+  yieldOnCostPct: number | null;
+  count: number;
+  lastDate: Date | null;
+  /** 特別配当が含まれているか */
+  hasSpecial: boolean;
+  /** 利回りが実勢としてありえない水準（8% 超）か */
+  yieldNeedsCheck: boolean;
+  /** 特別配当を除いた場合の利回り（%） */
+  recurringYieldPct: number | null;
 };
 
 /** 合計 = 各口座の単純合計。null（価格未取得）は 0 として扱わず null を伝播させない */
@@ -104,6 +131,32 @@ export function groupPositionsBySymbol(
       return e.priceUpdatedAt > acc ? e.priceUpdatedAt : acc;
     }, null);
 
+    /*
+     * 配当の合算。1 株あたりの配当額は銘柄共通なので代表値を採り、
+     * 受取額は各口座の株数に応じた額を足し合わせる。
+     * 取得原価に対する利回りは加重平均取得単価を使う。
+     */
+    const divEntry = entries.find(e => e.dividend !== null)?.dividend ?? null;
+    const avgCostForYield = quantity > 0 ? costValue / quantity : 0;
+    const dividend = divEntry
+      ? {
+          perShare: divEntry.perShare,
+          annualIncome: divEntry.perShare * quantity,
+          annualIncomeBase: sumOrNull(entries.map(e => e.dividend?.annualIncomeBase ?? null)),
+          yieldPct:
+            currentPrice !== null && currentPrice > 0
+              ? (divEntry.perShare / currentPrice) * 100
+              : null,
+          yieldOnCostPct:
+            avgCostForYield > 0 ? (divEntry.perShare / avgCostForYield) * 100 : null,
+          count: divEntry.count,
+          lastDate: divEntry.lastDate,
+          hasSpecial: divEntry.hasSpecial,
+          yieldNeedsCheck: divEntry.yieldNeedsCheck,
+          recurringYieldPct: divEntry.recurringYieldPct,
+        }
+      : null;
+
     return {
       symbol: head.symbol,
       tickerCode: head.tickerCode,
@@ -138,6 +191,7 @@ export function groupPositionsBySymbol(
       newsCount: Math.max(...entries.map(e => e.newsCount)),
       negativeNewsCount: Math.max(...entries.map(e => e.negativeNewsCount)),
       priceUpdatedAt,
+      dividend,
     } satisfies GroupedPosition;
   });
 
