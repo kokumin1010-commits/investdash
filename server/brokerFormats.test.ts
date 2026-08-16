@@ -157,8 +157,59 @@ describe("BROKER_FORMAT_OPTIONS", () => {
       "moomoo_jp",
       "rakuten_ispeed",
       "ibkr",
+      "sc_sg",
       "futu",
       "generic",
     ]);
+  });
+});
+
+describe("渣打銀行 シンガポール（SC Mobile Trading）", () => {
+  const format = getBrokerFormat("sc_sg");
+
+  it("実画面で検証済みのレイアウト定義を持つ", () => {
+    expect(format.id).toBe("sc_sg");
+    expect(format.layoutPrompt).not.toBeNull();
+    expect(BROKER_FORMAT_OPTIONS.find(o => o.id === "sc_sg")?.verified).toBe(true);
+  });
+
+  it("日本株と SGX が混在するため通貨を固定しない", () => {
+    expect(format.currency).toBeNull();
+    expect(format.market).toBe("MIXED");
+  });
+
+  it("アプリ名から判定できる", () => {
+    expect(guessFormatFromBrokerName("SC Mobile Trading")).toBe("sc_sg");
+    expect(guessFormatFromBrokerName("Standard Chartered Bank (Singapore)")).toBe("sc_sg");
+    expect(guessFormatFromBrokerName("渣打銀行")).toBe("sc_sg");
+  });
+
+  it("平均単価は損益率から逆算するよう指示している", () => {
+    // 現在値から求めると誤差が 5 倍になるため、必ず損益率を使わせる
+    expect(format.layoutPrompt).toContain("含み損益 ÷ (含み損益率 ÷ 100)");
+    expect(format.layoutPrompt).toContain("必ず損益率から求める");
+  });
+
+  it("LTV を借入と誤認しないよう指示している", () => {
+    // LTV 70% は担保価値の割合であって借入残高ではない
+    expect(format.layoutPrompt).toContain("LTV");
+    expect(format.layoutPrompt).toContain("借入として扱ってはならない");
+  });
+
+  it("市場サフィックスから市場と通貨を判定するよう指示している", () => {
+    expect(format.layoutPrompt).toContain(".JP");
+    expect(format.layoutPrompt).toContain(".SG");
+    expect(format.layoutPrompt).toContain(".SI");
+  });
+
+  it("セクション小計を銘柄として取り込まないよう指示している", () => {
+    expect(format.layoutPrompt).toContain("セクション小計は保有銘柄ではない");
+    expect(format.layoutPrompt).toContain("Total Mkt Value");
+  });
+
+  it("画面を見分ける特徴に固有の文字列を含む", () => {
+    expect(format.signatures).toContain("SC Mobile Trading");
+    expect(format.signatures).toContain("My Holdings Total Value");
+    expect(format.signatures).toContain("Ind. Invested Amt");
   });
 });

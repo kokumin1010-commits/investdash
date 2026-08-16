@@ -79,7 +79,7 @@ export type Market = "JP" | "US" | "SG" | "OTHER";
  * 証券プラットフォーム（どの口座で保有しているか）
  * ------------------------------------------------------------------ */
 
-export const BROKERS = ["moomoo_jp", "rakuten_ispeed", "futu", "ibkr", "other"] as const;
+export const BROKERS = ["moomoo_jp", "rakuten_ispeed", "futu", "ibkr", "sc_sg", "other"] as const;
 export type Broker = (typeof BROKERS)[number];
 
 export const BROKER_LABELS: Record<Broker, string> = {
@@ -87,6 +87,7 @@ export const BROKER_LABELS: Record<Broker, string> = {
   rakuten_ispeed: "楽天証券 iSPEED",
   futu: "富途牛牛 / Futu",
   ibkr: "IBKR シンガポール",
+  sc_sg: "渣打銀行 シンガポール",
   other: "その他",
 };
 
@@ -96,6 +97,7 @@ export const BROKER_SHORT: Record<Broker, string> = {
   rakuten_ispeed: "楽天",
   futu: "富途",
   ibkr: "IBKR",
+  sc_sg: "渣打",
   other: "その他",
 };
 
@@ -108,6 +110,7 @@ export const BROKER_STYLES: Record<Broker, string> = {
   rakuten_ispeed: "bg-red-500/15 text-red-600 border-red-500/30 dark:text-red-400",
   futu: "bg-blue-500/15 text-blue-600 border-blue-500/30 dark:text-blue-400",
   ibkr: "bg-violet-500/15 text-violet-600 border-violet-500/30 dark:text-violet-400",
+  sc_sg: "bg-teal-500/15 text-teal-700 border-teal-500/30 dark:text-teal-400",
   other: "bg-muted text-muted-foreground border-border",
 };
 
@@ -117,6 +120,7 @@ export const BROKER_HEX: Record<Broker, string> = {
   rakuten_ispeed: "#dc2626",
   futu: "#2563eb",
   ibkr: "#7c3aed",
+  sc_sg: "#0d9488",
   other: "#94a3b8",
 };
 
@@ -129,6 +133,7 @@ export const BROKER_BASE_CURRENCY: Record<Broker, string> = {
   rakuten_ispeed: "JPY",
   futu: "HKD",
   ibkr: "SGD",
+  sc_sg: "SGD",
   other: "JPY",
 };
 
@@ -163,6 +168,8 @@ export function brokerFromFormatId(formatId?: string | null): Broker {
       return "futu";
     case "ibkr":
       return "ibkr";
+    case "sc_sg":
+      return "sc_sg";
     default:
       return "other";
   }

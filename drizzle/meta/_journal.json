@@ -64,6 +64,13 @@
       "when": 1786865140577,
       "tag": "0008_smart_madripoor",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "5",
+      "when": 1786868612900,
+      "tag": "0009_curvy_the_call",
+      "breakpoints": true
     }
   ]
 }

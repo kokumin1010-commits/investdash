@@ -10,7 +10,15 @@ import {
   timestamp,
   varchar,
 } from "drizzle-orm/mysql-core";
+import { BROKERS, MARKETS } from "../shared/investing";
 
+/*
+ * broker / market の候補は shared/investing.ts の定数を唯一の出典とする。
+ * ここで文字列を再掲すると、口座や市場を追加したときにスキーマ側の更新が
+ * 漏れて「型は通るが DB が受け付けない」状態になるため、定数から生成する。
+ */
+const BROKER_ENUM = BROKERS as unknown as [(typeof BROKERS)[number], ...(typeof BROKERS)[number][]];
+const MARKET_ENUM = MARKETS as unknown as [(typeof MARKETS)[number], ...(typeof MARKETS)[number][]];
 /**
  * Core user table backing auth flow.
  * Columns use camelCase to match both database fields and generated types.
@@ -49,10 +57,10 @@ export const holdings = mysqlTable(
     tickerCode: varchar("tickerCode", { length: 16 }).notNull(),
     /** 表示名（ユーザー確認済みの名称。日本語可） */
     name: varchar("name", { length: 160 }).notNull(),
-    market: mysqlEnum("market", ["JP", "US", "SG", "OTHER"]).default("JP").notNull(),
+    market: mysqlEnum("market", MARKET_ENUM).default("JP").notNull(),
     currency: varchar("currency", { length: 8 }).default("JPY").notNull(),
     /** どの証券プラットフォームで保有しているか */
-    broker: mysqlEnum("broker", ["moomoo_jp", "rakuten_ispeed", "futu", "ibkr", "other"])
+    broker: mysqlEnum("broker", BROKER_ENUM)
       .default("other")
       .notNull(),
     /** 保有株数 */
@@ -212,7 +220,7 @@ export const watchlist = mysqlTable(
     symbol: varchar("symbol", { length: 24 }).notNull(),
     tickerCode: varchar("tickerCode", { length: 16 }).notNull(),
     name: varchar("name", { length: 160 }).notNull(),
-    market: mysqlEnum("market", ["JP", "US", "SG", "OTHER"]).default("JP").notNull(),
+    market: mysqlEnum("market", MARKET_ENUM).default("JP").notNull(),
     currency: varchar("currency", { length: 8 }).default("JPY").notNull(),
     currentPrice: decimal("currentPrice", { precision: 20, scale: 4 }),
     previousClose: decimal("previousClose", { precision: 20, scale: 4 }),
@@ -347,7 +355,7 @@ export const brokerBalances = mysqlTable(
     id: int("id").autoincrement().primaryKey(),
     userId: int("userId").notNull(),
     /** 対象の証券プラットフォーム */
-    broker: mysqlEnum("broker", ["moomoo_jp", "rakuten_ispeed", "futu", "ibkr", "other"]).notNull(),
+    broker: mysqlEnum("broker", BROKER_ENUM).notNull(),
     /** この口座の基軸通貨（IBKR シンガポールは SGD） */
     currency: varchar("currency", { length: 8 }).default("JPY").notNull(),
     /**

@@ -6,7 +6,13 @@
  * 未知のアプリは `generic` として汎用ルールで処理する。
  */
 
-export type BrokerFormatId = "moomoo_jp" | "rakuten_ispeed" | "ibkr" | "futu" | "generic";
+export type BrokerFormatId =
+  | "moomoo_jp"
+  | "rakuten_ispeed"
+  | "ibkr"
+  | "sc_sg"
+  | "futu"
+  | "generic";
 
 export type BrokerFormat = {
   id: BrokerFormatId;
@@ -15,7 +21,7 @@ export type BrokerFormat = {
   /** 想定される基準通貨 */
   currency: string | null;
   /** 想定される市場 */
-  market: "JP" | "US" | "HK" | "TW" | "MIXED" | null;
+  market: "JP" | "US" | "HK" | "TW" | "SG" | "MIXED" | null;
   /** 画面からこのフォーマットを見分けるための特徴 */
   signatures: string[];
   /** LLM に渡すレイアウト説明。null の場合は汎用ルールのみを使う */
@@ -321,7 +327,139 @@ const GENERIC: BrokerFormat = {
   layoutPrompt: null,
 };
 
-export const BROKER_FORMATS: BrokerFormat[] = [MOOMOO_JP, RAKUTEN_ISPEED, IBKR, FUTU, GENERIC];
+/** 渣打銀行 シンガポール（SC Mobile Trading）。実画面 4 枚で検証済み */
+const SC_SG: BrokerFormat = {
+  id: "sc_sg",
+  label: "渣打銀行 シンガポール",
+  /** 日本株（JPY）とシンガポール株（SGD）が同一口座に混在する */
+  currency: null,
+  market: "MIXED",
+  signatures: [
+    "SC Mobile Trading",
+    "Standard Chartered",
+    "My Holdings Total Value",
+    "Total Unrealized P/L",
+    "View Realized P/L",
+    "Mkt Price",
+    "Total Qty",
+    "Mkt Value",
+    "Unrealized P/L",
+    "Ind. Invested Amt",
+    "Ind. Selling Fee",
+    "LTV (%)",
+    "Roundup",
+    "Delayed SG Stock update",
+    "Delayed JP Stock update",
+  ],
+  layoutPrompt: `このスクリーンショットは渣打銀行（Standard Chartered Bank Singapore）の
+「SC Mobile Trading」アプリの Portfolio 画面である。
+
+## この口座の性質
+
+基軸通貨は SGD だが**現物取引のみで信用取引（借入）は使っていない**。
+「LTV (%) 70%」という表示は担保価値の割合であって借入残高ではない。
+借入として扱ってはならない。
+
+## 画面構造（表ではなくカード形式）
+
+moomoo や iSPEED のような表組みではない。**1 銘柄が 1 枚のカード**として
+縦に積まれ、カード内はラベル付きの 2 行 × 2 列になっている。
+
+| 位置 | ラベル | 内容 |
+|---|---|---|
+| 左上 | Mkt Price | 現在値（通貨記号付き。例 SGD 75.5300 / JPY 4,343.0000） |
+| 右上 | Total Qty | 保有数量 |
+| 左下 | Mkt Value | 評価額 |
+| 右下 | Unrealized P/L (%) | 含み損益の金額と損益率 |
+
+カード見出しは「D05.SG DBS GROUP HOLDINGS ORD」のように
+**銘柄コード + 市場サフィックス + 半角スペース + 英語社名**である。
+
+## 銘柄コードと市場の判定（サフィックスを使う）
+
+コード末尾のサフィックスで市場と通貨が確定する。推測してはならない。
+
+| サフィックス | 市場 | market | currency | symbol |
+|---|---|---|---|---|
+| .JP | 東京証券取引所 | JP | JPY | 4 桁コード + .T（例 7270.JP → 7270.T） |
+| .SG | シンガポール取引所 | SG | SGD | コード + .SI（例 D05.SG → D05.SI） |
+| .US | 米国 | US | USD | ティッカーそのまま |
+
+**tickerCode には サフィックスを除いたコード**（7270、D05、C38U）を入れる。
+
+## 市場ごとのセクション見出し
+
+カードの上に「TSE」「SGX」のような取引所名の見出し行があり、
+その右にセクション小計（評価額と含み損益）が SGD 換算で表示される。
+
+- **セクション小計は保有銘柄ではない。holdings に入れてはならない。**
+- 「Total Mkt Value」「Total Unrealized P/L」と書かれた行も小計であり銘柄ではない
+- セクション小計は notes に記録する（読み取り漏れの検算に使える）
+
+## 通貨の扱い（重要）
+
+各銘柄の Mkt Price と Mkt Value は**その銘柄の現地通貨**で表示される。
+一方でセクション小計と画面最上部の「My Holdings Total Value」は
+**SGD 換算**である。混同すると評価額が 100 倍以上ずれる。
+
+例: 9449.JP の Mkt Price は「JPY 4,343.0000」、Mkt Value は「JPY 1.74M」だが、
+TSE セクションの小計は「SGD 54,761.41」である。
+
+## 平均取得単価の求め方（この画面の最大の注意点）
+
+カードを畳んだ状態では **Avg Price が表示されない**。
+その場合は次の式で逆算する。
+
+    取得原価 = 含み損益 ÷ (含み損益率 ÷ 100)
+    avgCost  = 取得原価 ÷ 数量
+
+「現在値 × 数量 − 含み損益」から求める方法もあるが、現在値が遅延値かつ
+丸められているため誤差が 5 倍大きくなる。**必ず損益率から求める。**
+
+カードが展開されている銘柄には「Avg Price」が表示される。
+**その場合は表示値をそのまま使い、逆算しない。**
+展開時には他に「Ind. Invested Amt」（取得原価）、「LTV (%)」、
+「Ind. Selling Fee」（売却手数料）も出るが、これらは holdings の項目ではない。
+
+## Mkt Value の M 表記
+
+日本株では「JPY 1.74M」「JPY 3.05M」のように百万単位で丸められる。
+**1.74M は 1,740,000 と解釈する。**ただし 3 桁に丸められているため、
+この値を数量や単価の算出に使ってはならない（Total Qty と損益率を使う）。
+
+## 画面最上部が写っている場合
+
+「Account: 6090059」の下に「My Holdings Total Value」（口座合計・SGD）と
+「Total Unrealized P/L」（含み損益・SGD）が表示される。
+これらは口座サマリーなので holdings ではなく notes に記録する。
+
+「ALL / ASIA / US / EUROPE」はフィルタタブである。ALL が選択されている場合は
+全市場が表示されているので、notes に「ALL タブ表示」と記録する。
+
+## 無視すべき要素
+
+- 画面下部の「Portfolio / Orders / Trade / Roundup / Watchlist / More」はナビゲーション
+- 「BUY」「SELL」の緑と青のボタンは操作ボタンでデータではない
+- 「View Realized P/L」ボタン、各ラベル横の「?」アイコン
+- 「Delayed JP Stock update at 14/08/2026 14:30 SGT」は株価の遅延表示の注記。
+  ただし何時点の株価かは notes に記録する
+- 「Copyright © 2026 Standard Chartered Bank (Singapore) Limited」以下のフッタ
+- カード右端の ∨ / ∧ は展開ボタン
+
+## 符号の判断
+
+含み益は緑、含み損は赤で表示され、含み損には数値の前に − が付く。
+**色ではなく符号で判断する。**例: 「JPY -310,468.80 (-13.08%)」は含み損。`,
+};
+
+export const BROKER_FORMATS: BrokerFormat[] = [
+  MOOMOO_JP,
+  RAKUTEN_ISPEED,
+  IBKR,
+  SC_SG,
+  FUTU,
+  GENERIC,
+];
 
 /**
  * zod の enum に渡すためのフォーマット ID 一覧。
@@ -363,6 +501,16 @@ export function guessFormatFromBrokerName(brokerName: string | null): BrokerForm
     return "ibkr";
   }
   if (normalized.includes("futu") || normalized.includes("富途")) return "futu";
+
+  // 渣打銀行（Standard Chartered）。アプリ名は SC Mobile Trading
+  if (
+    normalized.includes("standard chartered") ||
+    normalized.includes("sc mobile") ||
+    normalized.includes("渣打") ||
+    normalized.includes("scb")
+  ) {
+    return "sc_sg";
+  }
 
   return "generic";
 }

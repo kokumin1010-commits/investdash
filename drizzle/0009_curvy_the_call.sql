@@ -1,0 +1,2 @@
+ALTER TABLE `brokerBalances` MODIFY COLUMN `broker` enum('moomoo_jp','rakuten_ispeed','futu','ibkr','sc_sg','other') NOT NULL;--> statement-breakpoint
+ALTER TABLE `holdings` MODIFY COLUMN `broker` enum('moomoo_jp','rakuten_ispeed','futu','ibkr','sc_sg','other') NOT NULL DEFAULT 'other';
