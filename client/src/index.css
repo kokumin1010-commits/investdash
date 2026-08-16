@@ -1,6 +1,15 @@
 @import "tailwindcss";
 @import "tw-animate-css";
 
+/*
+ * Tailwind 4 は Vite の root（client/）配下だけを走査するため、
+ * shared/ に書いたクラス名（口座バッジの色など）は CSS が生成されず無効になる。
+ * 口座やシグナルの色は画面とグラフで共通の定義を 1 か所に保つ必要があるので、
+ * クラス名を client 側へ複製するのではなく走査範囲を広げて解決する。
+ */
+@source "../../shared";
+@source "../../server/services";
+
 @custom-variant dark (&:is(.dark *));
 
 @theme inline {

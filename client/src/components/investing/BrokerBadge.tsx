@@ -11,6 +11,8 @@ type Props = {
 /**
  * どの証券プラットフォームで保有しているかを示すバッジ。
  * 一覧をざっと眺めたときに口座の違いが色で判別できるよう、各社のブランドカラーに寄せている。
+ * 色は shared/investing.ts の BROKER_STYLES を単一の出典とし、
+ * 表の縦線や円グラフ（BROKER_HEX）と同じ色相で揃えている。
  */
 export function BrokerBadge({ broker, short = false, className }: Props) {
   const label = short ? brokerShort(broker) : brokerLabel(broker);
@@ -24,12 +26,7 @@ export function BrokerBadge({ broker, short = false, className }: Props) {
       )}
       title={brokerLabel(broker)}
     >
-      <span
-        aria-hidden
-        className="size-1.5 rounded-full bg-current opacity-70"
-      />
       {label}
     </span>
   );
 }
-
