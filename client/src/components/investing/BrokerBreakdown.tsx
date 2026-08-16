@@ -1,6 +1,6 @@
 import { BrokerBadge } from "@/components/investing/BrokerBadge";
 import { MoneyText, PctText, PnlText } from "@/components/investing/Figures";
-import { formatNumber, type Broker } from "@shared/investing";
+import { brokerHex, formatNumber, type Broker } from "@shared/investing";
 
 /**
  * 同一銘柄を複数の証券口座で保有している場合の内訳。
@@ -16,6 +16,11 @@ export type BreakdownEntry = {
   pnl: number | null;
   pnlPct: number | null;
   currency: string;
+  /**
+   * 口座ごとの年間配当。株数が違えば受取額も変わるため、
+   * どの口座がいくら配当を生んでいるかを内訳でも確認できるようにする。
+   */
+  dividend?: { annualIncome: number } | null;
 };
 
 export function BrokerBreakdown({
@@ -43,10 +48,18 @@ export function BrokerBreakdown({
           /**
            * スマホ幅（375px 前後）では株数・単価・損益・操作を 1 行に収めると
            * 文字が重なってしまうため、2 段に分けて折り返す。
+           *
+           * また左端に口座の色を帯で出す。バッジだけだと口座が 2〜3 並んだとき
+           * 「どこからどこまでが同じ口座か」を視線で追いにくいため。
            */
-          className="space-y-0.5 border-b border-border/40 pb-1.5 last:border-0 last:pb-0"
+          className="relative space-y-0.5 border-b border-border/40 pb-1.5 pl-2.5 last:border-0 last:pb-0"
           data-testid="breakdown-row"
         >
+          <span
+            aria-hidden
+            className="absolute inset-y-0 left-0 w-1 rounded-full"
+            style={{ backgroundColor: brokerHex(e.broker) }}
+          />
           {/* 1 段目: 口座と損益 */}
           <div className="flex items-center justify-between gap-2">
             <BrokerBadge broker={e.broker} short />
@@ -62,6 +75,17 @@ export function BrokerBreakdown({
             <span className="tabular truncate">
               {formatNumber(e.quantity, 0)}株 @{" "}
               <MoneyText value={e.avgCost} currency={e.currency} className="tabular" />
+              {e.dividend && e.dividend.annualIncome > 0 ? (
+                <>
+                  {" ・配当 "}
+                  <MoneyText
+                    value={e.dividend.annualIncome}
+                    currency={e.currency}
+                    compact
+                    className="tabular text-gain"
+                  />
+                </>
+              ) : null}
             </span>
             {!compact && (onEdit || onDelete) ? (
               <span className="flex shrink-0 items-center gap-2">

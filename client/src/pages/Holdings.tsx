@@ -43,6 +43,7 @@ import {
   MARKETS,
   SIGNAL_ACTIONS,
   formatNumber,
+  brokerHex,
   marketHex,
   marketLabel,
   parseMarketFilter,
@@ -68,7 +69,11 @@ import { Fragment, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { Link, useLocation, useSearch } from "wouter";
 
-type SortKey = "value" | "pnlPct" | "weight" | "name" | "day" | "dividend" | "dividendYield";
+/**
+ * 並び替えの軸。長期保有が前提のため「前日比順」は置かない
+ * （日々の変動は判断材料にならず、長期の損益や配当のほうが役に立つ）。
+ */
+type SortKey = "value" | "pnlPct" | "weight" | "name" | "dividend" | "dividendYield";
 
 export default function Holdings() {
   const utils = trpc.useUtils();
@@ -169,8 +174,6 @@ export default function Holdings() {
           return (b.pnlPct ?? -Infinity) - (a.pnlPct ?? -Infinity);
         case "weight":
           return (b.weightPct ?? 0) - (a.weightPct ?? 0);
-        case "day":
-          return (b.dayChangePct ?? -Infinity) - (a.dayChangePct ?? -Infinity);
         case "name":
           return a.name.localeCompare(b.name, "ja");
         /*
@@ -432,7 +435,6 @@ export default function Holdings() {
             <SelectItem value="value">評価額順</SelectItem>
             <SelectItem value="pnlPct">損益率順</SelectItem>
             <SelectItem value="weight">構成比順</SelectItem>
-            <SelectItem value="day">前日比順</SelectItem>
             <SelectItem value="dividend">配当額順</SelectItem>
             <SelectItem value="dividendYield">配当利回り順</SelectItem>
             <SelectItem value="name">銘柄名順</SelectItem>
@@ -685,11 +687,10 @@ export default function Holdings() {
                     <TableHead className="min-w-[110px]">口座</TableHead>
                     <TableHead className="text-right">株数</TableHead>
                   <TableHead className="text-right">取得単価</TableHead>
-                  <TableHead className="text-right">現在値</TableHead>
-                  <TableHead className="text-right">前日比</TableHead>
+                    <TableHead className="text-right">現在値</TableHead>
                   <TableHead className="text-right">評価額</TableHead>
-                  <TableHead className="text-right">評価損益</TableHead>
-                  <TableHead className="text-right">年間配当</TableHead>
+                  <TableHead className="min-w-[130px] text-right">評価損益</TableHead>
+                  <TableHead className="min-w-[120px] text-right">年間配当</TableHead>
                   <TableHead className="text-right">構成比</TableHead>
                   <TableHead className="min-w-[110px]">AIシグナル</TableHead>
                   <TableHead className="w-[120px] text-right">操作</TableHead>
@@ -698,8 +699,17 @@ export default function Holdings() {
               <TableBody>
                 {rows.map(p => (
                   <Fragment key={p.symbol}>
-                  <TableRow className={`group ${p.isSplit ? "border-b-0" : ""}`}>
-                    <TableCell>
+                  {/*
+                    複数口座の銘柄は「合計行 + 内訳行」のまとまりになる。
+                    まとまりの境目が分かるよう、合計行の上に太めの区切り線を置き、
+                    合計行自体は白背景のまま（内訳だけ色を敷く）にして主従を示す。
+                  */}
+                  <TableRow
+                    className={`group ${
+                      p.isSplit ? "border-b-0 border-t-2 border-t-border/70" : ""
+                    }`}
+                  >
+                    <TableCell className={p.isSplit ? "font-medium" : undefined}>
                       <Link href={`/holdings/${p.entries[0].id}`} className="block space-y-0.5">
                         <div className="flex items-center gap-1.5">
                           <span className="font-medium hover:underline">{p.name}</span>
@@ -768,9 +778,6 @@ export default function Holdings() {
                     </TableCell>
                     <TableCell className="text-right">
                       <MoneyText value={p.currentPrice} currency={p.currency} />
-                    </TableCell>
-                    <TableCell className="text-right">
-                      <PctText value={p.dayChangePct} />
                     </TableCell>
                     <TableCell className="text-right">
                       <MoneyText value={p.marketValue} currency={p.currency} compact />
@@ -927,13 +934,23 @@ export default function Holdings() {
                     ? p.entries.map((e, i) => (
                         <TableRow
                           key={`sub-${e.id}`}
-                          className={`bg-muted/25 hover:bg-muted/40 ${
+                          className={`bg-muted/40 hover:bg-muted/60 ${
                             i === p.entries.length - 1 ? "" : "border-b-0"
                           }`}
                           data-testid="desktop-breakdown-row"
                         >
-                          <TableCell className="py-1.5">
-                            <span className="pl-4 text-xs text-muted-foreground">
+                          {/*
+                            内訳行の左端に口座の色を縦線で出す。バッジだけだと
+                            行が続いたときに「どの口座の行か」を追いにくいため、
+                            行そのものに色の帯を持たせて視線で追えるようにする。
+                          */}
+                          <TableCell className="relative py-1.5">
+                            <span
+                              aria-hidden
+                              className="absolute inset-y-0 left-0 w-1"
+                              style={{ backgroundColor: brokerHex(e.broker) }}
+                            />
+                            <span className="pl-5 text-xs text-muted-foreground">
                               {i === p.entries.length - 1 ? "└" : "├"} 内訳
                             </span>
                           </TableCell>
@@ -946,8 +963,7 @@ export default function Holdings() {
                           <TableCell className="py-1.5 text-right text-xs">
                             <MoneyText value={e.avgCost} currency={e.currency} />
                           </TableCell>
-                          {/* 現在値・前日比は口座によらず同じなので繰り返さない */}
-                          <TableCell className="py-1.5" />
+                          {/* 現在値は口座によらず同じなので繰り返さない */}
                           <TableCell className="py-1.5" />
                           <TableCell className="py-1.5 text-right text-xs">
                             <MoneyText value={e.marketValue} currency={e.currency} compact />
@@ -1005,7 +1021,7 @@ export default function Holdings() {
                 ))}
                 {rows.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={12} className="py-10 text-center text-sm text-muted-foreground">
+                    <TableCell colSpan={11} className="py-10 text-center text-sm text-muted-foreground">
                       条件に一致する銘柄がありません
                     </TableCell>
                   </TableRow>
