@@ -114,6 +114,22 @@ export const portfolioRouter = router({
         breakdown.__reportedNetValue = input.reportedNetValue;
       }
 
+      /*
+       * 設定画面からは借入額と維持証拠金だけを直したいことが多い。
+       * その場合に通貨別内訳と検算値（画面表示の株式時価・純資産）が
+       * 消えてしまわないよう、指定がなかった項目は既存の記録を引き継ぐ。
+       */
+      const existing = await db.getBrokerBalance(ctx.user.id, input.broker);
+      let merged = breakdown;
+      if (existing?.currencyBreakdown) {
+        try {
+          const prev = JSON.parse(existing.currencyBreakdown) as Record<string, number>;
+          merged = { ...prev, ...breakdown };
+        } catch {
+          // 壊れた JSON は引き継がず、今回の入力だけを保存する
+        }
+      }
+
       const id = await db.upsertBrokerBalance({
         userId: ctx.user.id,
         broker: input.broker,
@@ -121,7 +137,7 @@ export const portfolioRouter = router({
         cashBalance: String(input.cashBalance),
         maintenanceMargin: String(input.maintenanceMargin),
         interestMtd: String(input.interestMtd),
-        currencyBreakdown: Object.keys(breakdown).length > 0 ? JSON.stringify(breakdown) : null,
+        currencyBreakdown: Object.keys(merged).length > 0 ? JSON.stringify(merged) : null,
         capturedAt: new Date(),
       });
       return { id } as const;

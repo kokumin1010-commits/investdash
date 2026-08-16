@@ -1,5 +1,6 @@
 import { DisclaimerNote } from "@/components/investing/DisclaimerNote";
 import PasscodeSettings from "@/components/PasscodeSettings";
+import MarginSettings from "@/components/MarginSettings";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -185,6 +186,9 @@ export default function SettingsPage() {
           </div>
         </CardContent>
       </Card>
+
+      {/* 信用取引の借入は資産計算に直結するため、為替・現金の直後に置く */}
+      <MarginSettings />
 
       <Card>
         <CardHeader>
