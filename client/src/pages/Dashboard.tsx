@@ -12,6 +12,8 @@ import { useBatchRun } from "@/hooks/useBatchRun";
 import {
   SECTOR_COLORS,
   SIGNAL_ACTIONS,
+  MARGIN_RISK_LABELS,
+  MARGIN_RISK_STYLES,
   brokerHex,
   formatMoney,
   marketHex,
@@ -218,6 +220,13 @@ export default function Dashboard() {
 
   const isEmpty = (data?.groups.length ?? 0) === 0;
 
+  /*
+   * 信用取引の借入があるか。借入がある場合は「株式時価 = 自分の資産」ではないため、
+   * サマリーの見せ方を変える（純資産を主役にする）。現物のみの口座しかない場合は
+   * 従来の表示のままにして、無用な項目を増やさない。
+   */
+  const hasBorrowing = (summary?.totalBorrowedBase ?? 0) > 0;
+
   return (
     <div className="mx-auto max-w-[1400px] space-y-6 pb-10">
       <header className="flex flex-wrap items-end justify-between gap-4">
@@ -273,10 +282,38 @@ export default function Dashboard() {
           {/* サマリーカード */}
           <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
             <StatCard
-              label="総評価額"
+              /*
+               * 借入がある場合、株式時価は「自分のお金」ではない。
+               * ラベルを「株式時価」に変えて、その下に借入と純資産を必ず並べる。
+               * 借入がない場合は従来どおり「総評価額」として扱う。
+               */
+              label={hasBorrowing ? "株式時価（借入を含む）" : "総評価額"}
               value={formatMoney(summary?.totalValueBase, summary?.baseCurrency)}
               sub={
-                summary?.cashBalance
+                hasBorrowing ? (
+                  <span className="block space-y-1">
+                    <span className="flex items-center justify-between gap-2">
+                      <span className="text-muted-foreground">借入（信用取引）</span>
+                      <span className="tabular font-medium text-loss">
+                        −{formatMoney(summary?.totalBorrowedBase, summary?.baseCurrency)}
+                      </span>
+                    </span>
+                    <span className="flex items-center justify-between gap-2 border-t pt-1">
+                      <span className="font-medium text-foreground">純資産（実質の資産）</span>
+                      <span className="tabular font-semibold text-foreground">
+                        {formatMoney(summary?.netAssetsBase, summary?.baseCurrency)}
+                      </span>
+                    </span>
+                    <span className="flex items-center justify-between gap-2">
+                      <span className="text-muted-foreground">全体のレバレッジ</span>
+                      <span className="tabular font-medium">
+                        {summary?.overallLeverage !== null && summary?.overallLeverage !== undefined
+                          ? `${summary.overallLeverage.toFixed(2)} 倍`
+                          : "—"}
+                      </span>
+                    </span>
+                  </span>
+                ) : summary?.cashBalance
                   ? `現金 ${formatMoney(summary.cashBalance, summary.baseCurrency)} を含めた総資産 ${formatMoney(summary.totalAssets, summary.baseCurrency)}`
                   : `${summary?.positionCount ?? 0} 銘柄${
                       // 同一銘柄を複数口座で持つ場合は口座レコード数も添える
@@ -566,6 +603,60 @@ export default function Dashboard() {
                           }}
                         />
                       </div>
+                      {/*
+                        信用取引を使っている口座のみ、借入・純資産・追証余地を出す。
+                        現物口座では該当しない項目なので出さない。
+                      */}
+                      {b.leverage ? (
+                        <div className="mt-2.5 space-y-1 border-t pt-2 text-[11px]">
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="text-muted-foreground">借入</span>
+                            <span className="tabular text-loss">
+                              −{formatMoney(b.leverage.borrowedBase, summary?.baseCurrency)}
+                            </span>
+                          </div>
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="font-medium text-foreground">
+                              純資産（借入を引いた額）
+                            </span>
+                            <span className="tabular font-semibold text-foreground">
+                              {formatMoney(b.leverage.netValueBase, summary?.baseCurrency)}
+                            </span>
+                          </div>
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="text-muted-foreground">レバレッジ</span>
+                            <span className="tabular">
+                              {b.leverage.leverage !== null
+                                ? `${b.leverage.leverage.toFixed(2)} 倍`
+                                : "算出不可"}
+                            </span>
+                          </div>
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="text-muted-foreground">証拠金余力</span>
+                            <span className="tabular">
+                              {b.leverage.marginCushionBase !== null
+                                ? formatMoney(b.leverage.marginCushionBase, summary?.baseCurrency)
+                                : "—"}
+                            </span>
+                          </div>
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="text-muted-foreground">追証までの下落余地</span>
+                            <span className="flex items-center gap-1.5">
+                              <span className="tabular">
+                                {b.leverage.dropToMarginCallPct !== null
+                                  ? `−${b.leverage.dropToMarginCallPct.toFixed(1)}%`
+                                  : "—"}
+                              </span>
+                              <Badge
+                                variant="outline"
+                                className={`h-4 px-1 text-[10px] ${MARGIN_RISK_STYLES[b.leverage.riskLevel]}`}
+                              >
+                                {MARGIN_RISK_LABELS[b.leverage.riskLevel]}
+                              </Badge>
+                            </span>
+                          </div>
+                        </div>
+                      ) : null}
                     </Link>
                   ))}
                 </div>

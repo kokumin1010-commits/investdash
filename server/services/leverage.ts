@@ -9,6 +9,8 @@
  * 証拠金維持率と「あと何 % 下がると追証か」を算出する。
  */
 
+import type { MarginRisk } from "../../shared/investing";
+
 export type BrokerLeverageInput = {
   /** 証券プラットフォーム */
   broker: string;
@@ -119,7 +121,11 @@ export function computeBrokerLeverage(input: BrokerLeverageInput): BrokerLeverag
  * 証拠金維持率が下がるほど危険。下落余地が小さいほど警告を強める。
  * しきい値は一般的な信用取引の目安に合わせている。
  */
-export type MarginRiskLevel = "SAFE" | "CAUTION" | "WARNING" | "DANGER";
+/*
+ * 型とラベルは shared/investing.ts に置き、画面と共通で使う。
+ * ここで別に定義すると、片方だけ増やしたときに表示が欠ける。
+ */
+export type MarginRiskLevel = MarginRisk;
 
 export function marginRiskLevel(l: BrokerLeverage): MarginRiskLevel {
   if (!l.isMargin) return "SAFE";
@@ -132,10 +138,3 @@ export function marginRiskLevel(l: BrokerLeverage): MarginRiskLevel {
   if (drop < 35) return "CAUTION";
   return "SAFE";
 }
-
-export const MARGIN_RISK_LABELS: Record<MarginRiskLevel, string> = {
-  SAFE: "余力あり",
-  CAUTION: "注意",
-  WARNING: "警戒",
-  DANGER: "危険",
-};

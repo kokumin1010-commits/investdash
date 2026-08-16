@@ -298,6 +298,31 @@ export function marketHex(market?: string | null): string {
 /** 市場フィルタの選択肢。null は「すべて」 */
 export const MARKETS: readonly Market[] = ["JP", "US", "SG", "OTHER"] as const;
 
+/* ------------------------------------------------------------------ *
+ * 信用取引（レバレッジ）の追証リスク表示
+ *
+ * 判定ロジック本体は server/services/leverage.ts にある。ここには
+ * 画面表示用のラベルと配色だけを置く（クライアントはサーバーコードを
+ * import できないため）。
+ * ------------------------------------------------------------------ */
+
+export type MarginRisk = "SAFE" | "CAUTION" | "WARNING" | "DANGER";
+
+export const MARGIN_RISK_LABELS: Record<MarginRisk, string> = {
+  SAFE: "余力あり",
+  CAUTION: "注意",
+  WARNING: "警戒",
+  DANGER: "危険",
+};
+
+/** 危険度が上がるほど強い色にする。損益の赤緑とは別系統（緑→琥珀→橙→赤）で表す */
+export const MARGIN_RISK_STYLES: Record<MarginRisk, string> = {
+  SAFE: "border-emerald-500/40 text-emerald-600 dark:text-emerald-400",
+  CAUTION: "border-amber-500/40 text-amber-600 dark:text-amber-400",
+  WARNING: "border-orange-500/50 text-orange-600 dark:text-orange-400",
+  DANGER: "border-red-500/60 text-red-600 dark:text-red-400",
+};
+
 /**
  * URL クエリの market パラメータを検証して市場コードに変換する。
  * 不正な値や未指定は null（すべて表示）とする。
