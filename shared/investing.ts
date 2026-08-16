@@ -330,6 +330,37 @@ export const MARGIN_RISK_STYLES: Record<MarginRisk, string> = {
   DANGER: "border-red-500/60 text-red-600 dark:text-red-400",
 };
 
+/* ------------------------------------------------------------------ *
+ * 配当と借入金利の比較（キャリー判定）
+ *
+ * 借金をして株を買っている場合、配当で利息を賄えているかどうかで
+ * 「持っているだけで現金が増えるか減るか」が変わる。
+ * 判定ロジックは server/services/marginInterest.ts にある。
+ * ------------------------------------------------------------------ */
+
+export type CarryVerdictCode = "POSITIVE" | "THIN" | "NEGATIVE";
+
+export const CARRY_VERDICT_LABELS: Record<CarryVerdictCode, string> = {
+  POSITIVE: "配当で金利を賄えている",
+  THIN: "ぎりぎり賄えている",
+  NEGATIVE: "配当だけでは足りない",
+};
+
+export const CARRY_VERDICT_STYLES: Record<CarryVerdictCode, string> = {
+  POSITIVE: "border-emerald-500/40 text-emerald-600 dark:text-emerald-400",
+  THIN: "border-amber-500/40 text-amber-600 dark:text-amber-400",
+  NEGATIVE: "border-orange-500/50 text-orange-600 dark:text-orange-400",
+};
+
+/** 判定の意味を一文で説明する。数字だけでは何をすべきか伝わらないため */
+export const CARRY_VERDICT_NOTES: Record<CarryVerdictCode, string> = {
+  POSITIVE:
+    "受け取る配当が支払う利息を上回っているため、保有を続けるだけで現金が増えます。",
+  THIN:
+    "配当と利息がほぼ同額です。減配や金利上昇があると逆転するため、余裕は小さい状態です。",
+  NEGATIVE:
+    "配当だけでは利息を賄えていません。差額は株価の上昇で回収する必要があります。",
+};
 /**
  * URL クエリの market パラメータを検証して市場コードに変換する。
  * 不正な値や未指定は null（すべて表示）とする。

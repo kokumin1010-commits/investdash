@@ -96,7 +96,13 @@ export const holdings = mysqlTable(
      * 特別配当を除いた年間配当の推定（現地通貨）。
      * 特別配当がなければ annualDividend と同じ値になる。
      */
-    recurringDividend: decimal("recurringDividend", { precision: 20, scale: 6 }),
+    recurringDividend: decimal("recurringDividend", { precision: 18, scale: 6 }),
+    /**
+     * 月別の 1 株あたり配当額を JSON 配列で保存する（12 要素、添字 0 = 1 月）。
+     * 月ごとに 12 列を作るより、配列 1 列の方がスキーマが単純で、
+     * 「何月に集中しているか」を出す用途では十分に扱える。
+     */
+    monthlyDividends: json("monthlyDividends").$type<number[]>(),
     /** 最後に配当が支払われた日（権利落ち日） */
     lastDividendDate: timestamp("lastDividendDate"),
     /** 最後の 1 回あたりの配当額（現地通貨） */

@@ -66,6 +66,14 @@ export type DividendSummary = {
    * 特別配当がなければ annualDividend と同じ値。
    */
   recurringDividend: number;
+  /**
+   * 月別の 1 株あたり配当額（配列の添字 0 = 1 月 … 11 = 12 月）。
+   *
+   * 直近 12 か月の実績を「その支払があった月」に振り分けたもの。
+   * 権利落ち日を基準にしている（実際の入金は 2〜3 か月後になることが多いが、
+   * 入金日は Yahoo からは取得できないため、権利落ち月を配当月として扱う）。
+   */
+  monthlyDividends: number[];
 };
 
 export type DividendFrequency = "monthly" | "quarterly" | "semiannual" | "annual" | "irregular" | "none";
@@ -136,6 +144,7 @@ export function summarizeDividends(
       frequency: "none",
       hasSpecialDividend: false,
       recurringDividend: 0,
+      monthlyDividends: emptyMonths(),
     };
   }
 
@@ -143,6 +152,17 @@ export function summarizeDividends(
   const annualDividend = amounts.reduce((s, v) => s + v, 0);
   const lastIndex = recent.length - 1;
   const special = detectSpecialDividend(amounts);
+
+  /*
+   * 月別に振り分ける。同じ月に 2 回入ることもあるため加算していく。
+   * 月の判定は現地時間ではなく UTC で行う。権利落ち日は日付単位の情報で
+   * 時刻を持たないため、時差でひと月ずれるのを避けたい。
+   */
+  const monthlyDividends = emptyMonths();
+  for (const d of recent) {
+    const month = new Date(d.date * 1000).getUTCMonth();
+    monthlyDividends[month] += d.amount;
+  }
 
   return {
     annualDividend,
@@ -152,8 +172,70 @@ export function summarizeDividends(
     frequency: estimateFrequency(recent.length),
     hasSpecialDividend: special.detected,
     recurringDividend: special.recurring,
+    monthlyDividends,
   };
 }
+
+/** 12 か月分の 0 埋め配列 */
+export function emptyMonths(): number[] {
+  return Array.from({ length: 12 }, () => 0);
+}
+
+/**
+ * 月別の配当額（基軸通貨）を保有全体で合算する。
+ *
+ * 各保有の「1 株あたりの月別配当 × 株数 × 為替レート」を足し込む。
+ * 通貨が混ざるため、必ず基軸通貨に換算してから合算する。
+ */
+export function aggregateMonthlyIncome(
+  positions: Array<{
+    /** 1 株あたりの月別配当（現地通貨）。null の銘柄は無視する */
+    monthlyDividends: number[] | null;
+    quantity: number;
+    /** 現地通貨 → 基軸通貨の換算レート */
+    fxRate: number;
+  }>
+): number[] {
+  const totals = emptyMonths();
+  for (const p of positions) {
+    if (!p.monthlyDividends || p.monthlyDividends.length !== 12) continue;
+    if (!Number.isFinite(p.quantity) || p.quantity <= 0) continue;
+    if (!Number.isFinite(p.fxRate) || p.fxRate <= 0) continue;
+    for (let m = 0; m < 12; m++) {
+      const v = p.monthlyDividends[m];
+      if (!Number.isFinite(v) || v <= 0) continue;
+      totals[m] += v * p.quantity * p.fxRate;
+    }
+  }
+  return totals;
+}
+
+/** 月別配当のうち最も多い月（0=1月）。全て 0 なら null */
+export function peakDividendMonth(monthly: number[]): number | null {
+  let best: number | null = null;
+  for (let m = 0; m < monthly.length; m++) {
+    if (monthly[m] <= 0) continue;
+    if (best === null || monthly[m] > monthly[best]) best = m;
+  }
+  return best;
+}
+
+/**
+ * 配当が特定の月に偏っているかを表す指標（0〜1）。
+ *
+ * 上位 3 か月が年間配当の何割を占めるかで測る。
+ * 毎月均等なら 3/12 = 0.25、年 2 回に集中していれば 1.0 に近づく。
+ * 生活費に充てる場合、偏りが大きいと月々の受取が不安定になる。
+ */
+export function dividendConcentration(monthly: number[]): number | null {
+  const total = monthly.reduce((s, v) => s + v, 0);
+  if (total <= 0) return null;
+  const top3 = [...monthly].sort((a, b) => b - a).slice(0, 3).reduce((s, v) => s + v, 0);
+  return top3 / total;
+}
+
+/** 月のラベル（1 月 〜 12 月） */
+export const MONTH_LABELS = Array.from({ length: 12 }, (_, i) => `${i + 1}月`);
 
 /**
  * 特別配当（1 回だけ突出して多い配当）を検出する。

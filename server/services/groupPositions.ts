@@ -79,6 +79,11 @@ export type GroupedDividend = {
   yieldNeedsCheck: boolean;
   /** 特別配当を除いた場合の利回り（%） */
   recurringYieldPct: number | null;
+  /**
+   * 全口座合計の月別受取額（円換算、添字 0 = 1 月）。
+   * どの口座も月別データを持たない場合は null。
+   */
+  monthlyIncomeBase: number[] | null;
 };
 
 /** 合計 = 各口座の単純合計。null（価格未取得）は 0 として扱わず null を伝播させない */
@@ -86,6 +91,22 @@ function sumOrNull(values: (number | null)[]): number | null {
   const known = values.filter((v): v is number => v !== null);
   if (known.length === 0) return null;
   return known.reduce((a, b) => a + b, 0);
+}
+
+/**
+ * 月別配当を口座をまたいで合算する。
+ * ひとつも月別データが無ければ null（「不明」）を返す。
+ */
+function sumMonthly(lists: (number[] | null)[]): number[] | null {
+  const known = lists.filter((v): v is number[] => Array.isArray(v) && v.length === 12);
+  if (known.length === 0) return null;
+  const out = Array.from({ length: 12 }, () => 0);
+  for (const list of known) {
+    for (let m = 0; m < 12; m++) {
+      if (Number.isFinite(list[m])) out[m] += list[m];
+    }
+  }
+  return out;
 }
 
 /**
@@ -154,6 +175,7 @@ export function groupPositionsBySymbol(
           hasSpecial: divEntry.hasSpecial,
           yieldNeedsCheck: divEntry.yieldNeedsCheck,
           recurringYieldPct: divEntry.recurringYieldPct,
+          monthlyIncomeBase: sumMonthly(entries.map(e => e.dividend?.monthlyIncomeBase ?? null)),
         }
       : null;
 

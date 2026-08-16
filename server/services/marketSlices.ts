@@ -44,6 +44,12 @@ export type MarketSlice = {
   dividendIncomeBase: number;
   /** その市場の配当利回り（%）。円換算の評価額に対する比率 */
   dividendYieldPct: number | null;
+  /**
+   * 月別の受取配当（円換算）。長さ 12（0 = 1 月）。
+   * 日本株は 3 月・9 月、米国株は四半期ごとと傾向が異なるため、
+   * 市場ごとに分けて見ると入金月の偏りの原因が分かる。
+   */
+  dividendMonthlyBase: number[];
 };
 
 type MarketInput = {
@@ -58,7 +64,11 @@ type MarketInput = {
   /** 現地通貨の取得原価 */
   costValue: number;
   /** 年間受取配当（円換算）。未取得なら null */
-  dividend?: { annualIncomeBase: number | null } | null;
+  dividend?: {
+    annualIncomeBase: number | null;
+    /** 月別の受取額（円換算）。長さ 12 */
+    monthlyIncomeBase?: number[] | null;
+  } | null;
 };
 
 /** 市場の表示順。日本株を先頭に、その他を末尾にする */
@@ -81,6 +91,7 @@ export function buildMarketSlices(items: MarketInput[], totalValueBase: number):
       localCost: number;
       currency: string;
       dividendIncome: number;
+      dividendMonthly: number[];
     }
   >();
 
@@ -93,6 +104,8 @@ export function buildMarketSlices(items: MarketInput[], totalValueBase: number):
       localCost: 0,
       currency: it.currency,
       dividendIncome: 0,
+      // 12 か月分の受取額を足し込む器。銘柄ごとに加算する
+      dividendMonthly: Array<number>(12).fill(0),
     };
     cur.value += it.marketValueBase ?? 0;
     cur.cost += it.costValueBase;
@@ -100,6 +113,10 @@ export function buildMarketSlices(items: MarketInput[], totalValueBase: number):
     cur.localValue += it.marketValue ?? 0;
     cur.localCost += it.costValue;
     cur.dividendIncome += it.dividend?.annualIncomeBase ?? 0;
+    const monthly = it.dividend?.monthlyIncomeBase;
+    if (monthly && monthly.length === 12) {
+      for (let i = 0; i < 12; i++) cur.dividendMonthly[i] += monthly[i] ?? 0;
+    }
     map.set(it.market, cur);
   }
 
@@ -122,6 +139,7 @@ export function buildMarketSlices(items: MarketInput[], totalValueBase: number):
         isForeign: v.currency !== "JPY",
         dividendIncomeBase: v.dividendIncome,
         dividendYieldPct: v.value > 0 ? (v.dividendIncome / v.value) * 100 : null,
+        dividendMonthlyBase: v.dividendMonthly,
       };
     })
     .sort((a, b) => MARKET_ORDER[a.key] - MARKET_ORDER[b.key]);

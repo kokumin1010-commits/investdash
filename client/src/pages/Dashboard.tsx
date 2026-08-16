@@ -14,6 +14,9 @@ import {
   SIGNAL_ACTIONS,
   MARGIN_RISK_LABELS,
   MARGIN_RISK_STYLES,
+  CARRY_VERDICT_LABELS,
+  CARRY_VERDICT_STYLES,
+  CARRY_VERDICT_NOTES,
   brokerHex,
   formatMoney,
   marketHex,
@@ -38,7 +41,10 @@ import { useMemo, useState } from "react";
 import {
   Area,
   AreaChart,
+  Bar,
+  BarChart,
   Cell,
+  Line,
   Pie,
   PieChart,
   ResponsiveContainer,
@@ -218,6 +224,69 @@ export default function Dashboard() {
     });
     return counts;
   }, [data]);
+
+  /**
+   * 月別の配当グラフ用データ。
+   *
+   * 日本株は 3 月・9 月に集中するため、月ごとの受取額を見ると
+   * どの月に収入が寄っているかが分かる。月あたりの平均も併せて描き、
+   * 平均より多い月・少ない月を判断できるようにする。
+   */
+  const dividendMonthly = useMemo(() => {
+    const monthly = dividends?.monthlyIncomeBase;
+    if (!monthly || monthly.length !== 12) return [];
+    const average = dividends.annualIncomeBase / 12;
+    return monthly.map((amount, i) => ({
+      month: `${i + 1}月`,
+      amount,
+      average,
+      /** その月が年間の何割か。ツールチップで偏りを示すために持つ */
+      pct: dividends.annualIncomeBase > 0 ? (amount / dividends.annualIncomeBase) * 100 : 0,
+      isPeak: dividends.peakMonth === i,
+    }));
+  }, [dividends]);
+
+  /**
+   * 全口座を合わせた借入コストと、配当から利息を引いた手取り。
+   *
+   * 借入は今のところ IBKR のみだが、口座が増えても合算できるようにしておく。
+   * 「配当がいくら入るか」だけでは借金のコストが見えないため、
+   * 差し引き後の実際に残る額を出す。
+   */
+  const carryTotal = useMemo(() => {
+    const brokers = data?.brokers ?? [];
+    let annualInterestBase = 0;
+    let hasInterest = false;
+    for (const b of brokers) {
+      const interest = b.leverage?.interest;
+      if (!interest) continue;
+      hasInterest = true;
+      annualInterestBase += interest.annualInterestBase;
+    }
+    if (!hasInterest || !dividends) return null;
+    const annualDividendBase = dividends.annualIncomeBase;
+    const netCarryBase = annualDividendBase - annualInterestBase;
+    const coverageRatio =
+      annualInterestBase > 0 ? annualDividendBase / annualInterestBase : null;
+    const verdict: "POSITIVE" | "THIN" | "NEGATIVE" =
+      annualInterestBase <= 0 || (coverageRatio !== null && coverageRatio >= 1.2)
+        ? "POSITIVE"
+        : coverageRatio !== null && coverageRatio >= 1.0
+          ? "THIN"
+          : "NEGATIVE";
+    return {
+      annualDividendBase,
+      annualInterestBase,
+      netCarryBase,
+      coverageRatio,
+      verdict,
+      /** 手取りベースの利回り。株式時価に対する比率 */
+      netYieldPct:
+        summary && summary.totalValueBase > 0
+          ? (netCarryBase / summary.totalValueBase) * 100
+          : null,
+    };
+  }, [data?.brokers, dividends, summary]);
 
   const attention = useMemo(
     () =>
@@ -519,6 +588,57 @@ export default function Dashboard() {
                       {dividends.unknownCount > 0 ? ` / 未取得 ${dividends.unknownCount} 銘柄` : ""}
                     </span>
                     {/*
+                      借入がある場合、配当をそのまま収入と見ると実態を見誤る。
+                      利息を引いた「実際に残る額」を並べて出す。
+                    */}
+                    {carryTotal ? (
+                      <span className="block space-y-1 border-t pt-1">
+                        <span className="flex items-center justify-between gap-2">
+                          <span className="text-muted-foreground">借入の年間利息</span>
+                          <span className="tabular font-medium text-loss">
+                            −{formatMoney(carryTotal.annualInterestBase, summary?.baseCurrency)}
+                          </span>
+                        </span>
+                        <span className="flex items-center justify-between gap-2">
+                          <span className="font-medium text-foreground">
+                            差し引き後に残る額
+                          </span>
+                          <span
+                            className={`tabular font-semibold ${
+                              carryTotal.netCarryBase >= 0 ? "text-gain" : "text-loss"
+                            }`}
+                          >
+                            {carryTotal.netCarryBase >= 0 ? "+" : "−"}
+                            {formatMoney(
+                              Math.abs(carryTotal.netCarryBase),
+                              summary?.baseCurrency
+                            )}
+                            {carryTotal.netYieldPct !== null ? (
+                              <span className="ml-1 text-[11px] font-normal text-muted-foreground">
+                                {carryTotal.netYieldPct.toFixed(2)}%
+                              </span>
+                            ) : null}
+                          </span>
+                        </span>
+                        <span className="flex items-center gap-1.5">
+                          <Badge
+                            variant="outline"
+                            className={`h-4 px-1 text-[10px] ${CARRY_VERDICT_STYLES[carryTotal.verdict]}`}
+                          >
+                            {CARRY_VERDICT_LABELS[carryTotal.verdict]}
+                          </Badge>
+                          {carryTotal.coverageRatio !== null ? (
+                            <span className="tabular text-[11px] text-muted-foreground">
+                              配当は利息の {carryTotal.coverageRatio.toFixed(2)} 倍
+                            </span>
+                          ) : null}
+                        </span>
+                        <span className="block text-[11px] leading-relaxed text-muted-foreground">
+                          {CARRY_VERDICT_NOTES[carryTotal.verdict]}
+                        </span>
+                      </span>
+                    ) : null}
+                    {/*
                       特別配当（記念配当）が含まれる銘柄があると、
                       来年も同額もらえると誤解しやすいので除いた額も出す。
                     */}
@@ -651,6 +771,30 @@ export default function Dashboard() {
                           </span>
                         </div>
                       ) : null}
+                      {/*
+                        市場ごとに配当の入る月の傾向が違う（日本株は 3 月・9 月に集中、
+                        米国株は四半期ごとに分散）。どの市場が偏りの原因かを示す。
+                      */}
+                      {(() => {
+                        const monthly = m.dividendMonthlyBase ?? [];
+                        if (monthly.length !== 12 || m.dividendIncomeBase <= 0) return null;
+                        const peak = monthly.reduce(
+                          (best, v, i) => (v > monthly[best] ? i : best),
+                          0
+                        );
+                        const peakPct = (monthly[peak] / m.dividendIncomeBase) * 100;
+                        // 均等なら 1 か月あたり 8.3%。倍以上なら偏りとみなす
+                        const concentrated = peakPct >= 16.7;
+                        return (
+                          <div className="mt-1 flex items-baseline justify-between gap-2 text-[11px]">
+                            <span className="text-muted-foreground">配当が多い月</span>
+                            <span className="tabular text-muted-foreground">
+                              {peak + 1}月に {peakPct.toFixed(0)}%
+                              {concentrated ? "（偏りあり）" : "（分散）"}
+                            </span>
+                          </div>
+                        );
+                      })()}
                       <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-muted">
                         <div
                           className="h-full rounded-full transition-all"
@@ -794,6 +938,58 @@ export default function Dashboard() {
                               </Badge>
                             </span>
                           </div>
+                          {/*
+                            借入の金利と、その口座から入る配当の比較。
+                            借金で株を買っている場合、配当で利息を賄えているかが
+                            「持ち続けるだけで現金が増えるか」を決める。
+                          */}
+                          {b.leverage.interest && b.leverage.carry ? (
+                            <div className="mt-1.5 space-y-1 border-t pt-1.5">
+                              <div className="flex items-center justify-between gap-2">
+                                <span className="text-muted-foreground">
+                                  年間の利息（{b.leverage.interest.effectiveRatePct.toFixed(2)}%）
+                                </span>
+                                <span className="tabular text-loss">
+                                  −{formatMoney(
+                                    b.leverage.interest.annualInterestBase,
+                                    summary?.baseCurrency
+                                  )}
+                                </span>
+                              </div>
+                              <div className="flex items-center justify-between gap-2">
+                                <span className="font-medium text-foreground">
+                                  配当 − 利息
+                                </span>
+                                <span
+                                  className={`tabular font-semibold ${
+                                    b.leverage.carry.netCarryBase >= 0 ? "text-gain" : "text-loss"
+                                  }`}
+                                >
+                                  {b.leverage.carry.netCarryBase >= 0 ? "+" : "−"}
+                                  {formatMoney(
+                                    Math.abs(b.leverage.carry.netCarryBase),
+                                    summary?.baseCurrency
+                                  )}
+                                </span>
+                              </div>
+                              <div className="flex items-center justify-between gap-2">
+                                <span className="text-muted-foreground">配当は利息の</span>
+                                <span className="flex items-center gap-1.5">
+                                  <span className="tabular">
+                                    {b.leverage.carry.coverageRatio !== null
+                                      ? `${b.leverage.carry.coverageRatio.toFixed(2)} 倍`
+                                      : "—"}
+                                  </span>
+                                  <Badge
+                                    variant="outline"
+                                    className={`h-4 px-1 text-[10px] ${CARRY_VERDICT_STYLES[b.leverage.carry.verdict]}`}
+                                  >
+                                    {CARRY_VERDICT_LABELS[b.leverage.carry.verdict]}
+                                  </Badge>
+                                </span>
+                              </div>
+                            </div>
+                          ) : null}
                         </div>
                       ) : null}
                     </Link>
@@ -1008,6 +1204,128 @@ export default function Dashboard() {
               </CardContent>
             </Card>
           </div>
+
+          {/* 配当の受取月 */}
+          {dividendMonthly.length === 12 && dividends && dividends.annualIncomeBase > 0 ? (
+            <Card>
+              <CardHeader>
+                <div className="flex flex-wrap items-start justify-between gap-2">
+                  <div>
+                    <CardTitle className="text-base">配当が入る月</CardTitle>
+                    <CardDescription className="text-xs">
+                      直近 1 年の実績を権利確定月に振り分けたもの（税引前）。
+                      実際の入金は権利確定から 2〜3 か月後になります。
+                    </CardDescription>
+                  </div>
+                  {/*
+                    偏りを一目で伝える。日本株は 3 月・9 月に集中するため、
+                    「月あたり平均」だけを見ていると実際の入金月を読み違える。
+                  */}
+                  <div className="text-right text-xs">
+                    <div className="text-muted-foreground">最も多い月</div>
+                    <div className="tabular text-sm font-semibold">
+                      {dividends.peakMonth !== null
+                        ? `${dividends.peakMonth + 1}月 ${formatMoney(
+                            dividendMonthly[dividends.peakMonth].amount,
+                            summary?.baseCurrency
+                          )}`
+                        : "—"}
+                    </div>
+                  </div>
+                </div>
+              </CardHeader>
+              <CardContent>
+                <ResponsiveContainer width="100%" height={220}>
+                  <BarChart data={dividendMonthly} margin={{ left: 4, right: 8, top: 8, bottom: 0 }}>
+                    <XAxis
+                      dataKey="month"
+                      tick={{ fontSize: 11 }}
+                      stroke="var(--muted-foreground)"
+                      tickLine={false}
+                      axisLine={false}
+                    />
+                    <YAxis
+                      tick={{ fontSize: 11 }}
+                      stroke="var(--muted-foreground)"
+                      tickLine={false}
+                      axisLine={false}
+                      width={56}
+                      tickFormatter={v =>
+                        new Intl.NumberFormat("ja-JP", {
+                          notation: "compact",
+                          maximumFractionDigits: 1,
+                        }).format(v as number)
+                      }
+                    />
+                    <ReTooltip
+                      contentStyle={{
+                        background: "var(--popover)",
+                        border: "1px solid var(--border)",
+                        borderRadius: 8,
+                        fontSize: 12,
+                        color: "var(--popover-foreground)",
+                      }}
+                      formatter={(v: number, name, item) => {
+                        if (name === "average") {
+                          return [formatMoney(v, summary?.baseCurrency), "月あたり平均"];
+                        }
+                        const pct = (item?.payload as { pct: number })?.pct ?? 0;
+                        return [
+                          `${formatMoney(v, summary?.baseCurrency)}（年間の ${pct.toFixed(1)}%）`,
+                          "受取額",
+                        ];
+                      }}
+                    />
+                    {/* 平均線。棒がこれを超える月が「配当が多い月」 */}
+                    <Line
+                      type="monotone"
+                      dataKey="average"
+                      stroke="var(--muted-foreground)"
+                      strokeDasharray="4 4"
+                      strokeWidth={1.5}
+                      dot={false}
+                    />
+                    <Bar dataKey="amount" radius={[4, 4, 0, 0]}>
+                      {dividendMonthly.map(m => (
+                        <Cell
+                          key={m.month}
+                          // 最多月だけ濃くして視線を誘導する
+                          fill={m.isPeak ? "var(--chart-1)" : "var(--chart-2)"}
+                          fillOpacity={m.isPeak ? 1 : 0.65}
+                        />
+                      ))}
+                    </Bar>
+                  </BarChart>
+                </ResponsiveContainer>
+                {/*
+                  集中度は「上位 3 か月が年間の何割か」。毎月均等なら 25%。
+                  数字だけでは意味が伝わらないので、目安と解釈を添える。
+                */}
+                {dividends.concentration !== null ? (
+                  <div className="mt-3 rounded-lg border border-border/70 bg-muted/30 p-3 text-xs">
+                    <div className="flex flex-wrap items-baseline justify-between gap-2">
+                      <span className="text-muted-foreground">
+                        上位 3 か月に集まる割合
+                      </span>
+                      <span className="tabular font-semibold">
+                        {(dividends.concentration * 100).toFixed(0)}%
+                        <span className="ml-1 font-normal text-muted-foreground">
+                          （毎月均等なら 25%）
+                        </span>
+                      </span>
+                    </div>
+                    <p className="mt-1.5 leading-relaxed text-muted-foreground">
+                      {dividends.concentration >= 0.6
+                        ? "特定の月に大きく偏っています。日本株は 3 月・9 月の権利確定が多いためで、生活費に充てる場合は受取が集中する月を前提に考える必要があります。"
+                        : dividends.concentration >= 0.4
+                          ? "やや偏りがあります。受取が少ない月があるため、月あたり平均だけで資金計画を立てると不足する月が出ます。"
+                          : "比較的分散しています。月ごとの受取額の差が小さく、月あたり平均に近い形で入ります。"}
+                    </p>
+                  </div>
+                ) : null}
+              </CardContent>
+            </Card>
+          ) : null}
 
           <div className="grid gap-4 lg:grid-cols-3">
             {/* 注意が必要な銘柄 */}

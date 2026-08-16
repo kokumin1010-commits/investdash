@@ -16,9 +16,12 @@ import {
 } from "./marketData";
 import {
   annualIncome,
+  dividendConcentration,
   dividendYield,
+  emptyMonths,
   estimateFrequency,
   isImplausibleYield,
+  peakDividendMonth,
   summarizeDividends,
   yieldOnCost,
   type DividendFrequency,
@@ -32,6 +35,11 @@ import {
   marginRiskLevel,
   type MarginRiskLevel,
 } from "./leverage";
+import {
+  computeMarginInterest,
+  evaluateCarry,
+  type CarryVerdict,
+} from "./marginInterest";
 import { BROKER_LABELS, type Broker } from "../../shared/investing";
 import type { Market } from "../../shared/investing";
 import { FX_FALLBACK, convertToJpy, isPlausibleRate, type FxRates } from "./fx";
@@ -126,6 +134,11 @@ export type PositionDividendView = {
    * 支払が年 2 回の銘柄では特別配当を検出できないため、最後の安全網として持つ。
    */
   yieldNeedsCheck: boolean;
+  /**
+   * 月別の受取額（円換算、添字 0 = 1 月）。
+   * 権利落ち月を基準にしている。データが無い銘柄は null。
+   */
+  monthlyIncomeBase: number[] | null;
 };
 
 /** 配当の全体集計 */
@@ -153,6 +166,18 @@ export type DividendSummaryView = {
   recurringIncomeBase: number;
   /** 特別配当が含まれる銘柄数 */
   specialCount: number;
+  /**
+   * 月別の受取配当（円換算、添字 0 = 1 月）。
+   * 直近 12 か月の実績を権利落ち月に振り分けて合算したもの。
+   */
+  monthlyIncomeBase: number[];
+  /** 最も配当が多い月（0 = 1 月）。配当がなければ null */
+  peakMonth: number | null;
+  /**
+   * 上位 3 か月が年間配当の何割を占めるか（0〜1）。
+   * 毎月均等なら 0.25、少数の月に集中していれば 1 に近づく。
+   */
+  concentration: number | null;
 };
 
 export type PortfolioSummary = {
@@ -249,6 +274,53 @@ export type BrokerLeverageView = {
   interestMtdBase: number;
   /** 追証リスクの警告レベル */
   riskLevel: MarginRiskLevel;
+  /**
+   * 借入金利の計算結果。
+   * 借入通貨の階層別テーブルから加重平均で求める。
+   * 通貨の階層定義が無い場合は null（推測で計算しない）。
+   */
+  interest: MarginInterestView | null;
+  /**
+   * 配当と金利の比較。
+   * 「借金の利息を配当で賄えているか」を判定する。
+   * 金利が計算できない場合は null。
+   */
+  carry: CarryView | null;
+};
+
+/** 借入金利の計算結果（画面表示用） */
+export type MarginInterestView = {
+  /** 借入通貨（実際に借りている通貨。IBKR の表示通貨とは異なることがある） */
+  currency: string;
+  /** 借入額（借入通貨） */
+  borrowed: number;
+  /** 年間利息（借入通貨） */
+  annualInterest: number;
+  /** 年間利息（円換算） */
+  annualInterestBase: number;
+  /** 加重平均の年率（%） */
+  effectiveRatePct: number;
+  /** 階層別の内訳（計算根拠を画面で示すため） */
+  breakdown: Array<{ amount: number; annualRatePct: number; interest: number }>;
+  /**
+   * 月初来の実績から年換算した利息（円）。
+   * 計算値の妥当性を利用者が確認できるように併記する。
+   * 月初来の日数が不明なので概算。
+   */
+  annualInterestFromActualBase: number | null;
+};
+
+/** 配当と金利の比較（画面表示用） */
+export type CarryView = {
+  /** その口座の年間配当（円換算・税引前） */
+  annualDividendBase: number;
+  /** 年間利息（円換算） */
+  annualInterestBase: number;
+  /** 差額（円）。プラスなら配当が金利を上回る */
+  netCarryBase: number;
+  /** 配当が金利の何倍か */
+  coverageRatio: number | null;
+  verdict: CarryVerdict;
 };
 
 export type ConcentrationAlert = {
@@ -353,6 +425,7 @@ export async function buildPortfolio(userId: number): Promise<{
             recurringPerShare,
             recurringYieldPct: dividendYield(recurringPerShare, currentPrice),
             yieldNeedsCheck: isImplausibleYield(divYieldPct),
+            monthlyIncomeBase: monthlyIncomeBase(h.monthlyDividends, quantity, h.currency, toBase),
           };
 
     return {
@@ -469,6 +542,43 @@ export async function buildPortfolio(userId: number): Promise<{
       interestMtd: interestBase,
     });
 
+    /*
+     * 借入金利の計算。
+     *
+     * IBKR は口座の基軸通貨（SGD）に換算した借入額を表示するが、
+     * 金利は**実際に借りている通貨**のレートが適用される。
+     * 通貨別内訳（currencyBreakdown）にマイナス残高の通貨があれば
+     * それを借入通貨として扱い、無ければ口座通貨で計算する。
+     */
+    const borrowCurrency = detectBorrowCurrency(bal.currencyBreakdown, bal.currency);
+    const interestView = buildInterestView(
+      borrowCurrency,
+      lev.borrowed,
+      lev.interestMtd,
+      rates
+    );
+
+    /*
+     * 配当と金利の比較。
+     * その口座の保有銘柄から入る年間配当と、借入の年間利息を比べる。
+     */
+    const brokerDividendBase = positions
+      .filter(p => p.broker === bal.broker)
+      .reduce((acc, p) => acc + (p.dividend?.annualIncomeBase ?? 0), 0);
+    const carryView =
+      interestView === null
+        ? null
+        : (() => {
+            const c = evaluateCarry(brokerDividendBase, interestView.annualInterestBase);
+            return {
+              annualDividendBase: c.annualDividendBase,
+              annualInterestBase: c.annualInterestBase,
+              netCarryBase: c.netCarryBase,
+              coverageRatio: c.coverageRatio,
+              verdict: c.verdict,
+            };
+          })();
+
     totalBorrowedBase += lev.borrowed;
     leverageByBroker.set(bal.broker, {
       currency: bal.currency,
@@ -482,6 +592,8 @@ export async function buildPortfolio(userId: number): Promise<{
       dropToMarginCallPct: lev.dropToMarginCallPct,
       interestMtdBase: lev.interestMtd,
       riskLevel: marginRiskLevel(lev),
+      interest: interestView,
+      carry: carryView,
     });
   }
 
@@ -661,6 +773,20 @@ function buildDividendSummary(
   );
 
   /*
+   * 月別の合計。各保有の月別受取額（既に円換算済み）を足し込む。
+   * 口座レコード単位で足すため、同じ銘柄を複数口座で持っていても
+   * それぞれの株数分が正しく反映される。
+   */
+  const monthlyTotals = emptyMonths();
+  for (const p of positions) {
+    const m = p.dividend?.monthlyIncomeBase;
+    if (!m) continue;
+    for (let i = 0; i < 12; i++) {
+      if (Number.isFinite(m[i])) monthlyTotals[i] += m[i];
+    }
+  }
+
+  /*
    * 特別配当を除いた受取額。円換算は annualIncomeBase と同じ比率で按分する
    * （為替レートを再計算せずに済むよう、1 株配当の比で割り戻す）。
    */
@@ -715,6 +841,128 @@ function buildDividendSummary(
     updatedAt,
     recurringIncomeBase,
     specialCount,
+    monthlyIncomeBase: monthlyTotals,
+    peakMonth: peakDividendMonth(monthlyTotals),
+    concentration: dividendConcentration(monthlyTotals),
+  };
+}
+
+/**
+ * 1 株あたりの月別配当を、保有株数と為替を掛けて円換算した月別受取額にする。
+ *
+ * 換算できない通貨（想定外の通貨）や月別データが無い銘柄は null を返し、
+ * 「0 円」と「不明」を混同しないようにする。
+ *
+ * @param monthly DB に保存された 1 株あたりの月別配当（12 要素）
+ * @param quantity 保有株数
+ * @param currency 銘柄の通貨
+ * @param toBase 現地通貨 → 円の換算関数（呼び出し側の為替レートを使う）
+ */
+function monthlyIncomeBase(
+  monthly: number[] | null,
+  quantity: number,
+  currency: string,
+  toBase: (value: number | null, currency: string) => number | null
+): number[] | null {
+  if (!monthly || monthly.length !== 12) return null;
+  if (!Number.isFinite(quantity) || quantity <= 0) return null;
+
+  const out = emptyMonths();
+  for (let m = 0; m < 12; m++) {
+    const perShare = monthly[m];
+    if (!Number.isFinite(perShare) || perShare <= 0) continue;
+    const base = toBase(perShare * quantity, currency);
+    if (base === null) return null; // 換算できない通貨は月別も出さない
+    out[m] = base;
+  }
+  /*
+   * すべての月が 0 でも配列を返す。無配の銘柄を「不明（null）」ではなく
+   * 「12 か月すべて 0」として扱いたいため。
+   */
+  return out;
+}
+
+/**
+ * 実際に借りている通貨を判定する。
+ *
+ * IBKR は基軸通貨（SGD）に換算した借入額を表示するが、金利は借入通貨の
+ * レートで決まる。通貨別内訳のうち**最も大きなマイナス残高**を持つ通貨を
+ * 借入通貨とみなす。内訳が無い場合は口座通貨で借りているものとして扱う。
+ *
+ * @param breakdownJson currencyBreakdown 列の JSON 文字列
+ * @param fallback 内訳が無い場合に使う通貨（口座の基軸通貨）
+ */
+export function detectBorrowCurrency(
+  breakdownJson: string | null,
+  fallback: string
+): string {
+  if (!breakdownJson) return fallback;
+  try {
+    const parsed = JSON.parse(breakdownJson) as Record<string, unknown>;
+    let worst: { currency: string; amount: number } | null = null;
+    for (const [key, value] of Object.entries(parsed)) {
+      // 検算用に入れた補助キー（__reportedPositionValue など）は通貨ではない
+      if (key.startsWith("__")) continue;
+      const amount = typeof value === "number" ? value : Number(value);
+      if (!Number.isFinite(amount) || amount >= 0) continue;
+      if (worst === null || amount < worst.amount) worst = { currency: key, amount };
+    }
+    return worst?.currency ?? fallback;
+  } catch {
+    // 壊れた JSON が入っていても評価額の計算は続けたい
+    return fallback;
+  }
+}
+
+/**
+ * 借入金利の計算結果を画面表示用に組み立てる。
+ *
+ * 借入額は円換算済みの値（borrowedBase）で渡されるため、
+ * 借入通貨に戻してから階層に当てる。階層の区切りは借入通貨の
+ * 金額で定義されているので、円のまま当てると誤った階層になる。
+ *
+ * @param borrowCurrency 実際に借りている通貨
+ * @param borrowedBase 借入額（円換算、正の数）
+ * @param interestMtdBase 月初来の支払利息（円換算、負値）
+ */
+function buildInterestView(
+  borrowCurrency: string,
+  borrowedBase: number,
+  interestMtdBase: number,
+  rates: FxRates
+): MarginInterestView | null {
+  if (borrowedBase <= 0) return null;
+
+  /*
+   * 円換算額を借入通貨に戻す。JPY 借入なら換算は不要。
+   * 1 単位が何円かを求めて割り戻す。
+   */
+  const unitInJpy = convertToJpy(1, borrowCurrency, rates);
+  if (unitInJpy === null || unitInJpy <= 0) return null;
+  const borrowedLocal = borrowedBase / unitInJpy;
+
+  const result = computeMarginInterest(borrowedLocal, borrowCurrency);
+  if (result === null) return null;
+
+  /*
+   * 実績からの年換算。月初来利息は「今月 1 日から今日まで」の累計なので、
+   * 経過日数で割って 365 倍する。月初の 1〜2 日は日数が少なく誤差が大きいため、
+   * 3 日未満は算出しない。
+   */
+  const dayOfMonth = new Date().getDate();
+  const annualInterestFromActualBase =
+    dayOfMonth >= 3 && interestMtdBase !== 0
+      ? (Math.abs(interestMtdBase) / dayOfMonth) * 365
+      : null;
+
+  return {
+    currency: result.currency,
+    borrowed: result.borrowed,
+    annualInterest: result.annualInterest,
+    annualInterestBase: result.annualInterest * unitInJpy,
+    effectiveRatePct: result.effectiveRatePct,
+    breakdown: result.breakdown,
+    annualInterestFromActualBase,
   };
 }
 
@@ -1212,6 +1460,7 @@ export async function syncDividends(
           dividendCount: summary.count,
           hasSpecialDividend: summary.hasSpecialDividend,
           recurringDividend: summary.recurringDividend.toFixed(6),
+          monthlyDividends: summary.monthlyDividends,
           lastDividendDate: summary.lastDate ?? undefined,
           lastDividendAmount:
             summary.lastAmount === null ? undefined : summary.lastAmount.toFixed(6),
