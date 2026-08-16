@@ -1,6 +1,7 @@
 import { DisclaimerNote } from "@/components/investing/DisclaimerNote";
 import { BrokerBadge } from "@/components/investing/BrokerBadge";
 import { MoneyText, PctText, PnlText } from "@/components/investing/Figures";
+import { CurrencyToggle } from "@/components/investing/CurrencyToggle";
 import { SignalBadge, SignalPlaceholder } from "@/components/investing/SignalBadge";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -148,6 +149,11 @@ export default function HoldingDetail({ params }: { params: { id: string } }) {
           </div>
 
           <div className="flex flex-wrap gap-2">
+            {/* 他の画面と同じ表示通貨で評価額を見られるようにする */}
+            <div className="flex items-center gap-1.5">
+              <span className="text-[11px] text-muted-foreground">金額表示</span>
+              <CurrencyToggle />
+            </div>
             <Button
               variant="outline"
               size="sm"
@@ -173,11 +179,22 @@ export default function HoldingDetail({ params }: { params: { id: string } }) {
       <Card>
         <CardContent className="grid gap-x-6 gap-y-4 py-5 sm:grid-cols-3 lg:grid-cols-6">
           <Metric label="保有株数" value={`${formatNumber(Number(holding.quantity), 0)} 株`} />
+          {/*
+            単価は換算しない。板に出る値段と一致していないと
+            「いくらで買えるか」の判断に使えないため。
+          */}
           <Metric label="取得単価" value={formatMoney(avgCostNum, currency)} />
           <Metric label="現在値" value={formatMoney(view?.currentPrice, currency)} />
           <Metric
             label="評価額"
-            value={formatMoney(view?.marketValue, currency)}
+            node={
+              <MoneyText
+                value={view?.marketValue ?? null}
+                currency={currency}
+                baseValue={view?.marketValueBase ?? null}
+                className="text-base font-semibold"
+              />
+            }
             sub={
               view?.weightPct !== null && view?.weightPct !== undefined
                 ? `構成比 ${view.weightPct.toFixed(1)}%`
@@ -186,7 +203,23 @@ export default function HoldingDetail({ params }: { params: { id: string } }) {
           />
           <Metric
             label="評価損益"
-            node={<PnlText value={view?.pnl ?? null} currency={currency} className="text-base" />}
+            node={
+              <PnlText
+                value={view?.pnl ?? null}
+                currency={currency}
+                /*
+                  損益の円換算値は API に無いので、円換算の評価額と取得原価から出す。
+                  どちらも同じレートで換算されているため、差もそのまま円建てになる。
+                */
+                baseValue={
+                  view?.marketValueBase !== null && view?.marketValueBase !== undefined
+                    ? view.marketValueBase - view.costValueBase
+                    : null
+                }
+                hideLocalHint
+                className="text-base"
+              />
+            }
             sub={undefined}
             subNode={<PctText value={view?.pnlPct ?? null} className="text-xs" />}
           />

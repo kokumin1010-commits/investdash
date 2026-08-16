@@ -232,6 +232,11 @@ export default function Watchlist() {
                 <div className="grid grid-cols-3 gap-2 rounded-lg bg-muted/40 px-3 py-2.5">
                   <div className="space-y-0.5">
                     <p className="text-[11px] text-muted-foreground">現在値</p>
+                    {/*
+                      ここは株価そのものなので表示通貨に換算しない。
+                      「いくらになったら買うか」を板の値段で判断するため、
+                      USD 換算した目標価格を出しても注文に使えない。
+                    */}
                     <MoneyText value={r.priceNum} currency={r.currency} className="text-sm font-medium" />
                   </div>
                   <div className="space-y-0.5">

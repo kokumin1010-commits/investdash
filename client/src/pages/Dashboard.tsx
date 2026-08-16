@@ -1,5 +1,6 @@
 import { MoneyText, PctText, PnlText } from "@/components/investing/Figures";
 import { BrokerBadge } from "@/components/investing/BrokerBadge";
+import { CurrencyToggle } from "@/components/investing/CurrencyToggle";
 import { DisclaimerNote } from "@/components/investing/DisclaimerNote";
 import { SignalBadge } from "@/components/investing/SignalBadge";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -24,6 +25,7 @@ import {
   type SignalAction,
 } from "@shared/investing";
 import { pnlLabel } from "@shared/pnlLabel";
+import { useDisplayCurrency } from "@/contexts/DisplayCurrencyContext";
 import {
   AlertTriangle,
   ArrowUpRight,
@@ -60,6 +62,11 @@ export default function Dashboard() {
   const utils = trpc.useUtils();
   const overview = trpc.portfolio.overview.useQuery();
   const [busy, setBusy] = useState<null | "price">(null);
+  /**
+   * 表示通貨。保有一覧と同じ選択を共有するので、
+   * 一覧で USD にしていればダッシュボードも USD で見える。
+   */
+  const display = useDisplayCurrency();
 
   const syncPrices = trpc.portfolio.syncPrices.useMutation({
     onSuccess: async res => {
@@ -150,6 +157,31 @@ export default function Dashboard() {
 
   const data = overview.data;
   const summary = data?.summary;
+  /**
+   * 円建ての集計値を表示通貨で描くための短縮関数。
+   *
+   * ダッシュボードは金額が多く、「借入 −◯◯」のように記号を前置きしている
+   * 箇所もあるため、要素ではなく文字列を返す形にして既存の組み立てを保つ。
+   */
+  const money = (baseJpy: number | null | undefined, opts?: { compact?: boolean }) => {
+    const converted = display.convert(baseJpy);
+    if (converted === null) {
+      // LOCAL 選択時やレート未取得時は、集計値の通貨（円）でそのまま出す
+      return formatMoney(baseJpy, summary?.baseCurrency, opts);
+    }
+    return formatMoney(converted, display.codeFor(summary?.baseCurrency), opts);
+  };
+  /**
+   * 借入・金利・追証は円を必ず併記する。
+   *
+   * 借りているのは日本円（2.29 億円）で金利も円で発生するため、
+   * USD 表示に切り替えたときに円が消えると実際の債務額が分からなくなる。
+   */
+  const moneyWithJpy = (baseJpy: number | null | undefined) => {
+    const main = money(baseJpy);
+    if (display.currency === "JPY" || display.convert(baseJpy) === null) return main;
+    return `${main}（${formatMoney(baseJpy, "JPY")}）`;
+  };
   /**
    * 前回記録からの変化。長期保有では前日比より判断に役立つ。
    * スナップショットが 2 件未満なら null。
@@ -338,6 +370,14 @@ export default function Dashboard() {
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
+          {/*
+            金額の表示通貨。保有一覧と同じ選択を共有するので、
+            どちらの画面でも同じ通貨で数字を突き合わせられる。
+          */}
+          <div className="flex items-center gap-1.5">
+            <span className="text-[11px] text-muted-foreground">金額表示</span>
+            <CurrencyToggle />
+          </div>
           <Button
             variant="outline"
             size="sm"
@@ -400,20 +440,21 @@ export default function Dashboard() {
                * 借入がない場合は従来どおり「総評価額」として扱う。
                */
               label={hasBorrowing ? "株式時価（借入を含む）" : "総評価額"}
-              value={formatMoney(summary?.totalValueBase, summary?.baseCurrency)}
+              value={money(summary?.totalValueBase)}
               sub={
                 hasBorrowing ? (
                   <span className="block space-y-1">
                     <span className="flex items-center justify-between gap-2">
                       <span className="text-muted-foreground">借入（信用取引）</span>
                       <span className="tabular font-medium text-loss">
-                        −{formatMoney(summary?.totalBorrowedBase, summary?.baseCurrency)}
+                        {/* 借りているのは日本円なので、他通貨表示でも円を併記する */}
+                        −{moneyWithJpy(summary?.totalBorrowedBase)}
                       </span>
                     </span>
                     <span className="flex items-center justify-between gap-2 border-t pt-1">
                       <span className="font-medium text-foreground">純資産（実質の資産）</span>
                       <span className="tabular font-semibold text-foreground">
-                        {formatMoney(summary?.netAssetsBase, summary?.baseCurrency)}
+                        {money(summary?.netAssetsBase)}
                       </span>
                     </span>
                     <span className="flex items-center justify-between gap-2">
@@ -426,7 +467,7 @@ export default function Dashboard() {
                     </span>
                   </span>
                 ) : summary?.cashBalance
-                  ? `現金 ${formatMoney(summary.cashBalance, summary.baseCurrency)} を含めた総資産 ${formatMoney(summary.totalAssets, summary.baseCurrency)}`
+                  ? `現金 ${money(summary.cashBalance)} を含めた総資産 ${money(summary.totalAssets)}`
                   : `${summary?.positionCount ?? 0} 銘柄${
                       // 同一銘柄を複数口座で持つ場合は口座レコード数も添える
                       (data?.positions.length ?? 0) > (summary?.positionCount ?? 0)
@@ -442,6 +483,9 @@ export default function Dashboard() {
                 <PnlText
                   value={summary?.totalPnl ?? null}
                   currency={summary?.baseCurrency}
+                  /* 集計値は円なので baseValue にも同じ値を渡して表示通貨に追随させる */
+                  baseValue={summary?.totalPnl ?? null}
+                  hideLocalHint
                   className="whitespace-nowrap text-2xl font-semibold"
                 />
               }
@@ -450,7 +494,7 @@ export default function Dashboard() {
                   <span className="flex items-center gap-1.5">
                     <PctText value={summary?.totalPnlPct ?? null} />
                     <span className="text-muted-foreground">
-                      / 取得原価 {formatMoney(summary?.totalCostBase, summary?.baseCurrency)}
+                      / 取得原価 {money(summary?.totalCostBase)}
                     </span>
                   </span>
                   {/**
@@ -466,6 +510,8 @@ export default function Dashboard() {
                             <PnlText
                               value={b.pnl}
                               currency={summary?.baseCurrency}
+                              baseValue={b.pnl}
+                              hideLocalHint
                               compact
                               className="text-xs font-medium"
                             />
@@ -491,6 +537,8 @@ export default function Dashboard() {
                   <PnlText
                     value={periodChange.gainDelta}
                     currency={summary?.baseCurrency}
+                    baseValue={periodChange.gainDelta}
+                    hideLocalHint
                     className="text-2xl font-semibold"
                   />
                 ) : periodChange ? (
@@ -549,7 +597,7 @@ export default function Dashboard() {
                         <span className="block text-[11px] text-muted-foreground">
                           評価額の差は{" "}
                           {periodChange.totalDelta >= 0 ? "+" : ""}
-                          {formatMoney(periodChange.totalDelta, summary?.baseCurrency)}
+                          {money(periodChange.totalDelta)}
                           ですが、その大半は登録した銘柄の分です
                         </span>
                         <span className="block text-[11px] text-muted-foreground">
@@ -579,7 +627,7 @@ export default function Dashboard() {
               valueNode={
                 <span className="whitespace-nowrap text-2xl font-semibold text-gain">
                   {dividends && dividends.annualIncomeBase > 0
-                    ? formatMoney(dividends.annualIncomeBase, summary?.baseCurrency)
+                    ? money(dividends.annualIncomeBase)
                     : "—"}
                 </span>
               }
@@ -588,7 +636,7 @@ export default function Dashboard() {
                   <span className="block space-y-1">
                     <span className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
                       <span className="tabular font-medium">
-                        月あたり {formatMoney(dividends.monthlyAverageBase, summary?.baseCurrency)}
+                        月あたり {money(dividends.monthlyAverageBase)}
                       </span>
                       <span className="text-muted-foreground">
                         （年間を 12 で割った平均）
@@ -621,7 +669,8 @@ export default function Dashboard() {
                         <span className="flex items-center justify-between gap-2">
                           <span className="text-muted-foreground">借入の年間利息</span>
                           <span className="tabular font-medium text-loss">
-                            −{formatMoney(carryTotal.annualInterestBase, summary?.baseCurrency)}
+                            {/* 金利は円建てで発生するので円を併記する */}
+                            −{moneyWithJpy(carryTotal.annualInterestBase)}
                           </span>
                         </span>
                         <span className="flex items-center justify-between gap-2">
@@ -634,10 +683,7 @@ export default function Dashboard() {
                             }`}
                           >
                             {carryTotal.netCarryBase >= 0 ? "+" : "−"}
-                            {formatMoney(
-                              Math.abs(carryTotal.netCarryBase),
-                              summary?.baseCurrency
-                            )}
+                            {money(Math.abs(carryTotal.netCarryBase))}
                             {carryTotal.netYieldPct !== null ? (
                               <span className="ml-1 text-[11px] font-normal text-muted-foreground">
                                 {carryTotal.netYieldPct.toFixed(2)}%
@@ -671,7 +717,7 @@ export default function Dashboard() {
                       <span className="block text-[11px] text-amber-600 dark:text-amber-400">
                         {dividends.specialCount} 銘柄に一時的な配当（特別・記念配当）が含まれます。
                         それを除くと年間{" "}
-                        {formatMoney(dividends.recurringIncomeBase, summary?.baseCurrency)}
+                        {money(dividends.recurringIncomeBase)}
                       </span>
                     ) : null}
                     {dividends.updatedAt ? (
@@ -746,6 +792,8 @@ export default function Dashboard() {
                         <MoneyText
                           value={m.value}
                           currency={summary?.baseCurrency}
+                          baseValue={m.value}
+                          hideLocalHint
                           className="text-xl font-semibold"
                         />
                       </div>
@@ -757,6 +805,8 @@ export default function Dashboard() {
                           <PnlText
                             value={m.pnl}
                             currency={summary?.baseCurrency}
+                            baseValue={m.pnl}
+                            hideLocalHint
                             compact
                             className="text-xs"
                           />
@@ -788,7 +838,7 @@ export default function Dashboard() {
                           <span className="text-muted-foreground">年間配当</span>
                           <span className="flex items-baseline gap-1.5">
                             <span className="tabular font-medium text-gain">
-                              {formatMoney(m.dividendIncomeBase, summary?.baseCurrency)}
+                              {money(m.dividendIncomeBase)}
                             </span>
                             <span className="tabular text-muted-foreground">
                               {m.dividendYieldPct !== null ? `${m.dividendYieldPct.toFixed(2)}%` : ""}
@@ -871,6 +921,8 @@ export default function Dashboard() {
                         <MoneyText
                           value={b.value}
                           currency={summary?.baseCurrency}
+                          baseValue={b.value}
+                          hideLocalHint
                           className="text-xl font-semibold"
                         />
                       </div>
@@ -879,6 +931,8 @@ export default function Dashboard() {
                           <PnlText
                             value={b.pnl}
                             currency={summary?.baseCurrency}
+                            baseValue={b.pnl}
+                            hideLocalHint
                             compact
                             className="text-xs"
                           />
@@ -903,7 +957,7 @@ export default function Dashboard() {
                           <span className="text-muted-foreground">年間配当</span>
                           <span className="flex items-baseline gap-1.5">
                             <span className="tabular font-medium text-gain">
-                              {formatMoney(b.dividendIncomeBase, summary?.baseCurrency)}
+                              {money(b.dividendIncomeBase)}
                             </span>
                             <span className="tabular text-muted-foreground">
                               {b.dividendYieldPct !== null ? `${b.dividendYieldPct.toFixed(2)}%` : ""}
@@ -920,7 +974,7 @@ export default function Dashboard() {
                           <div className="flex items-center justify-between gap-2">
                             <span className="text-muted-foreground">借入</span>
                             <span className="tabular text-loss">
-                              −{formatMoney(b.leverage.borrowedBase, summary?.baseCurrency)}
+                              −{moneyWithJpy(b.leverage.borrowedBase)}
                             </span>
                           </div>
                           <div className="flex items-center justify-between gap-2">
@@ -928,7 +982,7 @@ export default function Dashboard() {
                               純資産（借入を引いた額）
                             </span>
                             <span className="tabular font-semibold text-foreground">
-                              {formatMoney(b.leverage.netValueBase, summary?.baseCurrency)}
+                              {money(b.leverage.netValueBase)}
                             </span>
                           </div>
                           <div className="flex items-center justify-between gap-2">
@@ -943,7 +997,7 @@ export default function Dashboard() {
                             <span className="text-muted-foreground">証拠金余力</span>
                             <span className="tabular">
                               {b.leverage.marginCushionBase !== null
-                                ? formatMoney(b.leverage.marginCushionBase, summary?.baseCurrency)
+                                ? money(b.leverage.marginCushionBase)
                                 : "—"}
                             </span>
                           </div>
@@ -975,10 +1029,7 @@ export default function Dashboard() {
                                   年間の利息（{b.leverage.interest.effectiveRatePct.toFixed(2)}%）
                                 </span>
                                 <span className="tabular text-loss">
-                                  −{formatMoney(
-                                    b.leverage.interest.annualInterestBase,
-                                    summary?.baseCurrency
-                                  )}
+                                  −{moneyWithJpy(b.leverage.interest.annualInterestBase)}
                                 </span>
                               </div>
                               <div className="flex items-center justify-between gap-2">
@@ -991,10 +1042,7 @@ export default function Dashboard() {
                                   }`}
                                 >
                                   {b.leverage.carry.netCarryBase >= 0 ? "+" : "−"}
-                                  {formatMoney(
-                                    Math.abs(b.leverage.carry.netCarryBase),
-                                    summary?.baseCurrency
-                                  )}
+                                  {money(Math.abs(b.leverage.carry.netCarryBase))}
                                 </span>
                               </div>
                               <div className="flex items-center justify-between gap-2">
@@ -1166,12 +1214,12 @@ export default function Dashboard() {
                         formatter={(v: number, name): [string, string] => {
                           if (name === "netAssets") {
                             return [
-                              formatMoney(v, summary?.baseCurrency),
+                              money(v),
                               "純資産（借入を引いた額）",
                             ];
                           }
                           return [
-                            formatMoney(v, summary?.baseCurrency),
+                            money(v),
                             name === "value" ? "株式時価" : "取得原価",
                           ];
                         }}
@@ -1185,7 +1233,7 @@ export default function Dashboard() {
                           }
                           if (p.priceChange !== null) {
                             const sign = p.priceChange >= 0 ? "+" : "";
-                            return `${label}（値動き ${sign}${formatMoney(p.priceChange, summary?.baseCurrency)}）`;
+                            return `${label}（値動き ${sign}${money(p.priceChange)}）`;
                           }
                           return `${label}（銘柄 ${p.positionCount}）`;
                         }}
@@ -1283,7 +1331,7 @@ export default function Dashboard() {
                                 }
                               >
                                 {assetTrend.data.priceOnlyChange >= 0 ? " +" : " "}
-                                {formatMoney(assetTrend.data.priceOnlyChange, summary?.baseCurrency)}
+                                {money(assetTrend.data.priceOnlyChange)}
                               </span>
                               です。
                             </>
@@ -1333,7 +1381,7 @@ export default function Dashboard() {
                             color: "var(--popover-foreground)",
                           }}
                           formatter={(v: number, _n, item) => [
-                            `${formatMoney(v, summary?.baseCurrency)}（${(item?.payload as { pct: number })?.pct.toFixed(1)}%）`,
+                            `${money(v)}（${(item?.payload as { pct: number })?.pct.toFixed(1)}%）`,
                             (item?.payload as { name: string })?.name,
                           ]}
                         />
@@ -1381,10 +1429,7 @@ export default function Dashboard() {
                     <div className="text-muted-foreground">最も多い月</div>
                     <div className="tabular text-sm font-semibold">
                       {dividends.peakMonth !== null
-                        ? `${dividends.peakMonth + 1}月 ${formatMoney(
-                            dividendMonthly[dividends.peakMonth].amount,
-                            summary?.baseCurrency
-                          )}`
+                        ? `${dividends.peakMonth + 1}月 ${money(dividendMonthly[dividends.peakMonth].amount)}`
                         : "—"}
                     </div>
                     {/* 詳しい確認は配当ページで行う（口座別・市場別の絞り込みがある） */}
@@ -1481,11 +1526,11 @@ export default function Dashboard() {
                       }}
                       formatter={(v: number, name, item) => {
                         if (name === "average") {
-                          return [formatMoney(v, summary?.baseCurrency), "月あたり平均"];
+                          return [money(v), "月あたり平均"];
                         }
                         const pct = (item?.payload as { pct: number })?.pct ?? 0;
                         return [
-                          `${formatMoney(v, summary?.baseCurrency)}（年間の ${pct.toFixed(1)}%）`,
+                          `${money(v)}（年間の ${pct.toFixed(1)}%）`,
                           "受取額",
                         ];
                       }}
@@ -1543,7 +1588,7 @@ export default function Dashboard() {
                       </div>
                       <div className="flex items-center gap-2">
                         <span className="tabular text-sm font-semibold text-gain">
-                          {formatMoney(selectedDivDetail.totalBase, summary?.baseCurrency)}
+                          {money(selectedDivDetail.totalBase)}
                         </span>
                         <button
                           type="button"
@@ -1591,10 +1636,13 @@ export default function Dashboard() {
                             </div>
                             <div className="shrink-0 text-right">
                               <div className="tabular text-xs font-medium">
-                                {formatMoney(e.amountBase, summary?.baseCurrency)}
+                                {money(e.amountBase)}
                               </div>
-                              {/* 外貨建ては現地通貨も出す。為替の影響を切り分けられるようにする */}
-                              {e.currency !== summary?.baseCurrency ? (
+                              {/*
+                                表示通貨と違う通貨の銘柄は現地通貨も出す。
+                                為替の影響を切り分けられるようにするため。
+                              */}
+                              {display.showLocalHint(e.currency) ? (
                                 <div className="tabular text-[10px] text-muted-foreground">
                                   {e.currency}{" "}
                                   {e.amount.toLocaleString(undefined, {

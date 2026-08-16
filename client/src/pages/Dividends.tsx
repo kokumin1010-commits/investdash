@@ -1,4 +1,5 @@
 import { BrokerBadge } from "@/components/investing/BrokerBadge";
+import { CurrencyToggle } from "@/components/investing/CurrencyToggle";
 import { MoneyText } from "@/components/investing/Figures";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -19,6 +20,7 @@ import {
 } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { trpc } from "@/lib/trpc";
+import { useDisplayCurrency } from "@/contexts/DisplayCurrencyContext";
 import { parseBrokerFilter } from "@shared/brokerFilter";
 import {
   BROKERS,
@@ -90,7 +92,11 @@ const MONTH_LABELS = [
   "12月",
 ];
 
-function formatMoney(value: number | null | undefined, currency = "JPY"): string {
+/**
+ * このページ内で使う金額整形。
+ * 円未満の端数を出しても意味がないので小数は落とす。
+ */
+function formatMoneyLocal(value: number | null | undefined, currency = "JPY"): string {
   if (value === null || value === undefined || !Number.isFinite(value)) return "—";
   return new Intl.NumberFormat("ja-JP", {
     style: "currency",
@@ -140,6 +146,18 @@ export default function Dividends() {
   const data = overview.data;
   const summary = data?.summary;
   const baseCurrency = summary?.baseCurrency ?? "JPY";
+  /**
+   * 表示通貨。保有一覧・ダッシュボードと同じ選択を共有する。
+   * 配当は「年間いくら入るか」を他の資産と比べる数字なので、
+   * 画面ごとに通貨が違うと突き合わせられない。
+   */
+  const display = useDisplayCurrency();
+  /** 円建ての集計値を表示通貨で描く */
+  const money = (baseJpy: number | null | undefined) => {
+    const converted = display.convert(baseJpy);
+    if (converted === null) return formatMoneyLocal(baseJpy, baseCurrency);
+    return formatMoneyLocal(converted, display.codeFor(baseCurrency));
+  };
   const calendar = data?.dividendCalendar ?? [];
   const positions = data?.positions ?? [];
 
@@ -340,15 +358,24 @@ export default function Dividends() {
               : "配当情報は未取得です"}
           </p>
         </div>
-        <Button
-          variant="outline"
-          size="sm"
-          disabled={syncDividends.isPending}
-          onClick={() => syncDividends.mutate({})}
-        >
-          <RefreshCw className={`mr-1.5 h-3.5 w-3.5 ${syncDividends.isPending ? "animate-spin" : ""}`} />
-          配当更新
-        </Button>
+        <div className="flex flex-wrap items-center gap-2">
+          {/* 他の画面と同じ選択を共有するので、通貨を揃えて突き合わせられる */}
+          <div className="flex items-center gap-1.5">
+            <span className="text-[11px] text-muted-foreground">金額表示</span>
+            <CurrencyToggle />
+          </div>
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={syncDividends.isPending}
+            onClick={() => syncDividends.mutate({})}
+          >
+            <RefreshCw
+              className={`mr-1.5 h-3.5 w-3.5 ${syncDividends.isPending ? "animate-spin" : ""}`}
+            />
+            配当更新
+          </Button>
+        </div>
       </div>
 
       {!hasAny ? (
@@ -452,10 +479,10 @@ export default function Dividends() {
                     {isFiltered ? "絞り込み後の年間配当（税引前）" : "年間配当（税引前）"}
                   </p>
                   <p className="tabular mt-0.5 text-2xl font-semibold text-gain">
-                    {formatMoney(annualBase, baseCurrency)}
+                    {money(annualBase)}
                   </p>
                   <p className="mt-0.5 text-xs text-muted-foreground">
-                    月あたり {formatMoney(annualBase / 12, baseCurrency)}
+                    月あたり {money(annualBase / 12)}
                     {isFiltered && dividends
                       ? ` ・全体の ${
                           dividends.annualIncomeBase > 0
@@ -596,11 +623,11 @@ export default function Dividends() {
                         }}
                         formatter={(v: number, name, item) => {
                           if (name === "average") {
-                            return [formatMoney(v, baseCurrency), "月あたり平均"];
+                            return [money(v), "月あたり平均"];
                           }
                           const payload = item?.payload as { pct: number; count: number };
                           return [
-                            `${formatMoney(v, baseCurrency)}（年間の ${
+                            `${money(v)}（年間の ${
                               payload?.pct?.toFixed(1) ?? "0"
                             }% ・${payload?.count ?? 0} 件）`,
                             "受取額",
@@ -675,7 +702,7 @@ export default function Dividends() {
                         </CardDescription>
                       </div>
                       <span className="tabular text-sm font-semibold text-gain">
-                        {formatMoney(selected.totalBase, baseCurrency)}
+                        {money(selected.totalBase)}
                       </span>
                     </div>
                   </CardHeader>
@@ -719,9 +746,13 @@ export default function Dividends() {
                               </div>
                               <div className="shrink-0 text-right">
                                 <p className="tabular text-sm font-semibold text-gain">
-                                  {formatMoney(e.amountBase, baseCurrency)}
+                                  {money(e.amountBase)}
                                 </p>
-                                {e.currency !== baseCurrency ? (
+                                {/*
+                                  表示通貨と違う通貨の銘柄だけ現地通貨を添える。
+                                  同じ通貨なら同じ数字が二度並ぶだけになるため。
+                                */}
+                                {display.showLocalHint(e.currency) ? (
                                   <MoneyText
                                     value={e.amount}
                                     currency={e.currency}
@@ -807,7 +838,7 @@ export default function Dividends() {
                           </div>
                           <div className="shrink-0 text-right">
                             <p className="tabular text-sm font-semibold text-gain">
-                              {formatMoney(r.annualBase, baseCurrency)}
+                              {money(r.annualBase)}
                             </p>
                             <p className="tabular text-[11px] text-muted-foreground">
                               利回り{" "}
