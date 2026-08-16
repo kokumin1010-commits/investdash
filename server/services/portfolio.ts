@@ -31,6 +31,10 @@ import { groupPositionsBySymbol, type GroupedPosition } from "./groupPositions";
 import { buildMarketSlices, type MarketSlice } from "./marketSlices";
 import { computePeriodChange, type PeriodChange } from "./periodChange";
 import {
+  buildDividendCalendar,
+  type DividendCalendarMonth,
+} from "./dividendCalendar";
+import {
   computeBrokerLeverage,
   marginRiskLevel,
   type MarginRiskLevel,
@@ -139,6 +143,11 @@ export type PositionDividendView = {
    * 権利落ち月を基準にしている。データが無い銘柄は null。
    */
   monthlyIncomeBase: number[] | null;
+  /**
+   * 1 株あたりの月別配当（現地通貨、添字 0 = 1 月）。
+   * 銘柄内訳で現地通貨の金額を出すために保持する。データが無い銘柄は null。
+   */
+  monthlyPerShare: number[] | null;
 };
 
 /** 配当の全体集計 */
@@ -344,6 +353,8 @@ export async function buildPortfolio(userId: number): Promise<{
   currencies: SectorSlice[];
   /** 配当の全体集計 */
   dividends: DividendSummaryView;
+  /** 月別の配当の銘柄内訳（12 か月分。配当が無い月も要素として持つ） */
+  dividendCalendar: DividendCalendarMonth[];
   /** 国・市場別の内訳。米国株は為替影響を切り分けられるようにしている */
   markets: MarketSlice[];
   brokers: BrokerSlice[];
@@ -426,6 +437,10 @@ export async function buildPortfolio(userId: number): Promise<{
             recurringYieldPct: dividendYield(recurringPerShare, currentPrice),
             yieldNeedsCheck: isImplausibleYield(divYieldPct),
             monthlyIncomeBase: monthlyIncomeBase(h.monthlyDividends, quantity, h.currency, toBase),
+            monthlyPerShare:
+              h.monthlyDividends && h.monthlyDividends.length === 12
+                ? h.monthlyDividends
+                : null,
           };
 
     return {
@@ -723,6 +738,11 @@ export async function buildPortfolio(userId: number): Promise<{
      * （同一銘柄を複数口座で持っていれば、その分だけ配当も増えるため）。
      */
     dividends: buildDividendSummary(positions, groups, totalValueBase, totalCostBase),
+    /**
+     * 月別の配当の銘柄内訳。どの月にどの銘柄から配当が入るかを見るため、
+     * 口座レコード単位で保持する（同一銘柄を複数口座で持つ場合は分けて出す）。
+     */
+    dividendCalendar: buildDividendCalendar(positions),
     /**
      * 国・市場別の内訳。銘柄単位（groups）を集計対象にすることで、
      * 同一銘柄を複数口座で持っていても銘柄数を二重に数えない。

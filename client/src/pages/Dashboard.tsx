@@ -238,6 +238,8 @@ export default function Dashboard() {
     const average = dividends.annualIncomeBase / 12;
     return monthly.map((amount, i) => ({
       month: `${i + 1}月`,
+      /** 0 始まりの月。棒をタップしたときの選択に使う */
+      monthIndex: i,
       amount,
       average,
       /** その月が年間の何割か。ツールチップで偏りを示すために持つ */
@@ -245,6 +247,32 @@ export default function Dashboard() {
       isPeak: dividends.peakMonth === i,
     }));
   }, [dividends]);
+
+  /**
+   * 配当グラフで選択している月（0 = 1 月）。null なら未選択。
+   *
+   * 棒をタップするとその月の銘柄内訳を開く。合計金額だけでは
+   * どの銘柄が減配したときに影響が大きいかが分からないため。
+   */
+  const [selectedDivMonth, setSelectedDivMonth] = useState<number | null>(null);
+
+  /** 選択中の月の銘柄内訳 */
+  const selectedDivDetail = useMemo(() => {
+    if (selectedDivMonth === null) return null;
+    return data?.dividendCalendar?.[selectedDivMonth] ?? null;
+  }, [data?.dividendCalendar, selectedDivMonth]);
+
+  /**
+   * 銘柄内訳を全件表示するか。
+   *
+   * 3 月は 85 件になりスマホでは延々とスクロールすることになるため、
+   * 既定では上位 10 件だけを出す。累計の割合を添えて「上位で何割か」を
+   * 分かるようにし、必要なときだけ全件に広げる。
+   */
+  const [divShowAll, setDivShowAll] = useState(false);
+
+  /** 表示する件数の上限（折りたたみ時） */
+  const DIV_PREVIEW_COUNT = 10;
 
   /**
    * 全口座を合わせた借入コストと、配当から利息を引いた手取り。
@@ -1215,6 +1243,7 @@ export default function Dashboard() {
                     <CardDescription className="text-xs">
                       直近 1 年の実績を権利確定月に振り分けたもの（税引前）。
                       実際の入金は権利確定から 2〜3 か月後になります。
+                      月をタップするとその月に配当が入る銘柄が見られます。
                     </CardDescription>
                   </div>
                   {/*
@@ -1235,8 +1264,59 @@ export default function Dashboard() {
                 </div>
               </CardHeader>
               <CardContent>
+                {/*
+                  月を選ぶボタン列。棒グラフの棒はスマホだと細くて押しにくいため、
+                  タップ用の導線を別に用意する（棒のクリックでも同じ月を選べる）。
+                */}
+                <div className="mb-3 -mx-1 flex flex-wrap gap-1 px-1">
+                  {dividendMonthly.map(m => {
+                    const active = selectedDivMonth === m.monthIndex;
+                    const empty = m.amount <= 0;
+                    return (
+                      <button
+                        key={m.monthIndex}
+                        type="button"
+                        disabled={empty}
+                        onClick={() =>
+                          {
+                            setSelectedDivMonth(active ? null : m.monthIndex);
+                            // 月を切り替えたら折りたたみ状態を戻す
+                            setDivShowAll(false);
+                          }
+                        }
+                        className={`min-h-8 rounded-md border px-2 py-1 text-xs transition-all duration-150 active:scale-[0.97] ${
+                          active
+                            ? "border-primary bg-primary text-primary-foreground"
+                            : empty
+                              ? "cursor-not-allowed border-border/50 text-muted-foreground/50"
+                              : "border-border bg-background hover:bg-accent hover:text-accent-foreground"
+                        }`}
+                      >
+                        {m.month}
+                      </button>
+                    );
+                  })}
+                </div>
                 <ResponsiveContainer width="100%" height={220}>
-                  <BarChart data={dividendMonthly} margin={{ left: 4, right: 8, top: 8, bottom: 0 }}>
+                  <BarChart
+                    data={dividendMonthly}
+                    margin={{ left: 4, right: 8, top: 8, bottom: 0 }}
+                    onClick={state => {
+                      /*
+                        棒のクリックで月を選ぶ。recharts は activeTooltipIndex を
+                        グラフ全体のクリックで渡してくるので、そこから月を決める。
+                      */
+                      const idx = state?.activeTooltipIndex;
+                      if (typeof idx !== "number") return;
+                      const target = dividendMonthly[idx];
+                      if (!target || target.amount <= 0) return;
+                      setSelectedDivMonth(prev =>
+                        prev === target.monthIndex ? null : target.monthIndex
+                      );
+                      setDivShowAll(false);
+                    }}
+                    style={{ cursor: "pointer" }}
+                  >
                     <XAxis
                       dataKey="month"
                       tick={{ fontSize: 11 }}
@@ -1289,14 +1369,148 @@ export default function Dashboard() {
                       {dividendMonthly.map(m => (
                         <Cell
                           key={m.month}
-                          // 最多月だけ濃くして視線を誘導する
-                          fill={m.isPeak ? "var(--chart-1)" : "var(--chart-2)"}
-                          fillOpacity={m.isPeak ? 1 : 0.65}
+                          /*
+                            選択中の月を最も強調する。未選択のときは最多月を
+                            濃くして視線を誘導する。
+                          */
+                          fill={
+                            selectedDivMonth === m.monthIndex
+                              ? "var(--chart-1)"
+                              : m.isPeak
+                                ? "var(--chart-1)"
+                                : "var(--chart-2)"
+                          }
+                          fillOpacity={
+                            selectedDivMonth === null
+                              ? m.isPeak
+                                ? 1
+                                : 0.65
+                              : selectedDivMonth === m.monthIndex
+                                ? 1
+                                : 0.3
+                          }
                         />
                       ))}
                     </Bar>
                   </BarChart>
                 </ResponsiveContainer>
+                {/*
+                  選択した月の銘柄内訳。どの銘柄がその月の金額を作っているかを
+                  金額の大きい順に出す。減配時の影響を見積もるのに使う。
+                */}
+                {selectedDivDetail ? (
+                  <div className="mt-3 rounded-lg border border-border/70 bg-muted/20 p-3">
+                    <div className="mb-2 flex flex-wrap items-baseline justify-between gap-2">
+                      <div className="text-sm font-semibold">
+                        {selectedDivDetail.month + 1}月に配当が入る銘柄
+                        <span className="ml-1.5 text-xs font-normal text-muted-foreground">
+                          {selectedDivDetail.entries.length} 件
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className="tabular text-sm font-semibold text-gain">
+                          {formatMoney(selectedDivDetail.totalBase, summary?.baseCurrency)}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => setSelectedDivMonth(null)}
+                          className="rounded-md border px-2 py-0.5 text-[11px] text-muted-foreground transition-all duration-150 hover:bg-accent hover:text-accent-foreground active:scale-[0.97]"
+                        >
+                          閉じる
+                        </button>
+                      </div>
+                    </div>
+                    {selectedDivDetail.entries.length === 0 ? (
+                      <p className="py-4 text-center text-xs text-muted-foreground">
+                        この月に配当が入る銘柄はありません
+                      </p>
+                    ) : (
+                      <>
+                      <ul className="space-y-1">
+                        {(divShowAll
+                          ? selectedDivDetail.entries
+                          : selectedDivDetail.entries.slice(0, DIV_PREVIEW_COUNT)
+                        ).map(e => (
+                          <li
+                            key={`${e.holdingId}-${e.symbol}`}
+                            className="flex items-center justify-between gap-2 rounded-md bg-background/60 px-2 py-1.5"
+                          >
+                            <div className="flex min-w-0 items-center gap-1.5">
+                              <BrokerBadge broker={e.broker} short className="text-[10px]" />
+                              <Link
+                                href={`/holdings/${e.holdingId}`}
+                                className="truncate text-xs hover:underline"
+                              >
+                                {e.name}
+                              </Link>
+                              <span className="tabular shrink-0 text-[10px] text-muted-foreground">
+                                {e.tickerCode}
+                              </span>
+                              {e.hasSpecial ? (
+                                <span
+                                  className="shrink-0 text-[10px] text-warning"
+                                  title="特別配当が含まれるため、来期も同額とは限りません"
+                                >
+                                  特別配当
+                                </span>
+                              ) : null}
+                            </div>
+                            <div className="shrink-0 text-right">
+                              <div className="tabular text-xs font-medium">
+                                {formatMoney(e.amountBase, summary?.baseCurrency)}
+                              </div>
+                              {/* 外貨建ては現地通貨も出す。為替の影響を切り分けられるようにする */}
+                              {e.currency !== summary?.baseCurrency ? (
+                                <div className="tabular text-[10px] text-muted-foreground">
+                                  {e.currency}{" "}
+                                  {e.amount.toLocaleString(undefined, {
+                                    maximumFractionDigits: 2,
+                                  })}
+                                </div>
+                              ) : null}
+                            </div>
+                          </li>
+                        ))}
+                      </ul>
+                      {/*
+                        件数が多い月（3 月は 85 件）はスマホで延々とスクロールする
+                        ことになるため、既定では上位のみ出す。上位が占める割合を
+                        添えて「主要な銘柄がどれか」が分かるようにする。
+                      */}
+                      {selectedDivDetail.entries.length > DIV_PREVIEW_COUNT ? (
+                        <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
+                          {!divShowAll ? (
+                            <span className="text-[11px] text-muted-foreground">
+                              上位 {DIV_PREVIEW_COUNT} 件でこの月の{" "}
+                              {(
+                                (selectedDivDetail.entries
+                                  .slice(0, DIV_PREVIEW_COUNT)
+                                  .reduce((acc, e) => acc + e.amountBase, 0) /
+                                  selectedDivDetail.totalBase) *
+                                100
+                              ).toFixed(0)}
+                              % を占めます
+                            </span>
+                          ) : (
+                            <span className="text-[11px] text-muted-foreground">
+                              全 {selectedDivDetail.entries.length} 件を表示中
+                            </span>
+                          )}
+                          <button
+                            type="button"
+                            onClick={() => setDivShowAll(v => !v)}
+                            className="min-h-8 rounded-md border px-2.5 py-1 text-xs transition-all duration-150 hover:bg-accent hover:text-accent-foreground active:scale-[0.97]"
+                          >
+                            {divShowAll
+                              ? "上位のみ表示"
+                              : `残り ${selectedDivDetail.entries.length - DIV_PREVIEW_COUNT} 件を表示`}
+                          </button>
+                        </div>
+                      ) : null}
+                      </>
+                    )}
+                  </div>
+                ) : null}
                 {/*
                   集中度は「上位 3 か月が年間の何割か」。毎月均等なら 25%。
                   数字だけでは意味が伝わらないので、目安と解釈を添える。
