@@ -16,11 +16,13 @@ export type BreakdownEntry = {
   pnl: number | null;
   pnlPct: number | null;
   currency: string;
+  /** 損益の円換算。表示通貨に追随させるために使う */
+  pnlBase?: number | null;
   /**
    * 口座ごとの年間配当。株数が違えば受取額も変わるため、
    * どの口座がいくら配当を生んでいるかを内訳でも確認できるようにする。
    */
-  dividend?: { annualIncome: number } | null;
+  dividend?: { annualIncome: number; annualIncomeBase?: number | null } | null;
 };
 
 export function BrokerBreakdown({
@@ -64,7 +66,13 @@ export function BrokerBreakdown({
           <div className="flex items-center justify-between gap-2">
             <BrokerBadge broker={e.broker} short />
             <div className="flex shrink-0 items-baseline gap-1.5">
-              <PnlText value={e.pnl} currency={e.currency} compact className="text-[11px]" />
+              <PnlText
+                value={e.pnl}
+                currency={e.currency}
+                baseValue={e.pnlBase}
+                compact
+                className="text-[11px]"
+              />
               <span className="text-[10px]">
                 <PctText value={e.pnlPct} />
               </span>
@@ -81,8 +89,10 @@ export function BrokerBreakdown({
                   <MoneyText
                     value={e.dividend.annualIncome}
                     currency={e.currency}
+                    baseValue={e.dividend.annualIncomeBase}
                     compact
                     className="tabular text-gain"
+                    hideLocalHint
                   />
                 </>
               ) : null}

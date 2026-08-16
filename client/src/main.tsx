@@ -5,6 +5,7 @@ import { createRoot } from "react-dom/client";
 import superjson from "superjson";
 import App from "./App";
 import { adoptTokenFromUrl, getStoredToken } from "./lib/passcodeSession";
+import { DisplayCurrencyProvider } from "@/contexts/DisplayCurrencyContext";
 import "./index.css";
 
 // 開発時のみ: ?devToken=... が付いていればトークンとして取り込む（描画前に実行）
@@ -47,7 +48,10 @@ const trpcClient = trpc.createClient({
 createRoot(document.getElementById("root")!).render(
   <QueryClientProvider client={queryClient}>
     <trpc.Provider client={trpcClient} queryClient={queryClient}>
-      <App />
+      {/* 表示通貨は trpc の設定取得に依存するため Provider の内側に置く */}
+      <DisplayCurrencyProvider>
+        <App />
+      </DisplayCurrencyProvider>
     </trpc.Provider>
   </QueryClientProvider>
 );

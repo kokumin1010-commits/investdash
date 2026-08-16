@@ -35,6 +35,12 @@ export type GroupedPosition = {
   /** 合計評価額（基準通貨 JPY 換算） */
   marketValueBase: number | null;
   costValueBase: number;
+  /**
+   * 評価損益の円換算。
+   * 表示通貨を切り替えるとき損益額も揃えないと
+   * 「評価額は USD・損益は現地通貨」という不統一が生じるため持たせる。
+   */
+  pnlBase: number | null;
   /** ポートフォリオ全体に対する構成比 */
   weightPct: number | null;
   /** この銘柄を保有している口座の一覧（評価額の降順） */
@@ -200,6 +206,12 @@ export function groupPositionsBySymbol(
       dayChangePct,
       marketValueBase,
       costValueBase,
+      /*
+       * 円換算の損益は「円換算の評価額 − 円換算の取得原価」で求める。
+       * 現地通貨の損益に今のレートを掛ける方法だと、
+       * 取得時と現在で異なるレートが混ざって二重計算になるため採らない。
+       */
+      pnlBase: marketValueBase === null ? null : marketValueBase - costValueBase,
       weightPct:
         totalValueBase > 0 && marketValueBase !== null
           ? (marketValueBase / totalValueBase) * 100

@@ -1,6 +1,7 @@
 import { DisclaimerNote } from "@/components/investing/DisclaimerNote";
 import { BrokerBadge } from "@/components/investing/BrokerBadge";
 import { BrokerBreakdown } from "@/components/investing/BrokerBreakdown";
+import { CurrencyToggle } from "@/components/investing/CurrencyToggle";
 import { MoneyText, PctText, PnlText } from "@/components/investing/Figures";
 import { SignalBadge, SignalPlaceholder } from "@/components/investing/SignalBadge";
 import { SignalGuide } from "@/components/investing/SignalGuide";
@@ -440,6 +441,15 @@ export default function Holdings() {
             <SelectItem value="name">銘柄名順</SelectItem>
           </SelectContent>
         </Select>
+        {/*
+          表示通貨の切り替え。
+          現地通貨のままだと ¥4530万 と $14.5万 が縦に並び大小を比較できないため、
+          金額の通貨を揃えて見られるようにする。
+        */}
+        <div className="ml-auto flex items-center gap-1.5">
+          <span className="text-[11px] text-muted-foreground">金額表示</span>
+          <CurrencyToggle />
+        </div>
       </div>
 
       {positions.length === 0 ? (
@@ -511,6 +521,7 @@ export default function Holdings() {
                       <MoneyText
                         value={p.marketValue}
                         currency={p.currency}
+                        baseValue={p.marketValueBase}
                         className="text-base font-semibold"
                       />
                     </div>
@@ -519,6 +530,12 @@ export default function Holdings() {
                       <PnlText
                         value={p.pnl}
                         currency={p.currency}
+                        baseValue={p.pnlBase}
+                        /*
+                          スマホは幅が狭く、金額・現地通貨の併記・率の 3 つを並べると折り返す。
+                          現地通貨は左隣の評価額に出ているので、ここでは省く。
+                        */
+                        hideLocalHint
                         className="text-base font-semibold"
                       />
                       <div className="text-xs">
@@ -575,7 +592,9 @@ export default function Holdings() {
                           <MoneyText
                             value={p.dividend.annualIncome}
                             currency={p.currency}
+                            baseValue={p.dividend.annualIncomeBase}
                             className="text-xs font-semibold text-gain"
+                            hideLocalHint
                           />
                           <span className="tabular text-[11px] text-muted-foreground">
                             {p.dividend.yieldPct !== null
@@ -614,7 +633,16 @@ export default function Holdings() {
 
                   {/* 複数口座で保有している場合の内訳 */}
                   <BrokerBreakdown
-                    entries={p.entries}
+                    /*
+                      内訳も表示通貨に追随させる。円換算の損益は
+                      「円換算の評価額 − 円換算の取得原価」で求める（取得時と現在で
+                      レートが違うため、現地通貨の損益に今のレートを掛けると誤る）。
+                    */
+                    entries={p.entries.map(e => ({
+                      ...e,
+                      pnlBase:
+                        e.marketValueBase === null ? null : e.marketValueBase - e.costValueBase,
+                    }))}
                     onEdit={id => setEditTarget(id)}
                     onDelete={id => {
                       const target = p.entries.find(e => e.id === id);
@@ -780,11 +808,29 @@ export default function Holdings() {
                       <MoneyText value={p.currentPrice} currency={p.currency} />
                     </TableCell>
                     <TableCell className="text-right">
-                      <MoneyText value={p.marketValue} currency={p.currency} compact />
+                      {/* 評価額は表示通貨に合わせる。並び順の基準（円換算）と表示を一致させるため */}
+                      <MoneyText
+                        value={p.marketValue}
+                        currency={p.currency}
+                        baseValue={p.marketValueBase}
+                        compact
+                      />
                     </TableCell>
                     <TableCell className="text-right">
                       <div className="space-y-0.5">
-                        <PnlText value={p.pnl} currency={p.currency} compact className="text-sm" />
+                        <PnlText
+                          value={p.pnl}
+                          currency={p.currency}
+                          baseValue={p.pnlBase}
+                          compact
+                          /*
+                            損益は「金額 + 率」で既に 2 段になっている。
+                            ここに現地通貨を併記すると 3 つの数字が並んで読みにくいため省く。
+                            現地通貨は隣の評価額列に出ているので情報は失われない。
+                          */
+                          hideLocalHint
+                          className="text-sm"
+                        />
                         <div className="text-xs">
                           <PctText value={p.pnlPct} />
                         </div>
@@ -800,8 +846,10 @@ export default function Holdings() {
                           <MoneyText
                             value={p.dividend.annualIncome}
                             currency={p.currency}
+                            baseValue={p.dividend.annualIncomeBase}
                             compact
                             className="text-sm font-medium text-gain"
+                            hideLocalHint
                           />
                           <div className="flex items-center justify-end gap-1">
                             <span className="tabular text-xs text-muted-foreground">
@@ -966,14 +1014,26 @@ export default function Holdings() {
                           {/* 現在値は口座によらず同じなので繰り返さない */}
                           <TableCell className="py-1.5" />
                           <TableCell className="py-1.5 text-right text-xs">
-                            <MoneyText value={e.marketValue} currency={e.currency} compact />
+                            <MoneyText
+                              value={e.marketValue}
+                              currency={e.currency}
+                              baseValue={e.marketValueBase}
+                              compact
+                              hideLocalHint
+                            />
                           </TableCell>
                           <TableCell className="py-1.5 text-right">
                             <div className="space-y-0.5">
                               <PnlText
                                 value={e.pnl}
                                 currency={e.currency}
+                                baseValue={
+                                  e.marketValueBase === null
+                                    ? null
+                                    : e.marketValueBase - e.costValueBase
+                                }
                                 compact
+                                hideLocalHint
                                 className="text-xs"
                               />
                               <div className="text-[10px]">
@@ -987,8 +1047,10 @@ export default function Holdings() {
                               <MoneyText
                                 value={e.dividend.annualIncome}
                                 currency={e.currency}
+                                baseValue={e.dividend.annualIncomeBase}
                                 compact
                                 className="text-xs text-gain"
+                                hideLocalHint
                               />
                             ) : null}
                           </TableCell>
