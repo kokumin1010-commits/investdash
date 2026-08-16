@@ -19,6 +19,7 @@ export default function SettingsPage() {
   const { theme, toggleTheme } = useTheme();
 
   const [usdJpy, setUsdJpy] = useState("");
+  const [sgdJpy, setSgdJpy] = useState("");
   const [posThreshold, setPosThreshold] = useState("");
   const [secThreshold, setSecThreshold] = useState("");
   const [cash, setCash] = useState("");
@@ -29,6 +30,7 @@ export default function SettingsPage() {
   useEffect(() => {
     if (!settings.data) return;
     setUsdJpy(settings.data.usdJpyRate ?? "150");
+    setSgdJpy(settings.data.sgdJpyRate ?? "115");
     setPosThreshold(String(settings.data.concentrationThreshold));
     setSecThreshold(String(settings.data.sectorConcentrationThreshold));
     setCash(settings.data.cashBalance ?? "0");
@@ -59,7 +61,10 @@ export default function SettingsPage() {
   const syncFx = trpc.portfolio.syncFxRate.useMutation({
     onSuccess: async res => {
       await utils.portfolio.invalidate();
-      toast.success(`為替レートを更新しました（${res.rate.toFixed(2)} 円/ドル）`);
+      const parts: string[] = [];
+      if (res.usdJpy !== null) parts.push(`${res.usdJpy.toFixed(2)} 円/ドル`);
+      if (res.sgdJpy !== null) parts.push(`${res.sgdJpy.toFixed(2)} 円/SGD`);
+      toast.success(`為替レートを更新しました（${parts.join(" ・ ")}）`);
     },
     onError: e => toast.error(e.message),
   });
@@ -90,7 +95,8 @@ export default function SettingsPage() {
         <CardHeader>
           <CardTitle className="text-base">資産計算</CardTitle>
           <CardDescription className="text-xs">
-            米国株の評価額は、この為替レートで円換算されます。自動取得を有効にすると、株価更新のたびに最新レートへ更新されます。
+            外貨建て銘柄の評価額は、ここの為替レートで円換算されます（米国株は USD/JPY、シンガポール株と
+            IBKR の SGD 建て残高は SGD/JPY）。自動取得を有効にすると、株価更新のたびに最新レートへ更新されます。
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -144,6 +150,23 @@ export default function SettingsPage() {
                   自動取得が有効なため、株価更新のたびに上書きされます
                 </p>
               ) : null}
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="sgdjpy">SGD/JPY レート</Label>
+              <Input
+                id="sgdjpy"
+                type="number"
+                inputMode="decimal"
+                value={sgdJpy}
+                onChange={e => {
+                  setSgdJpy(e.target.value);
+                  mark();
+                }}
+                className="tabular"
+              />
+              <p className="text-xs text-muted-foreground">
+                シンガポール株（SGX）と IBKR の借入・証拠金の円換算に使います
+              </p>
             </div>
             <div className="space-y-2">
               <Label htmlFor="cash-setting">現金残高（JPY）</Label>
@@ -294,6 +317,7 @@ export default function SettingsPage() {
               // 自動取得が有効なときに手動値を送ると fxRateUpdatedAt が消えて
               // 「まだ自動取得していません」と表示されてしまうため、手動時のみ送る
               usdJpyRate: !fxAuto && Number(usdJpy) > 0 ? Number(usdJpy) : undefined,
+              sgdJpyRate: !fxAuto && Number(sgdJpy) > 0 ? Number(sgdJpy) : undefined,
               concentrationThreshold: Number(posThreshold) > 0 ? Number(posThreshold) : undefined,
               sectorConcentrationThreshold:
                 Number(secThreshold) > 0 ? Number(secThreshold) : undefined,

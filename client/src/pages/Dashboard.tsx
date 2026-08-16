@@ -56,7 +56,10 @@ export default function Dashboard() {
     onSuccess: async res => {
       await utils.portfolio.invalidate();
       // 為替レートも同時に更新しているので、更新できたときは併せて知らせる
-      const fx = res.fxRate !== null ? `／為替 ${res.fxRate.toFixed(2)} 円/ドル` : "";
+      const fxParts: string[] = [];
+      if (res.fxRates.usdJpy !== null) fxParts.push(`${res.fxRates.usdJpy.toFixed(2)} 円/ドル`);
+      if (res.fxRates.sgdJpy !== null) fxParts.push(`${res.fxRates.sgdJpy.toFixed(2)} 円/SGD`);
+      const fx = fxParts.length > 0 ? `／為替 ${fxParts.join(" ・ ")}` : "";
       toast.success(
         res.failed.length > 0
           ? `${res.updated} 銘柄を更新しました（${res.failed.length} 銘柄は取得できませんでした）${fx}`

@@ -1,4 +1,4 @@
-import { marketLabel } from "../../shared/investing";
+import { marketLabel, type Market } from "../../shared/investing";
 
 /**
  * 国・市場別の資産集計。
@@ -8,7 +8,7 @@ import { marketLabel } from "../../shared/investing";
  * 現地通貨ベースの損益も併せて持たせて切り分けられるようにする。
  */
 export type MarketSlice = {
-  key: "JP" | "US" | "OTHER";
+  key: Market;
   label: string;
   /** 円換算の評価額 */
   value: number;
@@ -43,7 +43,7 @@ export type MarketSlice = {
 };
 
 type MarketInput = {
-  market: "JP" | "US" | "OTHER";
+  market: Market;
   currency: string;
   /** 円換算の評価額。株価未取得なら null */
   marketValueBase: number | null;
@@ -56,7 +56,7 @@ type MarketInput = {
 };
 
 /** 市場の表示順。日本株を先頭に、その他を末尾にする */
-const MARKET_ORDER: Record<MarketSlice["key"], number> = { JP: 0, US: 1, OTHER: 2 };
+const MARKET_ORDER: Record<Market, number> = { JP: 0, US: 1, SG: 2, OTHER: 3 };
 
 /**
  * 銘柄単位の保有から市場別の集計を作る。

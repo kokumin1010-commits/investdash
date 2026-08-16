@@ -1,0 +1,1 @@
+ALTER TABLE `userSettings` ADD `sgdJpyRate` decimal(12,4) DEFAULT '115.0000' NOT NULL;

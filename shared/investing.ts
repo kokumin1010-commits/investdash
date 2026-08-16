@@ -73,19 +73,20 @@ export const PRIORITY_STYLES: Record<WatchPriority, string> = {
   LOW: "bg-muted text-muted-foreground border-border",
 };
 
-export type Market = "JP" | "US" | "OTHER";
+export type Market = "JP" | "US" | "SG" | "OTHER";
 
 /* ------------------------------------------------------------------ *
  * 証券プラットフォーム（どの口座で保有しているか）
  * ------------------------------------------------------------------ */
 
-export const BROKERS = ["moomoo_jp", "rakuten_ispeed", "futu", "other"] as const;
+export const BROKERS = ["moomoo_jp", "rakuten_ispeed", "futu", "ibkr", "other"] as const;
 export type Broker = (typeof BROKERS)[number];
 
 export const BROKER_LABELS: Record<Broker, string> = {
   moomoo_jp: "moomoo 日本版",
   rakuten_ispeed: "楽天証券 iSPEED",
   futu: "富途牛牛 / Futu",
+  ibkr: "IBKR シンガポール",
   other: "その他",
 };
 
@@ -94,6 +95,7 @@ export const BROKER_SHORT: Record<Broker, string> = {
   moomoo_jp: "moomoo",
   rakuten_ispeed: "楽天",
   futu: "富途",
+  ibkr: "IBKR",
   other: "その他",
 };
 
@@ -105,6 +107,7 @@ export const BROKER_STYLES: Record<Broker, string> = {
   moomoo_jp: "bg-orange-500/15 text-orange-600 border-orange-500/30 dark:text-orange-400",
   rakuten_ispeed: "bg-red-500/15 text-red-600 border-red-500/30 dark:text-red-400",
   futu: "bg-blue-500/15 text-blue-600 border-blue-500/30 dark:text-blue-400",
+  ibkr: "bg-violet-500/15 text-violet-600 border-violet-500/30 dark:text-violet-400",
   other: "bg-muted text-muted-foreground border-border",
 };
 
@@ -113,7 +116,20 @@ export const BROKER_HEX: Record<Broker, string> = {
   moomoo_jp: "#f97316",
   rakuten_ispeed: "#dc2626",
   futu: "#2563eb",
+  ibkr: "#7c3aed",
   other: "#94a3b8",
+};
+
+/**
+ * 口座の基軸通貨。表示や検算の基準になる。
+ * IBKR シンガポールは SGD 建てで集計される。
+ */
+export const BROKER_BASE_CURRENCY: Record<Broker, string> = {
+  moomoo_jp: "JPY",
+  rakuten_ispeed: "JPY",
+  futu: "HKD",
+  ibkr: "SGD",
+  other: "JPY",
 };
 
 export function brokerLabel(broker?: string | null): string {
@@ -145,6 +161,8 @@ export function brokerFromFormatId(formatId?: string | null): Broker {
       return "rakuten_ispeed";
     case "futu":
       return "futu";
+    case "ibkr":
+      return "ibkr";
     default:
       return "other";
   }
@@ -196,7 +214,11 @@ export function normalizeSymbol(raw: string): { symbol: string; tickerCode: stri
   // すでにサフィックス付き
   if (input.includes(".")) {
     const [code, suffix] = input.split(".");
-    const market: Market = suffix === "T" ? "JP" : "OTHER";
+    /*
+     * Yahoo Finance のサフィックスから市場を判定する。
+     * .T = 東証、.SI = シンガポール取引所（SGX）。
+     */
+    const market: Market = suffix === "T" ? "JP" : suffix === "SI" ? "SG" : "OTHER";
     return { symbol: input, tickerCode: code, market };
   }
 
@@ -209,7 +231,52 @@ export function normalizeSymbol(raw: string): { symbol: string; tickerCode: stri
 }
 
 export function marketLabel(market: Market): string {
-  return market === "JP" ? "日本株" : market === "US" ? "米国株" : "その他";
+  if (market === "JP") return "日本株";
+  if (market === "US") return "米国株";
+  if (market === "SG") return "シンガポール株";
+  return "その他";
+}
+
+/** 市場ごとの取引通貨 */
+export const MARKET_CURRENCY: Record<Market, string> = {
+  JP: "JPY",
+  US: "USD",
+  SG: "SGD",
+  OTHER: "USD",
+};
+
+/**
+ * 証券アプリが表示する取引所コードから市場・通貨・Yahoo Finance シンボルを決める。
+ *
+ * IBKR は 1 つの口座に複数国の銘柄が混在し、銘柄コードの隣に取引所を表示する。
+ * 例: `ORCL NYSE`（米ドル）/ `7203 TSEJ`（円）/ `D05 SGX`（シンガポールドル）。
+ * コードの形だけでは通貨を決められないため、取引所コードを手がかりにする。
+ */
+export function resolveByExchange(
+  tickerCode: string,
+  exchange: string
+): { symbol: string; tickerCode: string; market: Market; currency: string } {
+  const code = tickerCode.trim().toUpperCase();
+  const ex = exchange.trim().toUpperCase();
+
+  // 東証。Yahoo Finance では 4 桁コード + .T
+  if (ex === "TSEJ" || ex === "TSE" || ex === "JPX") {
+    return { symbol: `${code}.T`, tickerCode: code, market: "JP", currency: "JPY" };
+  }
+
+  // シンガポール取引所。Yahoo Finance では英数字コード + .SI
+  if (ex === "SGX" || ex === "SES") {
+    return { symbol: `${code}.SI`, tickerCode: code, market: "SG", currency: "SGD" };
+  }
+
+  // 米国市場はサフィックスなし
+  if (ex.startsWith("NYSE") || ex.startsWith("NASDAQ") || ex === "AMEX" || ex === "ARCA") {
+    return { symbol: code, tickerCode: code, market: "US", currency: "USD" };
+  }
+
+  // 未知の取引所は既存の推測ロジックに委ねる
+  const guessed = normalizeSymbol(code);
+  return { ...guessed, currency: MARKET_CURRENCY[guessed.market] };
 }
 
 /**
@@ -219,6 +286,7 @@ export function marketLabel(market: Market): string {
 export const MARKET_HEX: Record<Market, string> = {
   JP: "#0f766e",
   US: "#4338ca",
+  SG: "#b45309",
   OTHER: "#94a3b8",
 };
 
@@ -228,7 +296,7 @@ export function marketHex(market?: string | null): string {
 }
 
 /** 市場フィルタの選択肢。null は「すべて」 */
-export const MARKETS: readonly Market[] = ["JP", "US", "OTHER"] as const;
+export const MARKETS: readonly Market[] = ["JP", "US", "SG", "OTHER"] as const;
 
 /**
  * URL クエリの market パラメータを検証して市場コードに変換する。

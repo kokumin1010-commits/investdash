@@ -156,6 +156,7 @@ describe("BROKER_FORMAT_OPTIONS", () => {
     expect(BROKER_FORMAT_OPTIONS.map(o => o.id)).toEqual([
       "moomoo_jp",
       "rakuten_ispeed",
+      "ibkr",
       "futu",
       "generic",
     ]);

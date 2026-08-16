@@ -46,13 +46,13 @@ export async function syncPricesHandler(req: Request, res: Response) {
       userId: number;
       updated: number;
       failed: number;
-      fxRate?: number | null;
+      fxRates?: { usdJpy: number | null; sgdJpy: number | null };
     }[] = [];
 
     for (const userId of userIds) {
       try {
         const r = await syncPrices(userId);
-        results.push({ userId, updated: r.updated, failed: r.failed.length, fxRate: r.fxRate });
+        results.push({ userId, updated: r.updated, failed: r.failed.length, fxRates: r.fxRates });
       } catch (error) {
         console.error(`[cron:syncPrices] user ${userId} failed:`, error);
         results.push({ userId, updated: 0, failed: -1 });

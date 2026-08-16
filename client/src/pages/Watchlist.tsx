@@ -33,6 +33,7 @@ import {
   marketLabel,
   sectorJa,
   type WatchPriority,
+  type Market,
 } from "@shared/investing";
 import {
   Brain,
@@ -54,7 +55,7 @@ type WatchRow = {
   symbol: string;
   tickerCode: string;
   name: string;
-  market: "JP" | "US" | "OTHER";
+  market: Market;
   currency: string;
   priority: WatchPriority;
   sector: string | null;

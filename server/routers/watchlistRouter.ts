@@ -2,7 +2,7 @@ import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import * as db from "../db";
 import { protectedProcedure, router } from "../_core/trpc";
-import { normalizeSymbol } from "../../shared/investing";
+import { BROKERS, normalizeSymbol } from "../../shared/investing";
 import { fetchCompanyProfile, fetchQuote } from "../services/marketData";
 import { regenerateWatchSignal } from "../services/portfolio";
 
@@ -153,7 +153,7 @@ export const watchlistRouter = router({
         id: z.number().int().positive(),
         quantity: z.number().positive(),
         avgCost: z.number().min(0),
-        broker: z.enum(["moomoo_jp", "rakuten_ispeed", "futu", "other"]).optional(),
+        broker: z.enum(BROKERS).optional(),
         keepInWatchlist: z.boolean().default(false),
       })
     )

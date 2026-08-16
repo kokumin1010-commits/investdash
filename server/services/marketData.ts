@@ -180,3 +180,14 @@ export async function fetchUsdJpyRate(): Promise<number | null> {
   const q = await fetchQuote("USDJPY=X");
   return q?.price ?? null;
 }
+
+/**
+ * SGD/JPY レートを取得する。失敗時は null。
+ *
+ * IBKR シンガポール口座は基軸通貨が SGD で、借入額・維持証拠金も SGD 建て。
+ * USD/SGD からの間接換算では実勢とずれるため、直接レートを取得する。
+ */
+export async function fetchSgdJpyRate(): Promise<number | null> {
+  const q = await fetchQuote("SGDJPY=X");
+  return q?.price ?? null;
+}

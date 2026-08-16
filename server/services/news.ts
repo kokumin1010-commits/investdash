@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import type { Market } from "../../shared/investing";
 
 /**
  * Google News RSS から銘柄関連ニュースを取得する。
@@ -41,9 +42,13 @@ export function hashUrl(url: string): string {
  */
 export async function searchNews(
   query: string,
-  opts: { market?: "JP" | "US" | "OTHER"; windowDays?: number; limit?: number } = {}
+  opts: { market?: Market; windowDays?: number; limit?: number } = {}
 ): Promise<RawNews[]> {
   const { market = "JP", windowDays = 30, limit = 12 } = opts;
+  /*
+   * 検索ロケール。日本株は日本語、それ以外は英語で探す。
+   * シンガポール株は現地報道が英語なので US ロケールで足りる。
+   */
   const locale =
     market === "JP"
       ? { hl: "ja", gl: "JP", ceid: "JP:ja" }
@@ -98,7 +103,7 @@ export async function searchNews(
 export function buildNewsQuery(params: {
   name: string;
   tickerCode: string;
-  market: "JP" | "US" | "OTHER";
+  market: Market;
 }): string {
   const { name, tickerCode, market } = params;
   const cleanName = name.replace(/[（(].*?[）)]/g, "").trim();

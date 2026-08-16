@@ -23,7 +23,7 @@ import {
 } from "@/components/ui/table";
 import { trpc } from "@/lib/trpc";
 import { looksLikeImage, prepareImage } from "@/lib/imageFile";
-import { marketLabel } from "@shared/investing";
+import { marketLabel, type Market } from "@shared/investing";
 import {
   AlertTriangle,
   CheckCircle2,
@@ -42,7 +42,7 @@ type Row = {
   name: string;
   symbol: string;
   tickerCode: string;
-  market: "JP" | "US" | "OTHER";
+  market: Market;
   quantity: number | null;
   avgCost: number | null;
   currentPrice: number | null;

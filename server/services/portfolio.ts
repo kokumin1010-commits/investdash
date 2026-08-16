@@ -11,12 +11,20 @@ import {
   fetchPriceHistory,
   fetchQuotes,
   fetchUsdJpyRate,
+  fetchSgdJpyRate,
 } from "./marketData";
 import { buildNewsQuery, filterNoise, searchNews } from "./news";
 import { groupPositionsBySymbol, type GroupedPosition } from "./groupPositions";
 import { buildMarketSlices, type MarketSlice } from "./marketSlices";
 import { computePeriodChange, type PeriodChange } from "./periodChange";
+import {
+  computeBrokerLeverage,
+  marginRiskLevel,
+  type MarginRiskLevel,
+} from "./leverage";
 import { BROKER_LABELS, type Broker } from "../../shared/investing";
+import type { Market } from "../../shared/investing";
+import { FX_FALLBACK, convertToJpy, isPlausibleRate, type FxRates } from "./fx";
 
 /**
  * 保有ポジションとウォッチリストに対する横断処理。
@@ -34,10 +42,10 @@ export type PositionView = {
   symbol: string;
   tickerCode: string;
   name: string;
-  market: "JP" | "US" | "OTHER";
+  market: Market;
   currency: string;
   /** どの証券プラットフォームで保有しているか */
-  broker: "moomoo_jp" | "rakuten_ispeed" | "futu" | "other";
+  broker: Broker;
   quantity: number;
   avgCost: number;
   currentPrice: number | null;
@@ -86,6 +94,8 @@ export type PortfolioSummary = {
   totalAssets: number;
   baseCurrency: string;
   usdJpyRate: number;
+  /** SGD/JPY レート。SGX 銘柄と IBKR の SGD 建て残高の円換算に使う */
+  sgdJpyRate: number;
   /** 為替レートを自動取得しているか。false なら手動設定値 */
   fxAutoUpdate: boolean;
   /** 為替レートを最後に自動取得できた時刻。null なら手動値のまま */
@@ -99,12 +109,66 @@ export type PortfolioSummary = {
    * スナップショットが 2 件未満の場合は null。
    */
   periodChange: PeriodChange | null;
+  /**
+   * 信用取引の借入合計（円換算、正の数）。
+   * 現物のみなら 0。IBKR のように借入して株を買っている口座があると正の値になる。
+   */
+  totalBorrowedBase: number;
+  /**
+   * 純資産（円換算）= 株式時価 + 現金 − 借入。
+   * 借入がある場合、株式時価をそのまま資産と見なすと過大になるため、
+   * 実際に自分のものである金額をこちらで表す。
+   */
+  netAssetsBase: number;
+  /**
+   * 全体のレバレッジ倍率 = 株式時価 ÷ 純資産。
+   * 借入がなければ 1.0 前後。純資産が 0 以下なら null。
+   */
+  overallLeverage: number | null;
 };
 
 export type SectorSlice = { key: string; label: string; value: number; pct: number; count: number };
 
 /** 証券プラットフォーム別の内訳。口座ごとの成績を比較できるよう損益も持たせる */
-export type BrokerSlice = SectorSlice & { pnl: number; pnlPct: number | null };
+export type BrokerSlice = SectorSlice & {
+  pnl: number;
+  pnlPct: number | null;
+  /**
+   * 信用取引の情報。借入がある口座（IBKR など）でのみ入る。
+   * 現物のみの口座では null。
+   */
+  leverage: BrokerLeverageView | null;
+};
+
+/**
+ * 口座の信用取引の状況（すべて円換算）。
+ * 元の口座通貨（IBKR なら SGD）ではなく円で持つのは、
+ * 他の口座と並べて総資産を判断できるようにするため。
+ */
+export type BrokerLeverageView = {
+  /** 口座の基軸通貨（記録用） */
+  currency: string;
+  /** 借入額（円換算、正の数） */
+  borrowedBase: number;
+  /** 余剰現金（円換算） */
+  freeCashBase: number;
+  /** 純資産（円換算）= 株式時価 − 借入 + 余剰現金 */
+  netValueBase: number;
+  /** レバレッジ倍率。純資産が 0 以下なら null */
+  leverage: number | null;
+  /** 維持証拠金（円換算） */
+  maintenanceMarginBase: number;
+  /** 証拠金余力（円換算）。マイナスなら追証 */
+  marginCushionBase: number | null;
+  /** 証拠金維持率（%）。100 を下回ると追証 */
+  marginRatioPct: number | null;
+  /** 追証に至るまでの株価下落率（%） */
+  dropToMarginCallPct: number | null;
+  /** 月初来の支払利息（円換算、負値） */
+  interestMtdBase: number;
+  /** 追証リスクの警告レベル */
+  riskLevel: MarginRiskLevel;
+};
 
 export type ConcentrationAlert = {
   level: "HIGH" | "MEDIUM";
@@ -130,7 +194,7 @@ export async function buildPortfolio(userId: number): Promise<{
   brokers: BrokerSlice[];
   alerts: ConcentrationAlert[];
 }> {
-  const [rows, settings, signalMap, cards, allNews, snapshots] = await Promise.all([
+  const [rows, settings, signalMap, cards, allNews, snapshots, brokerBalances] = await Promise.all([
     db.listHoldings(userId),
     db.getSettings(userId),
     db.latestSignals(userId),
@@ -138,9 +202,14 @@ export async function buildPortfolio(userId: number): Promise<{
     db.listNews(userId, { limit: 500 }),
     // 前回記録からの変化を出すために履歴を読む
     db.listSnapshots(userId, 120),
+    // 信用取引の借入額。株式時価から差し引かないと総資産が過大になる
+    db.listBrokerBalances(userId),
   ]);
 
-  const usdJpy = n(settings.usdJpyRate) ?? 150;
+  const rates: FxRates = {
+    usdJpy: n(settings.usdJpyRate) ?? FX_FALLBACK.usdJpy,
+    sgdJpy: n(settings.sgdJpyRate) ?? FX_FALLBACK.sgdJpy,
+  };
   const cardSymbols = new Set(cards.map(c => c.symbol));
 
   const newsBySymbol = new Map<string, { total: number; negative: number }>();
@@ -151,12 +220,12 @@ export async function buildPortfolio(userId: number): Promise<{
     newsBySymbol.set(item.symbol, entry);
   }
 
-  const toBase = (value: number | null, currency: string): number | null => {
-    if (value === null) return null;
-    if (currency === "JPY") return value;
-    if (currency === "USD") return value * usdJpy;
-    return value;
-  };
+  /*
+   * 円換算。未対応通貨は convertToJpy が null を返すので、
+   * 合計を欠損させたくない箇所では呼び出し側で現地通貨の値にフォールバックする。
+   */
+  const toBase = (value: number | null, currency: string): number | null =>
+    convertToJpy(value, currency, rates);
 
   const partial = rows.map(h => {
     const quantity = n(h.quantity) ?? 0;
@@ -243,6 +312,66 @@ export async function buildPortfolio(userId: number): Promise<{
    */
   const groups = groupPositionsBySymbol(positions, totalValueBase);
 
+  /* ---------------- 信用取引（借入）の反映 ---------------- */
+
+  /*
+   * 口座別の株式時価を先に出す。レバレッジは「株式時価 ÷ 純資産」で求めるため、
+   * その口座が実際に保有している株の評価額が必要になる。
+   */
+  const positionValueByBroker = new Map<string, number>();
+  for (const p of positions) {
+    positionValueByBroker.set(
+      p.broker,
+      (positionValueByBroker.get(p.broker) ?? 0) + (p.marketValueBase ?? 0)
+    );
+  }
+
+  const leverageByBroker = new Map<string, BrokerLeverageView>();
+  let totalBorrowedBase = 0;
+
+  for (const bal of brokerBalances) {
+    const cash = n(bal.cashBalance) ?? 0;
+    // 借入がなく証拠金も無い口座（現物のみ）は信用情報を持たせない
+    const margin = n(bal.maintenanceMargin) ?? 0;
+    if (cash >= 0 && margin <= 0) continue;
+
+    const positionValueBase = positionValueByBroker.get(bal.broker) ?? 0;
+    /*
+     * 借入・証拠金は口座通貨で記録されているので円に換算する。
+     * 株式時価（positionValueBase）は既に円換算済みなので、
+     * ここでは現金・証拠金・利息だけを換算すればよい。
+     */
+    const toAccountBase = (amount: number): number =>
+      convertToJpy(amount, bal.currency, rates) ?? amount;
+    const cashBase = toAccountBase(cash);
+    const marginBase = toAccountBase(margin);
+    const interestBase = toAccountBase(n(bal.interestMtd) ?? 0);
+
+    const lev = computeBrokerLeverage({
+      broker: bal.broker,
+      currency: bal.currency,
+      positionValue: positionValueBase,
+      cashBalance: cashBase,
+      maintenanceMargin: marginBase,
+      interestMtd: interestBase,
+    });
+
+    totalBorrowedBase += lev.borrowed;
+    leverageByBroker.set(bal.broker, {
+      currency: bal.currency,
+      borrowedBase: lev.borrowed,
+      freeCashBase: lev.freeCash,
+      netValueBase: lev.netValue,
+      leverage: lev.leverage,
+      maintenanceMarginBase: lev.maintenanceMargin,
+      marginCushionBase: lev.marginCushion,
+      marginRatioPct: lev.marginRatioPct,
+      dropToMarginCallPct: lev.dropToMarginCallPct,
+      interestMtdBase: lev.interestMtd,
+      riskLevel: marginRiskLevel(lev),
+    });
+  }
+
   const summary: PortfolioSummary = {
     totalValueBase,
     totalCostBase,
@@ -257,7 +386,8 @@ export async function buildPortfolio(userId: number): Promise<{
     cashBalance,
     totalAssets: totalValueBase + cashBalance,
     baseCurrency: settings.baseCurrency,
-    usdJpyRate: usdJpy,
+    usdJpyRate: rates.usdJpy,
+    sgdJpyRate: rates.sgdJpy,
     fxAutoUpdate: settings.fxAutoUpdate,
     fxRateUpdatedAt: settings.fxRateUpdatedAt,
     lastPriceSyncAt: settings.lastPriceSyncAt,
@@ -275,6 +405,16 @@ export async function buildPortfolio(userId: number): Promise<{
         capturedAt: s.capturedAt,
       }))
     ),
+    totalBorrowedBase,
+    netAssetsBase: totalValueBase + cashBalance - totalBorrowedBase,
+    /*
+     * 全体のレバレッジ。株式時価 ÷ 純資産で求める。
+     * 借入がなければ 1.0 前後になり、借入があると 1 を超える。
+     */
+    overallLeverage:
+      totalValueBase + cashBalance - totalBorrowedBase > 0
+        ? totalValueBase / (totalValueBase + cashBalance - totalBorrowedBase)
+        : null,
   };
 
   /* --- 分布集計 --- */
@@ -368,6 +508,8 @@ export async function buildPortfolio(userId: number): Promise<{
         /** 口座単位の含み損益。口座ごとの成績を比較できるようにする */
         pnl: v.value - v.cost,
         pnlPct: v.cost > 0 ? ((v.value - v.cost) / v.cost) * 100 : null,
+        /** 借入がある口座のみ信用情報を付ける（現物口座は null） */
+        leverage: leverageByBroker.get(key) ?? null,
       }))
       .sort((a, b) => b.value - a.value),
     alerts: alerts.sort((a, b) => b.pct - a.pct),
@@ -380,7 +522,8 @@ export async function buildPortfolio(userId: number): Promise<{
 export async function syncPrices(userId: number): Promise<{
   updated: number;
   failed: string[];
-  fxRate: number | null;
+  /** 更新できた為替レート。取得に失敗した通貨は null */
+  fxRates: { usdJpy: number | null; sgdJpy: number | null };
 }> {
   const [hs, ws, settings] = await Promise.all([
     db.listHoldings(userId),
@@ -393,7 +536,7 @@ export async function syncPrices(userId: number): Promise<{
    * 手動で固定したい場合に備えて fxAutoUpdate で切れるようにし、
    * 取得に失敗しても既存の設定値を維持する（0 で上書きして評価額を壊さない）。
    */
-  const fxRate = await syncFxRate(userId, settings?.fxAutoUpdate ?? true);
+  const fxRates = await syncFxRate(userId, settings?.fxAutoUpdate ?? true);
 
   /**
    * 同一銘柄を複数の証券口座で保有している場合、株価は 1 回だけ取得すればよい。
@@ -403,7 +546,7 @@ export async function syncPrices(userId: number): Promise<{
   const symbols = Array.from(new Set([...hs.map(h => h.symbol), ...ws.map(w => w.symbol)]));
   if (symbols.length === 0) {
     await db.updateSettings(userId, { lastPriceSyncAt: new Date() });
-    return { updated: 0, failed: [], fxRate };
+    return { updated: 0, failed: [], fxRates };
   }
 
   const quotes = await fetchQuotes(symbols);
@@ -460,7 +603,7 @@ export async function syncPrices(userId: number): Promise<{
     console.warn("[portfolio] snapshot failed:", error);
   }
 
-  return { updated, failed: Array.from(new Set(failed)), fxRate };
+  return { updated, failed: Array.from(new Set(failed)), fxRates };
 }
 
 /**
@@ -472,25 +615,58 @@ export async function syncPrices(userId: number): Promise<{
  *
  * @param enabled false の場合は取得せず、手動設定値をそのまま使う
  */
-export async function syncFxRate(userId: number, enabled = true): Promise<number | null> {
-  if (!enabled) return null;
+export async function syncFxRate(
+  userId: number,
+  enabled = true
+): Promise<{ usdJpy: number | null; sgdJpy: number | null }> {
+  if (!enabled) return { usdJpy: null, sgdJpy: null };
 
-  try {
-    const rate = await fetchUsdJpyRate();
-    // 明らかに異常な値は採用しない（API 仕様変更やパース失敗の検知）
-    if (rate === null || !Number.isFinite(rate) || rate < 50 || rate > 500) {
-      console.warn(`[portfolio] 為替レートが想定範囲外のため更新をスキップ: ${rate}`);
+  /*
+   * USD/JPY と SGD/JPY を個別に扱う。片方の取得に失敗しても、
+   * もう片方は更新できたほうが評価額は正確になる。
+   */
+  const [usdResult, sgdResult] = await Promise.allSettled([
+    fetchUsdJpyRate(),
+    fetchSgdJpyRate(),
+  ]);
+
+  const pick = (
+    result: PromiseSettledResult<number | null>,
+    label: string,
+    min: number,
+    max: number
+  ): number | null => {
+    if (result.status === "rejected") {
+      console.warn(`[portfolio] ${label} の取得に失敗:`, result.reason);
       return null;
     }
-    await db.updateSettings(userId, {
-      usdJpyRate: rate.toFixed(4),
-      fxRateUpdatedAt: new Date(),
-    });
-    return rate;
-  } catch (error) {
-    console.warn("[portfolio] 為替レートの取得に失敗:", error);
-    return null;
+    // 明らかに異常な値は採用しない（API 仕様変更やパース失敗の検知）
+    if (!isPlausibleRate(result.value, min, max)) {
+      console.warn(`[portfolio] ${label} が想定範囲外のため更新をスキップ: ${result.value}`);
+      return null;
+    }
+    return result.value;
+  };
+
+  const usdJpy = pick(usdResult, "USD/JPY", 50, 500);
+  // SGD/JPY は USD/JPY の 7〜8 割程度で推移するため、より狭い範囲で検査する
+  const sgdJpy = pick(sgdResult, "SGD/JPY", 40, 400);
+
+  const patch: { usdJpyRate?: string; sgdJpyRate?: string; fxRateUpdatedAt?: Date } = {};
+  if (usdJpy !== null) patch.usdJpyRate = usdJpy.toFixed(4);
+  if (sgdJpy !== null) patch.sgdJpyRate = sgdJpy.toFixed(4);
+
+  if (Object.keys(patch).length > 0) {
+    patch.fxRateUpdatedAt = new Date();
+    try {
+      await db.updateSettings(userId, patch);
+    } catch (error) {
+      console.warn("[portfolio] 為替レートの保存に失敗:", error);
+      return { usdJpy: null, sgdJpy: null };
+    }
   }
+
+  return { usdJpy, sgdJpy };
 }
 
 /**
@@ -528,7 +704,7 @@ export async function enrichProfiles(userId: number, force = false): Promise<num
   return count;
 }
 
-type NewsTarget = { symbol: string; name: string; tickerCode: string; market: "JP" | "US" | "OTHER" };
+type NewsTarget = { symbol: string; name: string; tickerCode: string; market: Market };
 
 /**
  * 指定銘柄のニュースを取得し、AI 判定して保存する。

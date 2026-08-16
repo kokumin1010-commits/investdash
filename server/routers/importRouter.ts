@@ -4,10 +4,20 @@ import * as db from "../db";
 import { protectedProcedure, router } from "../_core/trpc";
 import { storagePut } from "../storage";
 import { extractPositions, type ParsedPosition } from "../services/ocr";
-import { BROKER_FORMAT_OPTIONS, guessFormatFromBrokerName } from "../services/brokerFormats";
+import {
+  BROKER_FORMAT_IDS,
+  BROKER_FORMAT_OPTIONS,
+  guessFormatFromBrokerName,
+} from "../services/brokerFormats";
 import { toFriendlyAiError } from "../services/aiErrors";
 import { fetchCompanyProfile, fetchQuote } from "../services/marketData";
-import { brokerFromFormatId, normalizeSymbol } from "../../shared/investing";
+import {
+  brokerFromFormatId,
+  normalizeSymbol,
+  MARKETS,
+  MARKET_CURRENCY,
+  type Market,
+} from "../../shared/investing";
 
 /** 承認前にユーザーへ提示する行 */
 const rowSchema = z.object({
@@ -45,7 +55,8 @@ export const importRouter = router({
           .min(1)
           .max(5),
         /** 証券アプリの種類。指定するとレイアウト定義を使って精度が上がる */
-        formatId: z.enum(["moomoo_jp", "rakuten_ispeed", "futu", "generic"]).optional(),
+        // BROKER_FORMATS から生成し、対応アプリを追加したときの記述漏れを防ぐ
+        formatId: z.enum(BROKER_FORMAT_IDS).optional(),
       })
     )
     .mutation(async ({ ctx, input }) => {
@@ -184,14 +195,19 @@ export const importRouter = router({
           .array(
             rowSchema.extend({
               symbol: z.string().min(1).max(24),
-              market: z.enum(["JP", "US", "OTHER"]),
+              /*
+               * 市場の選択肢は MARKETS から生成する。ここにハードコードすると
+               * 市場を追加したとき（SG を足したときのように）更新漏れが起き、
+               * 取込だけが失敗する。
+               */
+              market: z.enum(MARKETS as unknown as [Market, ...Market[]]),
               mode: z.enum(["NEW", "UPDATE", "SKIP"]),
             })
           )
           .min(1),
         cashBalance: z.number().min(0).nullable().optional(),
         /** 取込元の証券アプリ。銘柄に紐づけて口座別の集計に使う */
-        formatId: z.enum(["moomoo_jp", "rakuten_ispeed", "futu", "generic"]).optional(),
+        formatId: z.enum(BROKER_FORMAT_IDS).optional(),
       })
     )
     .mutation(async ({ ctx, input }) => {
@@ -253,7 +269,8 @@ export const importRouter = router({
             tickerCode: row.tickerCode,
             name: row.name,
             market: row.market,
-            currency: quote?.currency ?? (row.market === "JP" ? "JPY" : "USD"),
+            // 株価 API が通貨を返さない場合は市場から推定する（SG なら SGD）
+            currency: quote?.currency ?? MARKET_CURRENCY[row.market],
             broker,
             quantity: String(row.quantity),
             avgCost: String(row.avgCost),
@@ -287,7 +304,7 @@ export const importRouter = router({
 
 export type ImportedRow = ParsedPosition & {
   symbol: string;
-  market: "JP" | "US" | "OTHER";
+  market: Market;
   mode: "NEW" | "UPDATE" | "SKIP";
   existingQuantity: number | null;
   existingAvgCost: number | null;

@@ -11,7 +11,7 @@ import {
   syncFxRate,
   syncPrices,
 } from "../services/portfolio";
-import { normalizeSymbol } from "../../shared/investing";
+import { BROKERS, normalizeSymbol } from "../../shared/investing";
 
 const decimalString = z.union([z.number(), z.string()]).transform(v => String(v));
 
@@ -27,6 +27,7 @@ export const portfolioRouter = router({
     .input(
       z.object({
         usdJpyRate: z.number().positive().optional(),
+        sgdJpyRate: z.number().positive().optional(),
         concentrationThreshold: z.number().int().min(1).max(100).optional(),
         sectorConcentrationThreshold: z.number().int().min(1).max(100).optional(),
         cashBalance: z.number().min(0).optional(),
@@ -37,13 +38,16 @@ export const portfolioRouter = router({
     .mutation(async ({ ctx, input }) => {
       return db.updateSettings(ctx.user.id, {
         usdJpyRate: input.usdJpyRate !== undefined ? String(input.usdJpyRate) : undefined,
+        sgdJpyRate: input.sgdJpyRate !== undefined ? String(input.sgdJpyRate) : undefined,
         concentrationThreshold: input.concentrationThreshold,
         sectorConcentrationThreshold: input.sectorConcentrationThreshold,
         cashBalance: input.cashBalance !== undefined ? String(input.cashBalance) : undefined,
         autoNewsEnabled: input.autoNewsEnabled,
         fxAutoUpdate: input.fxAutoUpdate,
         // 手動でレートを入れたときは、自動取得の時刻表示が実態と合わなくなるため消す
-        ...(input.usdJpyRate !== undefined ? { fxRateUpdatedAt: undefined } : {}),
+        ...(input.usdJpyRate !== undefined || input.sgdJpyRate !== undefined
+          ? { fxRateUpdatedAt: undefined }
+          : {}),
       });
     }),
 
@@ -52,16 +56,84 @@ export const portfolioRouter = router({
    * 株価更新は 27 銘柄以上あると時間がかかるため、レートだけ直したい場合の入口。
    */
   syncFxRate: protectedProcedure.mutation(async ({ ctx }) => {
-    const rate = await syncFxRate(ctx.user.id, true);
-    if (rate === null) {
+    const rates = await syncFxRate(ctx.user.id, true);
+    // どちらも取れなかった場合だけ失敗として扱う（片方でも取れれば前進している）
+    if (rates.usdJpy === null && rates.sgdJpy === null) {
       throw new TRPCError({
         code: "INTERNAL_SERVER_ERROR",
         message:
           "為替レートを取得できませんでした。時間をおいて再度お試しください。設定画面から手動で入力することもできます。",
       });
     }
-    return { rate };
+    return rates;
   }),
+
+  /** 口座別の残高・証拠金情報（信用取引の負債管理） */
+  brokerBalances: protectedProcedure.query(async ({ ctx }) => db.listBrokerBalances(ctx.user.id)),
+
+  /**
+   * 口座の残高・証拠金情報を保存する。
+   *
+   * 信用取引を使っている口座では、株式時価をそのまま資産にすると借入分だけ
+   * 過大になる。借入額・維持証拠金を記録して純資産とレバレッジを算出できるようにする。
+   */
+  saveBrokerBalance: protectedProcedure
+    .input(
+      z.object({
+        broker: z.enum(BROKERS),
+        currency: z.string().min(1).max(8).default("JPY"),
+        /** 現金残高。マイナスなら借入 */
+        cashBalance: z.number(),
+        /** 維持証拠金。信用を使わない口座は 0 */
+        maintenanceMargin: z.number().min(0).default(0),
+        /** 月初来の支払利息（マイナス表記） */
+        interestMtd: z.number().default(0),
+        /** 借入している通貨（記録用） */
+        borrowedCurrency: z.string().max(8).optional(),
+        /** 借入額（記録用、マイナス表記） */
+        borrowedAmount: z.number().optional(),
+        /** 画面表示の株式時価。検算用に残す */
+        reportedPositionValue: z.number().optional(),
+        /** 画面表示の純資産。検算用に残す */
+        reportedNetValue: z.number().optional(),
+      })
+    )
+    .mutation(async ({ ctx, input }) => {
+      /*
+       * 通貨別の内訳は JSON で保持する。どの通貨で借りているかは
+       * 金利と為替リスクの判断に必要なため記録しておく。
+       */
+      const breakdown: Record<string, number> = {};
+      if (input.borrowedCurrency && input.borrowedAmount !== undefined) {
+        breakdown[input.borrowedCurrency] = input.borrowedAmount;
+      }
+      if (input.reportedPositionValue !== undefined) {
+        breakdown.__reportedPositionValue = input.reportedPositionValue;
+      }
+      if (input.reportedNetValue !== undefined) {
+        breakdown.__reportedNetValue = input.reportedNetValue;
+      }
+
+      const id = await db.upsertBrokerBalance({
+        userId: ctx.user.id,
+        broker: input.broker,
+        currency: input.currency,
+        cashBalance: String(input.cashBalance),
+        maintenanceMargin: String(input.maintenanceMargin),
+        interestMtd: String(input.interestMtd),
+        currencyBreakdown: Object.keys(breakdown).length > 0 ? JSON.stringify(breakdown) : null,
+        capturedAt: new Date(),
+      });
+      return { id } as const;
+    }),
+
+  /** 口座の残高情報を削除する（信用取引をやめた場合など） */
+  deleteBrokerBalance: protectedProcedure
+    .input(z.object({ broker: z.enum(BROKERS) }))
+    .mutation(async ({ ctx, input }) => {
+      const removed = await db.deleteBrokerBalance(ctx.user.id, input.broker);
+      return { success: removed } as const;
+    }),
 
   /** 銘柄コードから相場情報を照会（追加フォームのプレビュー用） */
   lookup: protectedProcedure
@@ -104,7 +176,8 @@ export const portfolioRouter = router({
         name: z.string().min(1).max(160).optional(),
         quantity: z.number().positive(),
         avgCost: z.number().min(0),
-        broker: z.enum(["moomoo_jp", "rakuten_ispeed", "futu", "other"]).optional(),
+        // BROKERS から生成し、対応プラットフォームを追加したときの漏れを防ぐ
+        broker: z.enum(BROKERS).optional(),
         notes: z.string().max(2000).optional(),
       })
     )
@@ -168,7 +241,7 @@ export const portfolioRouter = router({
         name: z.string().min(1).max(160).optional(),
         quantity: z.number().positive().optional(),
         avgCost: z.number().min(0).optional(),
-        broker: z.enum(["moomoo_jp", "rakuten_ispeed", "futu", "other"]).optional(),
+        broker: z.enum(BROKERS).optional(),
         notes: z.string().max(2000).optional(),
       })
     )

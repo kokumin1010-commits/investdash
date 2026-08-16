@@ -6,7 +6,7 @@
  * 未知のアプリは `generic` として汎用ルールで処理する。
  */
 
-export type BrokerFormatId = "moomoo_jp" | "rakuten_ispeed" | "futu" | "generic";
+export type BrokerFormatId = "moomoo_jp" | "rakuten_ispeed" | "ibkr" | "futu" | "generic";
 
 export type BrokerFormat = {
   id: BrokerFormatId;
@@ -201,6 +201,117 @@ const FUTU: BrokerFormat = {
   layoutPrompt: null,
 };
 
+/** IBKR（Interactive Brokers）シンガポール口座。実画面で検証済み */
+const IBKR: BrokerFormat = {
+  id: "ibkr",
+  label: "IBKR（Interactive Brokers）",
+  /** 米国株と日本株が同一口座に混在するため画面から判定する */
+  currency: null,
+  market: "MIXED",
+  signatures: [
+    "ポートフォリオ",
+    "ポジション",
+    "残高",
+    "注文",
+    "AI Instructions",
+    "維持証拠金",
+    "維持証拠金余力",
+    "買付力",
+    "SPX デルタ",
+    "未実現損益",
+    "実現損益",
+    "純資産評価額",
+    "有価証券総ポジション価値",
+    "月初来利息",
+    "平均価格",
+    "時価評価額",
+    "NASDAQ.NMS",
+    "TSEJ",
+    "NYSE",
+  ],
+  layoutPrompt: `このスクリーンショットは IBKR（Interactive Brokers）モバイルアプリの「ポートフォリオ」画面である。
+
+## 最重要: この口座は信用取引（レバレッジ）を使っている
+
+**株式の時価をそのまま資産として扱ってはならない。**現金残高がマイナス（借入）であり、
+実際の資産は「株式時価 + 現金残高」で求まる純資産である。
+
+## 通貨の構造（極めて重要）
+
+この口座は基軸通貨が SGD だが、**個別銘柄の株価は現地通貨で表示される**。
+
+| 表示 | 通貨 |
+|---|---|
+| 画面上部の純資産・市場価格・維持証拠金 | SGD（基軸通貨） |
+| 一覧の「時価評価額」列（185.1K など） | SGD に換算済み |
+| 一覧の「平均価格」列（126.64 など） | **現地通貨**（米国株は USD、日本株は JPY） |
+
+判定方法は取引所コードを見る。
+
+- **NYSE / NASDAQ.NMS / ARCA / BATS** → 米国株。currency は "USD"、market は "US"
+- **TSEJ**（東京証券取引所）→ 日本株。currency は "JPY"、market は "JP"
+- **SEHK** → 香港株。currency は "HKD"、market は "HK"
+
+実例として、ORCL の平均価格 126.64 は USD（SGD なら約 163 になる）、
+7203 の平均価格 2891.9 は JPY である。**これを取り違えると評価額が 100 倍以上ずれる。**
+
+**時価評価額（SGD 換算値）は取り込まない。**avgCost と quantity から計算し直す方が正確である。
+
+## ポジション一覧の列構成
+
+1 銘柄が 1 行で表示される（iSPEED や moomoo と違い 2 行構成ではない）。
+
+| 列 | 見出し | 内容 |
+|---|---|---|
+| 1 | 商品 | ティッカー（大きい文字）＋ 取引所コード（小さい灰文字） |
+| 2 | ポジション | 保有数量 |
+| 3 | 平均価格 | 平均取得単価（**現地通貨**） |
+| 4 | 時価評価額 | SGD 換算の評価額（K 表記。取り込まない） |
+| 5 | 未実現損益 | SGD 換算の含み損益 |
+| 6 | 実現損益 | 「—」なら決済なし |
+
+列が表示されていない場合（「ポジション」「平均価格」の列が見えない場合）は
+**数量と取得単価を推測してはならない。**holdings を空配列で返し、notes に
+「ポジションと平均価格の列が表示されていない。表右上の設定アイコンから
+「ポジション」「平均価格」を表示に追加した画面を送ってほしい」と記す。
+
+## K 表記の扱い
+
+数量と金額が「1.10K」「6.90K」「185.1K」のように千単位で丸められる。
+
+- **1.10K は 1100、6.90K は 6900、2.00K は 2000、3.50K は 3500 と解釈する**
+- K が付かない数値（960、600、360 など）はそのままの株数
+- **注意**: K 表記は 3 桁に丸められているため、1.10K は実際には 1,095〜1,104 の可能性がある。
+  読み取った値をそのまま出力し、notes に「数量が K 表記で丸められている可能性がある」と記す
+
+## 残高タブが写っている場合
+
+「純資産評価額」「現金」「有価証券総ポジション価値」「月初来利息」が縦に並ぶ画面では、
+保有銘柄は写っていない。この場合は holdings を空配列にし、
+cash に「現金」の値（マイナスなら借入なので負の数のまま）を入れ、
+notes に純資産評価額・有価証券総ポジション価値・維持証拠金・月初来利息を記録する。
+
+**通貨別残高**（JPY / SGD / USD が国旗付きで並ぶ部分）が写っている場合は、
+マイナスの通貨が借入通貨である。notes に記録する。
+
+## 銘柄詳細画面が写っている場合
+
+上部にティッカーと社名、「150.77 USD x 100」のような現在値、
+下部に「ポジション: 960」「市場価格 185.1K SGD」「平均価格 126.64」が表示される。
+この場合は 1 銘柄だけを holdings に入れる。**現在値の右に明記された通貨を採用する。**
+
+## その他の注意点
+
+- 画面上部の「2,204,557」は純資産、「4,028,948.22」は株式の市場価格である。混同しない
+- 「維持証拠金 844,670.35」「維持証拠金余力 1,359,886.56」「買付力 8,382,403.07」は
+  信用取引の指標。notes に記録する
+- 「SPX デルタ」はオプションのリスク指標であり保有株式のデータではない。無視する
+- 「AI Instructions」タブや「ポジションを決済」「出口戦略」ボタンはデータではない
+- 画面下部の「ホーム / ポートフォリオ / ウォッチリスト / マーケット」はナビゲーション。無視する
+- 損益がマイナスの場合は数値の前に − が付くか斜体の色で表される。符号で判断する
+- 日本株のティッカーは 4 桁数字（7203、2768、7974）。symbol もその 4 桁を使う`,
+};
+
 const GENERIC: BrokerFormat = {
   id: "generic",
   label: "その他",
@@ -210,7 +321,16 @@ const GENERIC: BrokerFormat = {
   layoutPrompt: null,
 };
 
-export const BROKER_FORMATS: BrokerFormat[] = [MOOMOO_JP, RAKUTEN_ISPEED, FUTU, GENERIC];
+export const BROKER_FORMATS: BrokerFormat[] = [MOOMOO_JP, RAKUTEN_ISPEED, IBKR, FUTU, GENERIC];
+
+/**
+ * zod の enum に渡すためのフォーマット ID 一覧。
+ * ルーター側で手書きすると対応アプリ追加時に更新漏れが起きるため、定義から生成する。
+ */
+export const BROKER_FORMAT_IDS = BROKER_FORMATS.map(f => f.id) as [
+  BrokerFormatId,
+  ...BrokerFormatId[],
+];
 
 /** 選択肢として使えるフォーマット一覧（画面表示用） */
 export const BROKER_FORMAT_OPTIONS = BROKER_FORMATS.map(f => ({
@@ -234,6 +354,14 @@ export function guessFormatFromBrokerName(brokerName: string | null): BrokerForm
 
   if (normalized.includes("moomoo")) return "moomoo_jp";
   if (normalized.includes("ispeed") || normalized.includes("楽天")) return "rakuten_ispeed";
+  // IBKR は表記が多い（IBKR / Interactive Brokers / 盈透 など）
+  if (
+    normalized.includes("ibkr") ||
+    normalized.includes("interactive broker") ||
+    normalized.includes("盈透")
+  ) {
+    return "ibkr";
+  }
   if (normalized.includes("futu") || normalized.includes("富途")) return "futu";
 
   return "generic";

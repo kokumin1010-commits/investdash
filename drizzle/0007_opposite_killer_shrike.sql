@@ -1,0 +1,2 @@
+ALTER TABLE `holdings` MODIFY COLUMN `market` enum('JP','US','SG','OTHER') NOT NULL DEFAULT 'JP';--> statement-breakpoint
+ALTER TABLE `watchlist` MODIFY COLUMN `market` enum('JP','US','SG','OTHER') NOT NULL DEFAULT 'JP';

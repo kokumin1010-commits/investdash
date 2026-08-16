@@ -10,6 +10,7 @@ import {
   userSettings,
   users,
   watchlist,
+  brokerBalances,
   type Holding,
   type InsertHolding,
   type InsertImportJob,
@@ -18,6 +19,7 @@ import {
   type InsertSignal,
   type InsertUser,
   type InsertWatchlistItem,
+  type InsertBrokerBalance,
 } from "../drizzle/schema";
 import { ENV } from "./_core/env";
 
@@ -161,6 +163,7 @@ export async function updateSettings(
   patch: Partial<{
     baseCurrency: string;
     usdJpyRate: string;
+    sgdJpyRate: string;
     concentrationThreshold: number;
     sectorConcentrationThreshold: number;
     cashBalance: string;
@@ -175,6 +178,54 @@ export async function updateSettings(
   await getSettings(userId);
   await db.update(userSettings).set(patch).where(eq(userSettings.userId, userId));
   return getSettings(userId);
+}
+
+/* --------------------- 口座別の残高・証拠金（信用取引） --------------------- */
+
+/**
+ * 口座別の残高情報を取得する。
+ *
+ * 現物取引だけの口座では不要だが、信用取引を使っている口座（IBKR）では
+ * 借入額を差し引かないと総資産が過大になるため、口座単位で持つ。
+ */
+export async function listBrokerBalances(userId: number) {
+  const db = await requireDb();
+  return db.select().from(brokerBalances).where(eq(brokerBalances.userId, userId));
+}
+
+export async function getBrokerBalance(userId: number, broker: string) {
+  const db = await requireDb();
+  const rows = await db
+    .select()
+    .from(brokerBalances)
+    .where(and(eq(brokerBalances.userId, userId), eq(brokerBalances.broker, broker as never)))
+    .limit(1);
+  return rows[0] ?? null;
+}
+
+/**
+ * 口座別の残高情報を保存する（同じ口座なら上書き）。
+ * スクショを上げ直すたびに最新の借入額・証拠金へ更新される想定。
+ */
+export async function upsertBrokerBalance(data: InsertBrokerBalance): Promise<number> {
+  const db = await requireDb();
+  const existing = await getBrokerBalance(data.userId, data.broker);
+  if (existing) {
+    await db.update(brokerBalances).set(data).where(eq(brokerBalances.id, existing.id));
+    return existing.id;
+  }
+  await db.insert(brokerBalances).values(data);
+  // INSERT の戻り値から ID が取れない環境があるため、再検索して確実に取得する
+  const created = await getBrokerBalance(data.userId, data.broker);
+  return created?.id ?? 0;
+}
+
+export async function deleteBrokerBalance(userId: number, broker: string): Promise<boolean> {
+  const db = await requireDb();
+  const existing = await getBrokerBalance(userId, broker);
+  if (!existing) return false;
+  await db.delete(brokerBalances).where(eq(brokerBalances.id, existing.id));
+  return true;
 }
 
 /* -------------------------------- holdings -------------------------------- */

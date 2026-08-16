@@ -49,10 +49,10 @@ export const holdings = mysqlTable(
     tickerCode: varchar("tickerCode", { length: 16 }).notNull(),
     /** 表示名（ユーザー確認済みの名称。日本語可） */
     name: varchar("name", { length: 160 }).notNull(),
-    market: mysqlEnum("market", ["JP", "US", "OTHER"]).default("JP").notNull(),
+    market: mysqlEnum("market", ["JP", "US", "SG", "OTHER"]).default("JP").notNull(),
     currency: varchar("currency", { length: 8 }).default("JPY").notNull(),
     /** どの証券プラットフォームで保有しているか */
-    broker: mysqlEnum("broker", ["moomoo_jp", "rakuten_ispeed", "futu", "other"])
+    broker: mysqlEnum("broker", ["moomoo_jp", "rakuten_ispeed", "futu", "ibkr", "other"])
       .default("other")
       .notNull(),
     /** 保有株数 */
@@ -212,7 +212,7 @@ export const watchlist = mysqlTable(
     symbol: varchar("symbol", { length: 24 }).notNull(),
     tickerCode: varchar("tickerCode", { length: 16 }).notNull(),
     name: varchar("name", { length: 160 }).notNull(),
-    market: mysqlEnum("market", ["JP", "US", "OTHER"]).default("JP").notNull(),
+    market: mysqlEnum("market", ["JP", "US", "SG", "OTHER"]).default("JP").notNull(),
     currency: varchar("currency", { length: 8 }).default("JPY").notNull(),
     currentPrice: decimal("currentPrice", { precision: 20, scale: 4 }),
     previousClose: decimal("previousClose", { precision: 20, scale: 4 }),
@@ -302,8 +302,14 @@ export const userSettings = mysqlTable("userSettings", {
   /** USD/JPY レート（手動または自動取得） */
   usdJpyRate: decimal("usdJpyRate", { precision: 12, scale: 4 }).default("150.0000").notNull(),
   /**
+   * SGD/JPY レート（手動または自動取得）。
+   * IBKR シンガポール口座は基軸通貨が SGD で、借入額・維持証拠金も SGD 建て。
+   * SGX 上場銘柄の評価額も SGD なので、円換算に直接レートが必要になる。
+   */
+  sgdJpyRate: decimal("sgdJpyRate", { precision: 12, scale: 4 }).default("115.0000").notNull(),
+  /**
    * 為替レートを株価更新と同時に自動取得するか。
-   * false にすると usdJpyRate の手動設定値を使い続ける。
+   * false にすると usdJpyRate / sgdJpyRate の手動設定値を使い続ける。
    */
   fxAutoUpdate: boolean("fxAutoUpdate").default(true).notNull(),
   /** 為替レートを最後に自動取得できた時刻。null なら未取得（手動値のまま） */
@@ -323,6 +329,58 @@ export const userSettings = mysqlTable("userSettings", {
 
 export type UserSettings = typeof userSettings.$inferSelect;
 export type InsertUserSettings = typeof userSettings.$inferInsert;
+
+/**
+ * 証券口座ごとの現金残高・借入・証拠金。
+ *
+ * 現物取引のみの口座（楽天 iSPEED、moomoo）では現金残高だけを持つが、
+ * 信用取引を行う口座（IBKR）では借入がマイナスの現金として現れる。
+ * 株式の時価をそのまま資産計上すると借入分だけ過大になるため、
+ * 口座単位で負債を保持して純資産を算出できるようにする。
+ *
+ * 金額は口座の基軸通貨で保持し、`currency` に通貨コードを持つ。
+ * 円換算はレートを用いて表示時に行う。
+ */
+export const brokerBalances = mysqlTable(
+  "brokerBalances",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    userId: int("userId").notNull(),
+    /** 対象の証券プラットフォーム */
+    broker: mysqlEnum("broker", ["moomoo_jp", "rakuten_ispeed", "futu", "ibkr", "other"]).notNull(),
+    /** この口座の基軸通貨（IBKR シンガポールは SGD） */
+    currency: varchar("currency", { length: 8 }).default("JPY").notNull(),
+    /**
+     * 現金残高。マイナスなら借入（信用取引の建玉分）。
+     * IBKR の「現金」欄をそのまま入れる。
+     */
+    cashBalance: decimal("cashBalance", { precision: 20, scale: 2 }).default("0.00").notNull(),
+    /**
+     * 維持証拠金。追証の判定に使う。信用取引を使わない口座では 0。
+     */
+    maintenanceMargin: decimal("maintenanceMargin", { precision: 20, scale: 2 })
+      .default("0.00")
+      .notNull(),
+    /** 月初来の支払利息（マイナス表記）。借入コストの把握に使う */
+    interestMtd: decimal("interestMtd", { precision: 20, scale: 2 }).default("0.00").notNull(),
+    /**
+     * 借入の通貨別内訳（JSON）。
+     * 例: {"JPY": -228720494.5, "SGD": 6585.22, "USD": 2495.02}
+     * どの通貨で借りているかは金利と為替リスクの判断に必要。
+     */
+    currencyBreakdown: text("currencyBreakdown"),
+    /** この情報を記録した時点（スクショの日時） */
+    capturedAt: timestamp("capturedAt").defaultNow().notNull(),
+    createdAt: timestamp("createdAt").defaultNow().notNull(),
+    updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+  },
+  table => ({
+    userBrokerIdx: index("brokerBalances_user_broker_idx").on(table.userId, table.broker),
+  })
+);
+
+export type BrokerBalance = typeof brokerBalances.$inferSelect;
+export type InsertBrokerBalance = typeof brokerBalances.$inferInsert;
 
 /**
  * 簡易パスコード認証。
