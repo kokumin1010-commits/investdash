@@ -565,6 +565,8 @@ export async function insertSnapshot(values: {
   totalValue: string;
   totalCost: string;
   positionCount: number;
+  borrowed?: string | null;
+  netAssets?: string | null;
 }) {
   const db = await requireDb();
   await db.insert(portfolioSnapshots).values(values);

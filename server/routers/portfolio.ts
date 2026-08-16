@@ -4,6 +4,7 @@ import * as db from "../db";
 import { protectedProcedure, router } from "../_core/trpc";
 import { fetchCompanyProfile, fetchPriceHistory, fetchQuote } from "../services/marketData";
 import { isQuotaError, toFriendlyAiError } from "../services/aiErrors";
+import { buildAssetTrend, resolveScale, type SnapshotInput } from "../services/assetTrend";
 import {
   buildPortfolio,
   enrichProfiles,
@@ -480,6 +481,30 @@ export const portfolioRouter = router({
     }),
 
   snapshots: protectedProcedure.query(async ({ ctx }) => db.listSnapshots(ctx.user.id)),
+
+  /**
+   * 資産推移グラフ用の集計。
+   *
+   * 集計を画面側に置くと、粒度の自動切替や「登録作業による増加か値動きか」の
+   * 判定が画面ごとにばらつく。サーバーで確定させて 1 か所に集める。
+   */
+  assetTrend: protectedProcedure
+    .input(z.object({ scale: z.enum(["day", "month"]).default("month") }).optional())
+    .query(async ({ ctx, input }) => {
+      const rows = await db.listSnapshots(ctx.user.id, 400);
+      const mapped: SnapshotInput[] = rows.map(r => ({
+        totalValue: Number(r.totalValue),
+        totalCost: Number(r.totalCost),
+        positionCount: r.positionCount,
+        borrowed: r.borrowed === null ? null : Number(r.borrowed),
+        netAssets: r.netAssets === null ? null : Number(r.netAssets),
+        capturedAt: r.capturedAt,
+      }));
+      const requested = input?.scale ?? "month";
+      const { scale, fellBack } = resolveScale(mapped, requested);
+      const trend = buildAssetTrend(mapped, scale);
+      return { ...trend, scale, requestedScale: requested, fellBack } as const;
+    }),
 
   signalHistory: protectedProcedure
     .input(z.object({ symbol: z.string().min(1).max(24) }))

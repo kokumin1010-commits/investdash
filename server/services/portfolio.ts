@@ -1067,6 +1067,12 @@ export async function syncPrices(userId: number): Promise<{
         totalValue: summary.totalValueBase.toFixed(2),
         totalCost: summary.totalCostBase.toFixed(2),
         positionCount: summary.positionCount,
+        /*
+         * 借入と純資産も残す。信用取引があると総評価額は実質の資産より大きく出るため、
+         * 後から純資産の推移を復元できるようにしておく。
+         */
+        borrowed: summary.totalBorrowedBase.toFixed(2),
+        netAssets: summary.netAssetsBase.toFixed(2),
       });
     }
   } catch (error) {

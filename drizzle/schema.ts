@@ -319,6 +319,13 @@ export const portfolioSnapshots = mysqlTable(
     totalValue: decimal("totalValue", { precision: 20, scale: 2 }).notNull(),
     totalCost: decimal("totalCost", { precision: 20, scale: 2 }).notNull(),
     positionCount: int("positionCount").notNull(),
+    /**
+     * 借入（信用取引）の残高。借入があると総評価額は実質の資産より大きく出るため、
+     * 純資産の推移を後から復元できるように記録時点の値を残す。
+     */
+    borrowed: decimal("borrowed", { precision: 20, scale: 2 }),
+    /** 借入を差し引いた純資産。totalValue - borrowed + 現金 */
+    netAssets: decimal("netAssets", { precision: 20, scale: 2 }),
     capturedAt: timestamp("capturedAt").defaultNow().notNull(),
   },
   table => ({

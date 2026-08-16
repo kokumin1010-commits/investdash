@@ -47,6 +47,7 @@ import {
   Line,
   Pie,
   PieChart,
+  ReferenceLine,
   ResponsiveContainer,
   Tooltip as ReTooltip,
   XAxis,
@@ -58,7 +59,6 @@ import { Link } from "wouter";
 export default function Dashboard() {
   const utils = trpc.useUtils();
   const overview = trpc.portfolio.overview.useQuery();
-  const snapshots = trpc.portfolio.snapshots.useQuery();
   const [busy, setBusy] = useState<null | "price">(null);
 
   const syncPrices = trpc.portfolio.syncPrices.useMutation({
@@ -161,6 +161,11 @@ export default function Dashboard() {
    * 資産推移の粒度。長期保有では月次のほうが傾向が読みやすいので既定を月次にする。
    */
   const [trendScale, setTrendScale] = useState<"day" | "month">("month");
+  /*
+   * 集計はサーバーで確定させる。粒度の自動切替（月次で 1 点しか作れないときは日次）や
+   * 「銘柄追加による増加か値動きか」の判定を画面側で持つと、他の画面と食い違うため。
+   */
+  const assetTrend = trpc.portfolio.assetTrend.useQuery({ scale: trendScale });
 
   // どれか 1 つが動いている間は他の一括処理を止める（AI 利用枠と DB 競合を避ける）
   const anyBusy =
@@ -182,39 +187,9 @@ export default function Dashboard() {
       }));
   }, [data]);
 
-  const trend = useMemo(() => {
-    const rows = snapshots.data ?? [];
-    /**
-     * 株価更新は 1 日に複数回走るため、日次のままだと同じ日の点が並んで
-     * 長期の推移が読みづらい。粒度を選べるようにし、各期間の最終値を代表値にする。
-     */
-    const bucketOf = (d: Date) =>
-      trendScale === "month"
-        ? `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`
-        : `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-
-    // 期間ごとに最後の記録を残す（その時点の資産を表すため）
-    const byBucket = new Map<string, { at: Date; value: number; cost: number }>();
-    for (const r of rows) {
-      const at = new Date(r.capturedAt);
-      const key = bucketOf(at);
-      const cur = byBucket.get(key);
-      if (!cur || at.getTime() > cur.at.getTime()) {
-        byBucket.set(key, { at, value: Number(r.totalValue), cost: Number(r.totalCost) });
-      }
-    }
-
-    return Array.from(byBucket.values())
-      .sort((a, b) => a.at.getTime() - b.at.getTime())
-      .map(r => ({
-        date:
-          trendScale === "month"
-            ? r.at.toLocaleDateString("ja-JP", { year: "2-digit", month: "numeric" })
-            : r.at.toLocaleDateString("ja-JP", { month: "numeric", day: "numeric" }),
-        value: r.value,
-        cost: r.cost,
-      }));
-  }, [snapshots.data, trendScale]);
+  const trend = assetTrend.data?.points ?? [];
+  /** 借入がある期間があれば純資産の線を出す */
+  const hasNetAssetsLine = trend.some(p => p.netAssets !== null);
 
   const signalCounts = useMemo(() => {
     const counts = new Map<SignalAction, number>();
@@ -512,12 +487,21 @@ export default function Dashboard() {
             <StatCard
               label="前回記録からの変化"
               valueNode={
-                periodChange ? (
+                periodChange && periodChange.gainDelta !== null ? (
                   <PnlText
-                    value={periodChange.gainDelta ?? periodChange.totalDelta}
+                    value={periodChange.gainDelta}
                     currency={summary?.baseCurrency}
                     className="text-2xl font-semibold"
                   />
+                ) : periodChange ? (
+                  /*
+                   * 銘柄を登録した期間の評価額の増加は「資産が増えた」ではなく
+                   * 登録作業の結果。金額を主役に出すと成績と誤読されるため、
+                   * 判定できない旨を主表示にし、増減額は補助に落とす。
+                   */
+                  <span className="text-lg font-semibold text-muted-foreground">
+                    判定できません
+                  </span>
                 ) : (
                   <span className="text-2xl font-semibold text-muted-foreground">—</span>
                 )
@@ -532,7 +516,9 @@ export default function Dashboard() {
                           <span className="text-muted-foreground">株価変動による増減</span>
                         </>
                       ) : (
-                        <span className="text-muted-foreground">評価額の増減（合計）</span>
+                        <span className="text-muted-foreground">
+                          株価がいくら動いたかは、この期間では出せません
+                        </span>
                       )}
                     </span>
                     <span className="block text-[11px] text-muted-foreground">
@@ -553,11 +539,22 @@ export default function Dashboard() {
                       誤解を防ぐため、その旨をはっきり書く。
                     */}
                     {periodChange.compositionChanged ? (
-                      <span className="block text-[11px] text-amber-600 dark:text-amber-400">
-                        {periodChange.countDelta !== 0
-                          ? `この期間に ${periodChange.countDelta > 0 ? "+" : ""}${periodChange.countDelta} 銘柄の変動があったため、`
-                          : "この期間に買い増し・売却があったため、"}
-                        株価変動分は分けて出せません
+                      <span className="block space-y-0.5">
+                        <span className="block text-[11px] text-amber-600 dark:text-amber-400">
+                          {periodChange.countDelta !== 0
+                            ? `この期間に ${periodChange.countDelta > 0 ? "+" : ""}${periodChange.countDelta} 銘柄を登録したため、`
+                            : "この期間に買い増し・売却があったため、"}
+                          値動きと登録分を分けられません
+                        </span>
+                        <span className="block text-[11px] text-muted-foreground">
+                          評価額の差は{" "}
+                          {periodChange.totalDelta >= 0 ? "+" : ""}
+                          {formatMoney(periodChange.totalDelta, summary?.baseCurrency)}
+                          ですが、その大半は登録した銘柄の分です
+                        </span>
+                        <span className="block text-[11px] text-muted-foreground">
+                          銘柄を追加せずに株価更新すると、次回から値動きだけを出せます
+                        </span>
                       </span>
                     ) : null}
                   </span>
@@ -1068,7 +1065,29 @@ export default function Dashboard() {
                   <div>
                     <CardTitle className="text-base">資産推移</CardTitle>
                     <CardDescription className="text-xs">
-                      株価更新のたびにスナップショットを記録します
+                      {assetTrend.data && assetTrend.data.snapshotCount > 0 ? (
+                        <>
+                          記録 {assetTrend.data.snapshotCount} 件
+                          {assetTrend.data.firstAt && assetTrend.data.lastAt && (
+                            <>
+                              （
+                              {new Date(assetTrend.data.firstAt).toLocaleDateString("ja-JP", {
+                                month: "numeric",
+                                day: "numeric",
+                              })}
+                              〜
+                              {new Date(assetTrend.data.lastAt).toLocaleDateString("ja-JP", {
+                                month: "numeric",
+                                day: "numeric",
+                              })}
+                              ）
+                            </>
+                          )}
+                          {assetTrend.data.fellBack && " ・ 同じ月の記録のみなので日次で表示中"}
+                        </>
+                      ) : (
+                        "株価更新のたびにスナップショットを記録します"
+                      )}
                     </CardDescription>
                   </div>
                   {/* 長期の傾向を見たいときは月次、直近の動きを見たいときは日次 */}
@@ -1099,10 +1118,12 @@ export default function Dashboard() {
                 {trend.length < 2 ? (
                   <div className="flex h-[260px] flex-col items-center justify-center gap-2 text-center">
                     <p className="text-sm text-muted-foreground">
-                      推移グラフはスナップショットが 2 件以上たまると表示されます
+                      推移グラフは異なる日の記録が 2 件以上たまると表示されます
                     </p>
                     <p className="text-xs text-muted-foreground">
-                      現在 {trend.length} 件。株価更新を実行すると記録されます。
+                      {assetTrend.data && assetTrend.data.snapshotCount > 0
+                        ? `記録は ${assetTrend.data.snapshotCount} 件ありますが、すべて同じ日のため点が 1 つになります。日をまたいで株価更新すると増えます。`
+                        : "株価更新を実行すると記録されます。"}
                     </p>
                   </div>
                 ) : (
@@ -1142,10 +1163,32 @@ export default function Dashboard() {
                           fontSize: 12,
                           color: "var(--popover-foreground)",
                         }}
-                        formatter={(v: number, name) => [
-                          formatMoney(v, summary?.baseCurrency),
-                          name === "value" ? "評価額" : "取得原価",
-                        ]}
+                        formatter={(v: number, name): [string, string] => {
+                          if (name === "netAssets") {
+                            return [
+                              formatMoney(v, summary?.baseCurrency),
+                              "純資産（借入を引いた額）",
+                            ];
+                          }
+                          return [
+                            formatMoney(v, summary?.baseCurrency),
+                            name === "value" ? "株式時価" : "取得原価",
+                          ];
+                        }}
+                        labelFormatter={(label, payload) => {
+                          const p = payload?.[0]?.payload as (typeof trend)[number] | undefined;
+                          if (!p) return label;
+                          // 銘柄数が変わった期間は「増えた理由」が登録作業なので明示する
+                          if (p.positionChanged) {
+                            const sign = p.positionDelta > 0 ? "+" : "";
+                            return `${label}（銘柄 ${p.positionCount} ／ ${sign}${p.positionDelta} 銘柄の登録あり）`;
+                          }
+                          if (p.priceChange !== null) {
+                            const sign = p.priceChange >= 0 ? "+" : "";
+                            return `${label}（値動き ${sign}${formatMoney(p.priceChange, summary?.baseCurrency)}）`;
+                          }
+                          return `${label}（銘柄 ${p.positionCount}）`;
+                        }}
                       />
                       <Area
                         type="monotone"
@@ -1155,6 +1198,17 @@ export default function Dashboard() {
                         strokeWidth={1.5}
                         fill="none"
                       />
+                      {/* 借入がある場合は実質の資産が分かるよう純資産の線も出す */}
+                      {hasNetAssetsLine && (
+                        <Area
+                          type="monotone"
+                          dataKey="netAssets"
+                          stroke="var(--chart-2)"
+                          strokeWidth={2}
+                          fill="none"
+                          connectNulls
+                        />
+                      )}
                       <Area
                         type="monotone"
                         dataKey="value"
@@ -1162,8 +1216,81 @@ export default function Dashboard() {
                         strokeWidth={2}
                         fill="url(#valueFill)"
                       />
+                      {/*
+                        銘柄を登録した時点に印を付ける。
+                        この区間の増加は資産の成長ではなく登録作業によるものなので、
+                        線の上がり方を見誤らないようにする。
+                      */}
+                      {trend.map((p, i) =>
+                        p.positionChanged ? (
+                          <ReferenceLine
+                            key={`mark-${i}`}
+                            x={p.date}
+                            stroke="var(--muted-foreground)"
+                            strokeDasharray="2 3"
+                            strokeOpacity={0.5}
+                          />
+                        ) : null
+                      )}
                     </AreaChart>
                   </ResponsiveContainer>
+                )}
+                {/* グラフの読み方。登録作業と値動きを混同しないよう明示する */}
+                {trend.length >= 2 && (
+                  <div className="mt-3 space-y-1.5 border-t pt-3 text-xs">
+                    <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-muted-foreground">
+                      <span className="inline-flex items-center gap-1.5">
+                        <span
+                          className="inline-block h-0.5 w-4"
+                          style={{ background: "var(--chart-1)" }}
+                        />
+                        株式時価
+                      </span>
+                      {hasNetAssetsLine && (
+                        <span className="inline-flex items-center gap-1.5">
+                          <span
+                            className="inline-block h-0.5 w-4"
+                            style={{ background: "var(--chart-2)" }}
+                          />
+                          純資産（借入を引いた額）
+                        </span>
+                      )}
+                      <span className="inline-flex items-center gap-1.5">
+                        <span className="inline-block h-0.5 w-4 border-t border-dashed border-muted-foreground" />
+                        取得原価
+                      </span>
+                      {(assetTrend.data?.changedPointCount ?? 0) > 0 && (
+                        <span className="inline-flex items-center gap-1.5">
+                          <span className="inline-block h-3 w-0 border-l border-dashed border-muted-foreground" />
+                          銘柄の登録があった時点
+                        </span>
+                      )}
+                    </div>
+                    {(assetTrend.data?.changedPointCount ?? 0) > 0 && (
+                      <p className="text-muted-foreground">
+                        点線の位置では銘柄を登録しています。その区間の増加は資産が増えたのではなく
+                        登録作業によるものです。
+                        {assetTrend.data?.priceOnlyChange !== null &&
+                          assetTrend.data?.priceOnlyChange !== undefined && (
+                            <>
+                              {" "}
+                              銘柄数が変わらなかった期間だけを合計した値動きは
+                              <span
+                                className={
+                                  assetTrend.data.priceOnlyChange >= 0
+                                    ? "font-medium text-emerald-600 dark:text-emerald-400"
+                                    : "font-medium text-red-600 dark:text-red-400"
+                                }
+                              >
+                                {assetTrend.data.priceOnlyChange >= 0 ? " +" : " "}
+                                {formatMoney(assetTrend.data.priceOnlyChange, summary?.baseCurrency)}
+                              </span>
+                              です。
+                            </>
+                          )}
+                      </p>
+                    )}
+                  </div>
                 )}
               </CardContent>
             </Card>
