@@ -220,8 +220,11 @@ export async function ask(params: {
   /*
    * 文脈は毎回作り直す。会話の途中で株価や判定が変わることがあり、
    * 最初の 1 回だけ渡す設計では古い前提で答え続けてしまう。
+   *
+   * 進行中の会話は「過去の相談」から除く。history として別途渡しており、
+   * 両方に入れると同じ内容が二重に渡ってトークンを無駄にする。
    */
-  const context = await buildConsultContext(userId, symbol);
+  const context = await buildConsultContext(userId, symbol, consultationId);
 
   const started = Date.now();
   let answer: string;

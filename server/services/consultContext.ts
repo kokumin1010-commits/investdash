@@ -15,7 +15,12 @@
  */
 import { and, desc, eq } from "drizzle-orm";
 import { getDb } from "../db";
-import { newsItems } from "../../drizzle/schema";
+import {
+  consultations,
+  consultationMessages,
+  investmentCards,
+  newsItems,
+} from "../../drizzle/schema";
 import { buildPortfolio } from "./portfolio";
 import { listPlanOverview } from "./priceBandService";
 
@@ -24,6 +29,17 @@ export const TOP_HOLDINGS_LIMIT = 12;
 
 /** 相談対象銘柄について渡すニュース件数 */
 export const SYMBOL_NEWS_LIMIT = 6;
+
+/**
+ * 相談対象の銘柄について渡す過去の相談件数。
+ *
+ * 全部渡すと当時の株価が今の質問に混ざる。直近だけで
+ * 「前回はこう判断した」を踏まえるには足りる。
+ */
+export const PAST_CONSULT_LIMIT = 3;
+
+/** 過去の相談から渡す回答の文字数。結論部分だけで足りる */
+export const PAST_ANSWER_CHARS = 400;
 
 export type ConsultHolding = {
   symbol: string;
@@ -57,6 +73,38 @@ export type ConsultContext = {
   dividendYieldPct: number | null;
   /** 借入金利の年額。配当と比べて負担を測るのに使う */
   annualInterestJpy: number | null;
+  /**
+   * 借入の実効金利（年率 %）。
+   * 額だけでは「買い増しの期待収益がコストを上回るか」を判定できない。
+   * 借入額での加重平均。単純平均だと少額の高金利借入が過大に効く。
+   */
+  borrowRatePct: number | null;
+  /**
+   * 現金性資産（貨幣市場基金）の額と利回り。
+   * 「返済に回すか買い増すか現金で置くか」の三択を比べるのに必要。
+   * 株式時価には含まれない別枠の資産。
+   */
+  interestAssetsJpy: number;
+  interestIncomeJpy: number;
+  interestRatePct: number | null;
+  /**
+   * キャリー差（現金の利回り − 借入金利）。
+   * 正なら「借りて現金で置くだけで得が出ている」状態。
+   */
+  carrySpreadPct: number | null;
+  /**
+   * 口座別のレバレッジと借入。
+   * 全体が 1.36 倍でも借入は IBKR に集中しており単体では 1.83 倍になる。
+   * 追証は口座単位で発生するので、全体の倍率だけでは危険度を測れない。
+   */
+  brokerLeverage: {
+    broker: string;
+    borrowedJpy: number;
+    leverage: number | null;
+    ratePct: number | null;
+    marginRatioPct: number | null;
+    dropToMarginCallPct: number | null;
+  }[];
   positionCount: number;
   /** 業種の偏り。上位から順に */
   sectors: { sector: string; sharePct: number }[];
@@ -72,6 +120,22 @@ export type ConsultContext = {
   addZone: { symbol: string; name: string; label: string }[];
   /** 相談対象銘柄の直近ニュース */
   focusNews: { title: string; summary: string | null; impactScore: number | null }[];
+  /**
+   * 相談対象銘柄について過去にした相談。
+   * これがないと同じ質問に毎回違う答えが返り、判断が積み上がらない。
+   */
+  pastConsults: { askedAt: string; question: string; answerHead: string }[];
+  /**
+   * 相談対象銘柄の投資カード。
+   * 「何が崩れたら降りるか」を過去に決めているなら、それを踏まえて
+   * 答えるべき。無視すると当時の判断と矛盾した回答になる。
+   */
+  focusCard: {
+    coreThesis: string | null;
+    exitConditions: string | null;
+    risks: string | null;
+    valuationAssumption: string | null;
+  } | null;
   builtAt: string;
 };
 
@@ -84,7 +148,12 @@ export type ConsultContext = {
  */
 export async function buildConsultContext(
   userId: number,
-  focusSymbol?: string | null
+  focusSymbol?: string | null,
+  /**
+   * 今まさに進行中の会話。過去の相談として渡すと同じ内容が二重になる
+   * （進行中のやり取りは別途 history として渡している）。
+   */
+  excludeConsultationId?: number | null
 ): Promise<ConsultContext> {
   const overview = await buildPortfolio(userId);
   const plans = await listPlanOverview(userId).catch(() => []);
@@ -132,8 +201,19 @@ export async function buildConsultContext(
     .map(p => ({ symbol: p.symbol, name: p.name, label: p.actionLabel ?? "" }));
 
   const focusNews = focusSymbol ? await loadSymbolNews(userId, focusSymbol) : [];
+  /*
+   * 過去の相談と投資カードは相談対象が決まっているときだけ引く。
+   * 銘柄を指定しない全体の相談で全銘柄のカードを渡すと、
+   * 112 件分の文章でトークンを食い尽くし本題が埋もれる。
+   */
+  const pastConsults = focusSymbol
+    ? await loadPastConsults(userId, focusSymbol, excludeConsultationId)
+    : [];
+  const focusCard = focusSymbol ? await loadFocusCard(userId, focusSymbol) : null;
 
   const div = overview.dividends;
+  const borrowRatePct = computeBorrowRate(overview);
+  const interestRatePct = overview.summary.interestRatePct ?? null;
 
   return {
     totalValueJpy,
@@ -145,6 +225,24 @@ export async function buildConsultContext(
     annualDividendJpy: div?.annualIncomeBase ?? 0,
     dividendYieldPct: div?.yieldPct ?? null,
     annualInterestJpy: sumInterest(overview),
+    borrowRatePct,
+    interestAssetsJpy: overview.summary.interestAssetsBase ?? 0,
+    interestIncomeJpy: overview.summary.interestIncomeBase ?? 0,
+    interestRatePct,
+    carrySpreadPct:
+      interestRatePct !== null && borrowRatePct !== null
+        ? interestRatePct - borrowRatePct
+        : null,
+    brokerLeverage: (overview.brokers ?? [])
+      .filter(b => (b.leverage?.borrowedBase ?? 0) > 0)
+      .map(b => ({
+        broker: b.label,
+        borrowedJpy: b.leverage?.borrowedBase ?? 0,
+        leverage: b.leverage?.leverage ?? null,
+        ratePct: b.leverage?.interest?.effectiveRatePct ?? null,
+        marginRatioPct: b.leverage?.marginRatioPct ?? null,
+        dropToMarginCallPct: b.leverage?.dropToMarginCallPct ?? null,
+      })),
     positionCount: overview.summary.positionCount ?? 0,
     sectors: (div?.sectors ?? [])
       .slice(0, 8)
@@ -158,6 +256,8 @@ export async function buildConsultContext(
     focusSymbol: focusSymbol ?? null,
     addZone,
     focusNews,
+    pastConsults,
+    focusCard,
     builtAt: new Date().toISOString(),
   };
 }
@@ -181,6 +281,28 @@ function sumInterest(overview: Awaited<ReturnType<typeof buildPortfolio>>): numb
     0
   );
   return total > 0 ? total : null;
+}
+
+/**
+ * 借入全体の実効金利（年率 %）。
+ *
+ * 借入額での加重平均にする。単純平均だと少額の高金利借入が過大に効き、
+ * 実態から大きくずれる。金利が計算できない口座は分母からも除く
+ * （金利 0 として混ぜると全体の利率が実際より低く出る）。
+ */
+function computeBorrowRate(
+  overview: Awaited<ReturnType<typeof buildPortfolio>>
+): number | null {
+  let weighted = 0;
+  let base = 0;
+  for (const b of overview.brokers ?? []) {
+    const rate = b.leverage?.interest?.effectiveRatePct;
+    const borrowed = b.leverage?.borrowedBase ?? 0;
+    if (rate === undefined || rate === null || borrowed <= 0) continue;
+    weighted += rate * borrowed;
+    base += borrowed;
+  }
+  return base > 0 ? weighted / base : null;
 }
 
 /**
@@ -217,4 +339,91 @@ async function loadSymbolNews(
     summary: r.summary ?? null,
     impactScore: r.impactScore ?? null,
   }));
+}
+
+/**
+ * 相談対象銘柄について過去にした相談を引く。
+ *
+ * 回答は冒頭だけ渡す。相談の回答は 600 字程度あり、3 件分を丸ごと
+ * 渡すと本題より過去の話の方が長くなる。結論は先頭に書かせているので
+ * 冒頭を切り出せば「前回どう判断したか」は伝わる。
+ */
+async function loadPastConsults(
+  userId: number,
+  symbol: string,
+  excludeId?: number | null
+): Promise<{ askedAt: string; question: string; answerHead: string }[]> {
+  const db = await getDb();
+  if (!db) return [];
+  const threads = await db
+    .select({
+      id: consultations.id,
+      title: consultations.title,
+      createdAt: consultations.createdAt,
+    })
+    .from(consultations)
+    .where(and(eq(consultations.userId, userId), eq(consultations.symbol, symbol)))
+    .orderBy(desc(consultations.updatedAt))
+    .limit(PAST_CONSULT_LIMIT + 1);
+
+  const out: { askedAt: string; question: string; answerHead: string }[] = [];
+  for (const t of threads) {
+    if (excludeId && t.id === excludeId) continue;
+    if (out.length >= PAST_CONSULT_LIMIT) break;
+    const msgs = await db
+      .select({
+        role: consultationMessages.role,
+        content: consultationMessages.content,
+      })
+      .from(consultationMessages)
+      .where(eq(consultationMessages.consultationId, t.id))
+      .orderBy(consultationMessages.id)
+      .limit(2);
+    const answer = msgs.find(m => m.role === "ASSISTANT")?.content ?? "";
+    if (!answer) continue;
+    out.push({
+      askedAt: t.createdAt.toISOString().slice(0, 10),
+      question: t.title,
+      answerHead:
+        answer.length > PAST_ANSWER_CHARS
+          ? `${answer.slice(0, PAST_ANSWER_CHARS)}…`
+          : answer,
+    });
+  }
+  return out;
+}
+
+/**
+ * 相談対象銘柄の投資カードを引く。
+ *
+ * 全項目が空のカードは「無い」のと同じ扱いにする。存在するだけで渡すと
+ * AI が「投資カードに記載あり」と見なして空の内容を根拠にしてしまう。
+ */
+async function loadFocusCard(
+  userId: number,
+  symbol: string
+): Promise<ConsultContext["focusCard"]> {
+  const db = await getDb();
+  if (!db) return null;
+  const rows = await db
+    .select({
+      coreThesis: investmentCards.coreThesis,
+      exitConditions: investmentCards.exitConditions,
+      risks: investmentCards.risks,
+      valuationAssumption: investmentCards.valuationAssumption,
+    })
+    .from(investmentCards)
+    .where(and(eq(investmentCards.userId, userId), eq(investmentCards.symbol, symbol)))
+    .limit(1);
+  const row = rows[0];
+  if (!row) return null;
+  const hasAny =
+    row.coreThesis || row.exitConditions || row.risks || row.valuationAssumption;
+  if (!hasAny) return null;
+  return {
+    coreThesis: row.coreThesis ?? null,
+    exitConditions: row.exitConditions ?? null,
+    risks: row.risks ?? null,
+    valuationAssumption: row.valuationAssumption ?? null,
+  };
 }
