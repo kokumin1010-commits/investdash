@@ -42,11 +42,13 @@ export default function BuyPlans() {
   const [keyword, setKeyword] = useState("");
 
   const { data, isLoading, error } = trpc.portfolio.priceBandOverview.useQuery();
+  const allRows = data?.rows;
+  const stats = data?.stats;
 
   const rows = useMemo(() => {
-    if (!data) return [];
+    if (!allRows) return [];
     const kw = keyword.trim().toLowerCase();
-    return data
+    return allRows
       .filter(r => {
         if (kw && !r.name.toLowerCase().includes(kw) && !r.symbol.toLowerCase().includes(kw)) {
           return false;
@@ -83,21 +85,21 @@ export default function BuyPlans() {
         const bg = b.nextGapPct === null ? -Infinity : b.nextGapPct;
         return bg - ag;
       });
-  }, [data, filter, keyword]);
+  }, [allRows, filter, keyword]);
 
   const counts = useMemo(() => {
     const c = { BUY: 0, VERIFY: 0, OUTSIDE: 0, ALL: 0 };
-    for (const r of data ?? []) {
+    for (const r of allRows ?? []) {
       c.ALL += 1;
       if (r.action === "ADD_SMALL" || r.action === "ADD_MAIN") c.BUY += 1;
       if (r.action === "VERIFY") c.VERIFY += 1;
       if (r.outsideDirection !== null) c.OUTSIDE += 1;
     }
     return c;
-  }, [data]);
+  }, [allRows]);
 
-  const needsCheckCount = (data ?? []).filter(r => r.needsCheck).length;
-  const concernCount = (data ?? []).filter(r => r.concernCount > 0).length;
+  const needsCheckCount = (allRows ?? []).filter(r => r.needsCheck).length;
+  const concernCount = (allRows ?? []).filter(r => r.concernCount > 0).length;
 
   return (
     <div className="space-y-6">
@@ -197,7 +199,7 @@ export default function BuyPlans() {
 
       <div className="space-y-2">
         {rows.map(r => (
-          <PlanRow key={r.symbol} row={r} />
+          <PlanRow key={r.symbol} row={r} stats={stats} />
         ))}
       </div>
 
@@ -223,16 +225,42 @@ type Row = {
   nextActionLabel: string | null;
   needsCheck: boolean;
   concernCount: number;
+  holdingValueJpy: number | null;
+  weightPct: number | null;
+  avgCost: number | null;
+  pnlPct: number | null;
+  costRecovered: boolean;
+  held: boolean;
+  watchTargetPrice: number | null;
+  watchGapPct: number | null;
+  watchPriority: string | null;
+  targetTooFar: boolean;
 };
 
-function PlanRow({ row }: { row: Row }) {
+type Stats = {
+  avgWeightPct: number | null;
+  topAvgWeightPct: number | null;
+};
+
+/** 万円単位で丸める。8.58 億円規模なので円単位まで出すと桁が読めない */
+function manYen(jpy: number): string {
+  const man = jpy / 10000;
+  if (man >= 10000) return `${(man / 10000).toFixed(2)} 億円`;
+  return `${Math.round(man).toLocaleString()} 万円`;
+}
+
+function PlanRow({ row, stats }: { row: Row; stats?: Stats }) {
   const price =
     row.currentPrice === null
       ? "株価未取得"
       : `${row.currentPrice.toLocaleString(undefined, { maximumFractionDigits: 2 })} ${row.currency}`;
 
   return (
-    <Link href={`/holdings?symbol=${encodeURIComponent(row.symbol)}`}>
+    /*
+     * 未保有銘柄は保有一覧に出ないので、行き先をウォッチリストに分ける。
+     * 同じ /holdings に飛ばすと「該当なし」の画面に着いて行き止まりになる。
+     */
+    <Link href={row.held ? `/holdings?symbol=${encodeURIComponent(row.symbol)}` : "/watchlist"}>
       <Card className="hover:border-primary/40 cursor-pointer transition-colors">
         {/*
          * スマホでは横並びにすると銘柄名が「リ...」まで省略されて読めなくなるため
@@ -243,8 +271,84 @@ function PlanRow({ row }: { row: Row }) {
             <div className="flex items-center gap-2">
               <span className="font-medium break-words">{row.name}</span>
               <span className="text-muted-foreground shrink-0 text-xs">{row.symbol}</span>
+              {!row.held && (
+                <Badge
+                  variant="outline"
+                  className="shrink-0 border-sky-300 bg-sky-50 text-[10px] text-sky-700 dark:bg-sky-950/40 dark:text-sky-300"
+                >
+                  未保有
+                </Badge>
+              )}
             </div>
-            <div className="text-muted-foreground mt-0.5 text-sm">{price}</div>
+            <div className="text-muted-foreground mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-sm">
+              <span>{price}</span>
+              {/*
+               * 取得単価は段の根拠として意味がある。段は取得単価を基準に
+               * 組まれているので、「取得 1,847 に対して今 1,992」が見えると
+               * なぜ -7.2% 下がると「取得単価付近の重点買い増し」になるのかが繋がる。
+               */}
+              {row.avgCost !== null && (
+                <span className="text-xs">
+                  取得 {row.avgCost.toLocaleString(undefined, { maximumFractionDigits: 2 })}
+                </span>
+              )}
+              {row.costRecovered ? (
+                <span className="text-xs text-emerald-600">原価回収済み</span>
+              ) : (
+                row.pnlPct !== null && (
+                  <span
+                    className={
+                      row.pnlPct >= 0
+                        ? "text-xs font-medium text-emerald-600"
+                        : "text-xs font-medium text-rose-600"
+                    }
+                  >
+                    {row.pnlPct >= 0 ? "+" : ""}
+                    {row.pnlPct.toFixed(1)}%
+                  </span>
+                )
+              )}
+            </div>
+            {/*
+             * 保有額と構成比。5 銘柄すべてが買い増し圏にあるとき、
+             * どれを優先すべきかはこの数字で決まる。
+             * 上限という人工的な線は引かず、全体の分布と比べられるようにする。
+             */}
+            {row.holdingValueJpy !== null && (
+              <div className="mt-1 flex flex-wrap items-baseline gap-x-2 gap-y-0.5 text-xs">
+                <span className="font-medium">
+                  保有 {manYen(row.holdingValueJpy)}
+                  {row.weightPct !== null && `・全体の ${row.weightPct.toFixed(1)}%`}
+                </span>
+                {stats?.avgWeightPct != null && stats.topAvgWeightPct != null && (
+                  <span className="text-muted-foreground">
+                    平均 {stats.avgWeightPct.toFixed(1)}% / 上位 10 平均{" "}
+                    {stats.topAvgWeightPct.toFixed(1)}%
+                  </span>
+                )}
+              </div>
+            )}
+
+            {/*
+             * 未保有銘柄は保有額がないので、代わりに目標価格までの距離を出す。
+             * 目標が現在値から離れすぎている場合は「待つ」ことが実質
+             * 「買わない」と同じになるため、その旨を明示する。
+             */}
+            {!row.held && (
+              <div className="mt-1 flex flex-wrap items-baseline gap-x-2 gap-y-0.5 text-xs">
+                <span className="text-muted-foreground">まだ持っていません</span>
+                {row.watchTargetPrice !== null && (
+                  <span className="font-medium">
+                    目標{" "}
+                    {row.watchTargetPrice.toLocaleString(undefined, { maximumFractionDigits: 2 })}
+                    {row.watchGapPct !== null && `（あと ${row.watchGapPct.toFixed(1)}%）`}
+                  </span>
+                )}
+                {row.targetTooFar && (
+                  <span className="text-amber-600">目標が遠すぎます（作り直しを検討）</span>
+                )}
+              </div>
+            )}
           </div>
 
           <div className="flex shrink-0 flex-col items-start gap-1 sm:items-end">

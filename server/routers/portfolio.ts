@@ -15,6 +15,7 @@ import {
   getPlan,
   listPlanStatus,
   listPlanOverview,
+  computeOverviewStats,
   runChecksForBand,
   updateBand,
 } from "../services/priceBandService";
@@ -792,9 +793,11 @@ export const portfolioRouter = router({
    * 112 銘柄を 1 つずつ開いて確認するのは現実的でないため、
    * 買い増し圏に入っている銘柄と確認が必要な銘柄を横断で拾えるようにする。
    */
-  priceBandOverview: protectedProcedure.query(async ({ ctx }) =>
-    listPlanOverview(ctx.user.id)
-  ),
+  priceBandOverview: protectedProcedure.query(async ({ ctx }) => {
+    const rows = await listPlanOverview(ctx.user.id);
+    // 構成比が多いか少ないかを判断するには全体の分布が必要なので併せて返す
+    return { rows, stats: computeOverviewStats(rows) };
+  }),
 
   /**
    * 価格帯の確認項目をニュースと照合する。

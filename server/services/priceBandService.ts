@@ -23,6 +23,15 @@ import { withAiRunLog } from "./aiRunLog";
 import { buildPortfolio } from "./portfolio";
 import { fetchPriceHistory } from "./marketData";
 import { runBandChecks, BAND_CHECKER_MODEL } from "./bandChecker";
+import { convertToJpy, FX_FALLBACK, type FxRates } from "./fx";
+import { calcPnlPct, isCostRecovered } from "../../shared/pnlLabel";
+
+/** 文字列の数値カラム（decimal）を数値にする。空や不正値は null */
+const toNum = (v: string | null | undefined): number | null => {
+  if (v === null || v === undefined) return null;
+  const num = Number(v);
+  return Number.isFinite(num) ? num : null;
+};
 
 /**
  * 買い増しプランの保存・取得・生成をまとめる。
@@ -776,6 +785,45 @@ export type PlanOverviewRow = {
   /** 照合済みで懸念ありの件数 */
   concernCount: number;
   generatedAt: Date;
+  /** 保有額（円換算）。複数口座に分かれていても合算する */
+  holdingValueJpy: number | null;
+  /** 株式時価全体に対する構成比（%） */
+  weightPct: number | null;
+  /** 取得単価（現地通貨）。複数口座なら株数で重み付けした平均 */
+  avgCost: number | null;
+  /**
+   * 損益率（%）。取得原価が 0 以下の銘柄（オプションのプレミアム受取で
+   * 原価を回収済み）では率に意味がないため null を返す。
+   */
+  pnlPct: number | null;
+  /** 取得原価が 0 以下で率を出せない状態か */
+  costRecovered: boolean;
+  /** 保有しているか。false ならウォッチリストの未保有銘柄 */
+  held: boolean;
+  /** 未保有銘柄の目標買付価格（現地通貨） */
+  watchTargetPrice: number | null;
+  /** 目標価格まであと何%動けば届くか。現在値を分母にする */
+  watchGapPct: number | null;
+  /** 未保有銘柄の優先度（HIGH / MEDIUM / LOW） */
+  watchPriority: string | null;
+  /**
+   * 目標価格が現在値から -30% 以上離れているか。
+   * 半値近くまで待つ設定は実質「買わない」と同じで、
+   * 機会損失を防ぐ目的に反するため作り直すべきだと分かるようにする。
+   */
+  targetTooFar: boolean;
+};
+
+/** 構成比を判断するための全体の目安。上限という線は引かず、比較材料だけを出す */
+export type PlanOverviewStats = {
+  /** 株式時価の合計（円） */
+  totalValueJpy: number;
+  /** 銘柄数 */
+  symbolCount: number;
+  /** 1 銘柄あたりの平均構成比（%） */
+  avgWeightPct: number | null;
+  /** 上位 10 銘柄の平均構成比（%）。主力としての普通の大きさの目安 */
+  topAvgWeightPct: number | null;
 };
 
 /**
@@ -786,9 +834,11 @@ export type PlanOverviewRow = {
  */
 export async function listPlanOverview(userId: number): Promise<PlanOverviewRow[]> {
   const d = await requireDb();
-  const [holdings, plans] = await Promise.all([
+  const [holdings, plans, settings, watchItems] = await Promise.all([
     db.listHoldings(userId),
     d.select().from(priceBandPlans).where(eq(priceBandPlans.userId, userId)),
+    db.getSettings(userId),
+    db.listWatchlist(userId),
   ]);
   if (plans.length === 0) return [];
 
@@ -818,10 +868,71 @@ export async function listPlanOverview(userId: number): Promise<PlanOverviewRow[
     });
   }
 
+  /*
+   * ウォッチリスト（まだ買っていない銘柄）も同じ一覧に載せる。
+   *
+   * 買い場に来ているかどうかは保有・未保有で分けて見るものではない。
+   * 別画面に分かれていると「保有 5 銘柄が買い増し圏」を見た後に
+   * ウォッチリストを開き直す必要があり、未保有の買い場を見落とす。
+   * 保有側を優先するのは、同じ銘柄がウォッチリストにも残っている場合に
+   * 保有側の株価・名称の方が実態に近いため。
+   */
+  const watchBySymbol = new Map<string, (typeof watchItems)[number]>();
+  for (const w of watchItems) {
+    watchBySymbol.set(w.symbol, w);
+    if (priceBySymbol.has(w.symbol)) continue;
+    priceBySymbol.set(w.symbol, {
+      price: w.currentPrice === null ? null : Number(w.currentPrice),
+      name: w.name,
+    });
+  }
+
+  /*
+   * 保有額・取得原価・株数を銘柄単位で合算する。
+   *
+   * 同じ銘柄を複数口座で持つ場合、口座ごとに取得単価が違う（楽天で買った
+   * トヨタと IBKR で買ったトヨタは別の値段）。買い増しの判断で見たいのは
+   * 「この銘柄を全体でいくら持っているか」なので、株数で重み付けした
+   * 平均取得単価を出す。単純平均だと 1 株だけの口座が過大に効く。
+   */
+  const rates: FxRates = {
+    usdJpy: toNum(settings?.usdJpyRate) ?? FX_FALLBACK.usdJpy,
+    sgdJpy: toNum(settings?.sgdJpyRate) ?? FX_FALLBACK.sgdJpy,
+    hkdJpy: toNum(settings?.hkdJpyRate) ?? FX_FALLBACK.hkdJpy,
+  };
+  const aggBySymbol = new Map<
+    string,
+    { qty: number; costLocal: number; valueJpy: number | null; currency: string }
+  >();
+  for (const h of holdings) {
+    const qty = Number(h.quantity);
+    const cost = Number(h.avgCost);
+    const price = h.currentPrice === null ? null : Number(h.currentPrice);
+    const entry =
+      aggBySymbol.get(h.symbol) ??
+      { qty: 0, costLocal: 0, valueJpy: null, currency: h.currency };
+    entry.qty += qty;
+    entry.costLocal += qty * cost;
+    if (price !== null) {
+      const jpy = convertToJpy(qty * price, h.currency, rates);
+      if (jpy !== null) entry.valueJpy = (entry.valueJpy ?? 0) + jpy;
+    }
+    aggBySymbol.set(h.symbol, entry);
+  }
+
+  // 構成比の分母。株価が未取得の銘柄は分母にも入れない（比率が過小になるため）
+  let totalValueJpy = 0;
+  aggBySymbol.forEach(v => {
+    totalValueJpy += v.valueJpy ?? 0;
+  });
+
   const out: PlanOverviewRow[] = [];
   for (const plan of plans) {
     const info = priceBySymbol.get(plan.symbol);
-    // 保有から外れた銘柄のプランは一覧に出さない（売却済みなど）
+    /*
+     * 保有もウォッチリストにもない銘柄のプランは出さない。
+     * 売却してウォッチリストからも消した銘柄が残り続けるのを防ぐ。
+     */
     if (!info) continue;
 
     const bands: BandInput[] = (bandsByPlan.get(plan.id) ?? []).map(r => ({
@@ -868,7 +979,116 @@ export async function listPlanOverview(userId: number): Promise<PlanOverviewRow[
       needsCheck,
       concernCount,
       generatedAt: plan.generatedAt,
+      ...buildHoldingFacts(aggBySymbol.get(plan.symbol), info.price, totalValueJpy),
+      ...buildWatchFacts(watchBySymbol.get(plan.symbol), info.price, aggBySymbol.has(plan.symbol)),
     });
   }
   return out;
+}
+
+/**
+ * 未保有銘柄（ウォッチリスト）の情報を組み立てる。
+ *
+ * 目標価格までの距離は「今の株価から見てあと何%動けば届くか」で出す。
+ * 分母を目標価格にすると同じ距離でも数字が変わり、注文の判断に使えない。
+ *
+ * 目標が現在値から極端に離れている場合は印を付ける。実測では INPEX の
+ * 目標が 1,900 円に対し現在値 3,765 円（-49.5%）で、半値になるのを待つのは
+ * 実質「買わない」と同じ。機会損失を防ぐという当初の目的に反するため、
+ * 作り直すべきだと分かるようにする。
+ */
+function buildWatchFacts(
+  item:
+    | { targetPrice: string | null; priority: string; watchReason: string | null }
+    | undefined,
+  price: number | null,
+  held: boolean
+): Pick<
+  PlanOverviewRow,
+  "held" | "watchTargetPrice" | "watchGapPct" | "watchPriority" | "targetTooFar"
+> {
+  if (held || !item) {
+    return {
+      held,
+      watchTargetPrice: null,
+      watchGapPct: null,
+      watchPriority: null,
+      targetTooFar: false,
+    };
+  }
+  const target = item.targetPrice === null ? null : Number(item.targetPrice);
+  const gapPct =
+    target !== null && price !== null && price > 0 ? ((target - price) / price) * 100 : null;
+  return {
+    held: false,
+    watchTargetPrice: target,
+    watchGapPct: gapPct,
+    watchPriority: item.priority,
+    // -30% 以上離れていたら「遠すぎる」とみなす
+    targetTooFar: gapPct !== null && gapPct <= -30,
+  };
+}
+
+/**
+ * 保有額・構成比・取得単価・損益率を組み立てる。
+ *
+ * 損益率は calcPnlPct に通す。原価がマイナスの銘柄（AMD はオプションの
+ * プレミアム受取で原価を回収済み）を素朴に割ると符号が反転して
+ * 含み益が巨額の損失に見えるため、率を出さず「原価回収済み」として扱う。
+ */
+function buildHoldingFacts(
+  agg: { qty: number; costLocal: number; valueJpy: number | null } | undefined,
+  price: number | null,
+  totalValueJpy: number
+): Pick<
+  PlanOverviewRow,
+  "holdingValueJpy" | "weightPct" | "avgCost" | "pnlPct" | "costRecovered"
+> {
+  if (!agg || agg.qty === 0) {
+    return {
+      holdingValueJpy: null,
+      weightPct: null,
+      avgCost: null,
+      pnlPct: null,
+      costRecovered: false,
+    };
+  }
+  const avgCost = agg.costLocal / agg.qty;
+  const marketLocal = price === null ? null : price * agg.qty;
+  return {
+    holdingValueJpy: agg.valueJpy,
+    weightPct:
+      agg.valueJpy !== null && totalValueJpy > 0
+        ? (agg.valueJpy / totalValueJpy) * 100
+        : null,
+    avgCost,
+    // calcPnlPct は含み損益（時価 − 原価）を受け取る。時価そのものではない
+    pnlPct:
+      marketLocal === null ? null : calcPnlPct(marketLocal - agg.costLocal, agg.costLocal),
+    costRecovered: isCostRecovered(agg.costLocal),
+  };
+}
+
+/**
+ * 構成比を判断するための目安を出す。
+ *
+ * 「1 銘柄 5% 以下」という一般的な目安は 20〜30 銘柄で運用する前提の数字で、
+ * 112 銘柄には当てはまらない（均等なら 1 銘柄 0.9%）。固定の上限を引くと
+ * 根拠のない線になるため、実際の分布から比較材料だけを出す。
+ */
+export function computeOverviewStats(rows: PlanOverviewRow[]): PlanOverviewStats {
+  const weights = rows
+    .map(r => r.weightPct)
+    .filter((w): w is number => w !== null)
+    .sort((a, b) => b - a);
+  let totalValueJpy = 0;
+  for (const r of rows) totalValueJpy += r.holdingValueJpy ?? 0;
+  const top = weights.slice(0, 10);
+  return {
+    totalValueJpy,
+    symbolCount: weights.length,
+    avgWeightPct:
+      weights.length > 0 ? weights.reduce((a, b) => a + b, 0) / weights.length : null,
+    topAvgWeightPct: top.length > 0 ? top.reduce((a, b) => a + b, 0) / top.length : null,
+  };
 }
