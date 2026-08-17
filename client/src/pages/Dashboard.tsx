@@ -25,6 +25,8 @@ import {
   type SignalAction,
 } from "@shared/investing";
 import { pnlLabel } from "@shared/pnlLabel";
+import { computeCarrySpread } from "@shared/carrySpread";
+import { groupBySignal, pickDefaultSignal } from "@shared/signalGroups";
 import { useDisplayCurrency } from "@/contexts/DisplayCurrencyContext";
 import {
   AlertTriangle,
@@ -233,6 +235,34 @@ export default function Dashboard() {
     });
     return counts;
   }, [data]);
+
+  /**
+   * シグナルごとの銘柄一覧。
+   *
+   * 件数（ADD 25 / HOLD 42）だけでは「どの銘柄か」が分からず、
+   * 結局保有一覧を開いて探すことになる。判断が必要なもの（ADD / REDUCE / EXIT）
+   * から先に銘柄名を出して、そこから直接飛べるようにする。
+   *
+   * 各シグナル内では評価額の大きい順に並べる。同じ ADD でも
+   * 2,000 万円の銘柄と 20 万円の銘柄では検討の優先度が違うため。
+   */
+  const signalGroups = useMemo(() => {
+    type Group = NonNullable<typeof data>["groups"][number];
+    const items = (data?.groups ?? []).map(g => ({
+      ...g,
+      signalAction: g.signal?.action ?? null,
+    }));
+    return groupBySignal(items) as Map<SignalAction, (Group & { signalAction: SignalAction })[]>;
+  }, [data]);
+
+  /**
+   * 今どのシグナルを開いているか。
+   * 既定は「判断が必要なもの」を優先して開く（ADD → REDUCE → EXIT → WATCH → HOLD）。
+   * 静観（HOLD）を既定にすると、何もしなくてよいものが最初に出てしまう。
+   */
+  const [openSignal, setOpenSignal] = useState<SignalAction | null>(null);
+  const defaultSignal = useMemo(() => pickDefaultSignal(signalGroups), [signalGroups]);
+  const activeSignal = openSignal ?? defaultSignal;
 
   /**
    * 月別の配当グラフ用データ。
@@ -784,19 +814,62 @@ export default function Dashboard() {
                 </CardDescription>
               </CardHeader>
               <CardContent className="pt-0">
-                <div className="flex flex-wrap gap-1.5">
-                  {SIGNAL_ACTIONS.filter(a => (signalCounts.get(a) ?? 0) > 0).map(a => (
-                    <div key={a} className="flex items-center gap-1">
-                      <SignalBadge action={a} />
-                      <span className="tabular text-sm font-medium">{signalCounts.get(a)}</span>
+                {signalCounts.size === 0 ? (
+                  <p className="text-xs text-muted-foreground">
+                    まだシグナルがありません。「全銘柄をAI分析」を実行してください。
+                  </p>
+                ) : (
+                  <div className="space-y-2">
+                    {/*
+                      件数のバッジはタブとして機能させる。
+                      以前は数字だけで押しても何も起きず、どの銘柄が ADD なのか
+                      分からないまま保有一覧を開いて探す必要があった。
+                    */}
+                    <div className="flex flex-wrap gap-1.5">
+                      {SIGNAL_ACTIONS.filter(a => (signalCounts.get(a) ?? 0) > 0).map(a => (
+                        <button
+                          key={a}
+                          type="button"
+                          onClick={() => setOpenSignal(a)}
+                          aria-pressed={activeSignal === a}
+                          className={`flex min-h-7 items-center gap-1 rounded-md px-1.5 py-0.5 transition-all duration-150 active:scale-[0.97] ${
+                            activeSignal === a
+                              ? "bg-accent ring-1 ring-border"
+                              : "hover:bg-accent/50"
+                          }`}
+                        >
+                          <SignalBadge action={a} />
+                          <span className="tabular text-sm font-medium">
+                            {signalCounts.get(a)}
+                          </span>
+                        </button>
+                      ))}
                     </div>
-                  ))}
-                  {signalCounts.size === 0 ? (
-                    <p className="text-xs text-muted-foreground">
-                      まだシグナルがありません。「全銘柄をAI分析」を実行してください。
-                    </p>
-                  ) : null}
-                </div>
+
+                    {/* 選んだシグナルの銘柄。評価額の大きい順（検討の優先度が高い順） */}
+                    {activeSignal ? (
+                      <div className="space-y-0.5 border-t pt-2">
+                        {(signalGroups.get(activeSignal) ?? []).slice(0, 6).map(g => (
+                          <Link
+                            key={g.symbol}
+                            href={`/holdings?symbol=${encodeURIComponent(g.symbol)}`}
+                            className="flex items-center justify-between gap-2 rounded px-1 py-1 transition-colors hover:bg-accent/50"
+                          >
+                            <span className="truncate text-xs">{g.name}</span>
+                            <span className="tabular shrink-0 text-xs text-muted-foreground">
+                              {g.marketValueBase !== null ? money(g.marketValueBase) : "—"}
+                            </span>
+                          </Link>
+                        ))}
+                        {(signalGroups.get(activeSignal)?.length ?? 0) > 6 ? (
+                          <p className="px-1 pt-0.5 text-[11px] text-muted-foreground">
+                            ほか {(signalGroups.get(activeSignal)?.length ?? 0) - 6} 銘柄
+                          </p>
+                        ) : null}
+                      </div>
+                    ) : null}
+                  </div>
+                )}
               </CardContent>
             </Card>
           </div>
@@ -899,24 +972,61 @@ export default function Dashboard() {
                 {/*
                   借入がある場合、この現金性資産の利回りと借入金利の関係が重要になる。
                   借入金利より低い利回りで現金を寝かせているなら、返済に回した方が得だと分かる。
+
+                  この文は「借入を返すか、現金で置いておくか」という金額の大きい判断に
+                  直結するため、グレーの小さい字に埋めずに色を付けて目立たせる。
+                  ただし常に赤にはしない。赤が「警告」の意味を持たなくなり、
+                  不利な状態になったときに気付けなくなるため、
+                  有利なとき（利回り > 金利）は緑、不利なときは赤に分ける。
                 */}
                 {borrowingRatePct !== null &&
                 summary?.interestRatePct !== null &&
                 summary?.interestRatePct !== undefined ? (
-                  <p className="border-t pt-2 text-[11px] leading-relaxed text-muted-foreground">
-                    借入の実効金利は年{" "}
-                    <span className="tabular font-medium text-foreground">
-                      {borrowingRatePct.toFixed(2)}%
-                    </span>
-                    。この現金性資産の利回り（
-                    <span className="tabular font-medium text-foreground">
-                      {summary.interestRatePct.toFixed(2)}%
-                    </span>
-                    ）
-                    {summary.interestRatePct >= borrowingRatePct
-                      ? "が上回っているため、借入を返さずに現金で置いておく方が有利です。"
-                      : "を上回っています。この現金を借入の返済に回した方が利息の負担が減ります。"}
-                  </p>
+                  (() => {
+                    const carry = computeCarrySpread(
+                      borrowingRatePct,
+                      summary.interestRatePct,
+                      summary.interestAssetsBase,
+                    );
+                    if (!carry) return null;
+                    const { favorable, spreadPct, spreadAmountBase } = carry;
+                    return (
+                      <div
+                        className={`mt-2 rounded-md border-l-2 p-2.5 text-xs leading-relaxed ${
+                          favorable
+                            ? "border-l-emerald-500 bg-emerald-50 text-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-200"
+                            : "border-l-red-500 bg-red-50 text-red-900 dark:bg-red-950/40 dark:text-red-200"
+                        }`}
+                      >
+                        <p className="font-semibold">
+                          {favorable
+                            ? "借入を返さずに現金で置いておく方が有利です"
+                            : "この現金を借入の返済に回した方が利息の負担が減ります"}
+                        </p>
+                        <p className="mt-1">
+                          借入の実効金利は年{" "}
+                          <span className="tabular font-semibold">
+                            {borrowingRatePct.toFixed(2)}%
+                          </span>
+                          、現金性資産の利回りは年{" "}
+                          <span className="tabular font-semibold">
+                            {summary.interestRatePct.toFixed(2)}%
+                          </span>
+                          。差は{" "}
+                          <span className="tabular font-semibold">
+                            {spreadPct >= 0 ? "+" : "−"}
+                            {Math.abs(spreadPct).toFixed(2)}%
+                          </span>
+                          で、預けている {money(summary.interestAssetsBase)} に対して年{" "}
+                          <span className="tabular font-semibold">
+                            {spreadPct >= 0 ? "+" : "−"}
+                            {money(Math.abs(spreadAmountBase))}
+                          </span>
+                          {favorable ? " の得になります。" : " の損になります。"}
+                        </p>
+                      </div>
+                    );
+                  })()
                 ) : null}
               </CardContent>
             </Card>
