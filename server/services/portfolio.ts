@@ -29,6 +29,11 @@ import {
 } from "./dividend";
 import { buildNewsQuery, filterNoise, searchNews } from "./news";
 import { calcPnlPct } from "../../shared/pnlLabel";
+import {
+  buildInterestAssetViews,
+  summarizeInterestAssets,
+  type InterestAssetView,
+} from "./interestAssets";
 import { groupPositionsBySymbol, type GroupedPosition } from "./groupPositions";
 import { buildMarketSlices, type MarketSlice } from "./marketSlices";
 import { computePeriodChange, type PeriodChange } from "./periodChange";
@@ -240,6 +245,18 @@ export type PortfolioSummary = {
    * 借入がなければ 1.0 前後。純資産が 0 以下なら null。
    */
   overallLeverage: number | null;
+  /**
+   * 利息で増える現金性資産（貨幣市場基金・現金宝）の円換算合計。
+   *
+   * 株式時価には含めない。元本がほぼ動かず利息で増える資産を
+   * 株の含み損益に混ぜると「株で儲かったのか」が分からなくなるため。
+   * 一方で純資産（自分のものである金額）には含める。
+   */
+  interestAssetsBase: number;
+  /** 利息資産の 1 年間の見込み利息（円換算） */
+  interestIncomeBase: number;
+  /** 利息資産の加重平均年利回り（%）。無ければ null */
+  interestRatePct: number | null;
 };
 
 export type SectorSlice = { key: string; label: string; value: number; pct: number; count: number };
@@ -363,8 +380,22 @@ export async function buildPortfolio(userId: number): Promise<{
   markets: MarketSlice[];
   brokers: BrokerSlice[];
   alerts: ConcentrationAlert[];
+  /**
+   * 利息で増える現金性資産（貨幣市場基金・現金宝）の明細。
+   * 株式の一覧とは別に返す。
+   */
+  interestAssets: InterestAssetView[];
 }> {
-  const [rows, settings, signalMap, cards, allNews, snapshots, brokerBalances] = await Promise.all([
+  const [
+    rows,
+    settings,
+    signalMap,
+    cards,
+    allNews,
+    snapshots,
+    brokerBalances,
+    interestAssetRows,
+  ] = await Promise.all([
     db.listHoldings(userId),
     db.getSettings(userId),
     db.latestSignals(userId),
@@ -374,6 +405,8 @@ export async function buildPortfolio(userId: number): Promise<{
     db.listSnapshots(userId, 120),
     // 信用取引の借入額。株式時価から差し引かないと総資産が過大になる
     db.listBrokerBalances(userId),
+    // 利息で増える現金性資産（貨幣市場基金）。株式とは別枠で純資産に加える
+    db.listInterestAssets(userId),
   ]);
 
   const rates: FxRates = {
@@ -516,6 +549,16 @@ export async function buildPortfolio(userId: number): Promise<{
   const dayChangeBase = prevValueBase > 0 ? totalValueBase - prevValueBase : null;
   const cashBalance = n(settings.cashBalance) ?? 0;
 
+  /*
+   * 利息で増える現金性資産（貨幣市場基金・現金宝）。
+   *
+   * 株式時価（totalValueBase）には入れない。株価が上下する資産と
+   * 元本がほぼ動かない資産を同じ枠に入れると、含み損益の意味が変わるため。
+   * ただし「自分のものである金額」ではあるので純資産には加える。
+   */
+  const interestViews = buildInterestAssetViews(interestAssetRows, rates);
+  const interestSummary = summarizeInterestAssets(interestViews);
+
   /**
    * 同一銘柄を複数の証券口座で保有している場合の合計ビュー。
    * 銘柄数の表示やシグナル判定はこちらを基準にする。
@@ -655,15 +698,23 @@ export async function buildPortfolio(userId: number): Promise<{
       }))
     ),
     totalBorrowedBase,
-    netAssetsBase: totalValueBase + cashBalance - totalBorrowedBase,
+    /*
+     * 純資産に利息資産を加える。富途香港の現金宝のように
+     * 株ではないが自分の資産である現金性資産を落とすと純資産が過小になる。
+     */
+    netAssetsBase: totalValueBase + cashBalance + interestSummary.totalBase - totalBorrowedBase,
     /*
      * 全体のレバレッジ。株式時価 ÷ 純資産で求める。
      * 借入がなければ 1.0 前後になり、借入があると 1 を超える。
      */
     overallLeverage:
-      totalValueBase + cashBalance - totalBorrowedBase > 0
-        ? totalValueBase / (totalValueBase + cashBalance - totalBorrowedBase)
+      totalValueBase + cashBalance + interestSummary.totalBase - totalBorrowedBase > 0
+        ? totalValueBase /
+          (totalValueBase + cashBalance + interestSummary.totalBase - totalBorrowedBase)
         : null,
+    interestAssetsBase: interestSummary.totalBase,
+    interestIncomeBase: interestSummary.projectedAnnualIncomeBase,
+    interestRatePct: interestSummary.weightedRatePct,
   };
 
   /* --- 分布集計 --- */
@@ -780,6 +831,11 @@ export async function buildPortfolio(userId: number): Promise<{
       })
       .sort((a, b) => b.value - a.value),
     alerts: alerts.sort((a, b) => b.pct - a.pct),
+    /*
+     * 利息資産（貨幣市場基金）の明細。額の大きい順に並べる。
+     * 株式の positions とは意味が違うので別のキーで返す。
+     */
+    interestAssets: interestViews.sort((a, b) => (b.amountBase ?? 0) - (a.amountBase ?? 0)),
   };
 }
 

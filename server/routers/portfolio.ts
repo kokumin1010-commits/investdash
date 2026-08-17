@@ -6,6 +6,10 @@ import { fetchCompanyProfile, fetchPriceHistory, fetchQuote } from "../services/
 import { isQuotaError, toFriendlyAiError } from "../services/aiErrors";
 import { buildAssetTrend, resolveScale, type SnapshotInput } from "../services/assetTrend";
 import {
+  buildInterestAssetViews,
+  summarizeInterestAssets,
+} from "../services/interestAssets";
+import {
   buildPortfolio,
   enrichProfiles,
   syncDividends,
@@ -154,6 +158,71 @@ export const portfolioRouter = router({
     .input(z.object({ broker: z.enum(BROKERS) }))
     .mutation(async ({ ctx, input }) => {
       const removed = await db.deleteBrokerBalance(ctx.user.id, input.broker);
+      return { success: removed } as const;
+    }),
+
+  /**
+   * 利息で増える現金性資産（貨幣市場基金・現金宝など）の一覧。
+   *
+   * 株式とは分けて返す。株価が上下する資産と元本がほぼ動かない資産を
+   * 同じ枠に入れると「含み損益」の意味が変わってしまうため。
+   */
+  interestAssets: protectedProcedure.query(async ({ ctx }) => {
+    const [rows, settings] = await Promise.all([
+      db.listInterestAssets(ctx.user.id),
+      db.getSettings(ctx.user.id),
+    ]);
+    const fx = {
+      usdJpy: Number(settings.usdJpyRate),
+      sgdJpy: Number(settings.sgdJpyRate),
+      hkdJpy: Number(settings.hkdJpyRate),
+    };
+    const views = buildInterestAssetViews(rows, fx);
+    return { items: views, summary: summarizeInterestAssets(views) };
+  }),
+
+  /** 利息資産を追加・更新する（同じ口座・同じ商品名なら上書き） */
+  saveInterestAsset: protectedProcedure
+    .input(
+      z.object({
+        broker: z.enum(BROKERS),
+        name: z.string().min(1).max(160),
+        currency: z.string().min(1).max(8),
+        amount: z.number().min(0),
+        /** 年換算利回り（%）。日次で変わるので記録時点の目安 */
+        annualRatePct: z.number().min(0).max(100).optional(),
+        /** 前日の受取利息。実績から利回りを検算するために持つ */
+        dailyIncome: z.number().optional(),
+        /** 累計収益。買った時からの通算 */
+        cumulativeIncome: z.number().optional(),
+        /** 利息が元本に組み入れられるか */
+        compounding: z.boolean().default(true),
+        notes: z.string().max(2000).optional(),
+      })
+    )
+    .mutation(async ({ ctx, input }) => {
+      const id = await db.upsertInterestAsset({
+        userId: ctx.user.id,
+        broker: input.broker,
+        name: input.name,
+        currency: input.currency.toUpperCase(),
+        amount: String(input.amount),
+        annualRatePct: input.annualRatePct === undefined ? null : String(input.annualRatePct),
+        dailyIncome: input.dailyIncome === undefined ? null : String(input.dailyIncome),
+        cumulativeIncome:
+          input.cumulativeIncome === undefined ? null : String(input.cumulativeIncome),
+        compounding: input.compounding,
+        notes: input.notes ?? null,
+        capturedAt: new Date(),
+      });
+      return { id } as const;
+    }),
+
+  /** 利息資産を削除する（解約した場合など） */
+  deleteInterestAsset: protectedProcedure
+    .input(z.object({ id: z.number().int().positive() }))
+    .mutation(async ({ ctx, input }) => {
+      const removed = await db.deleteInterestAsset(ctx.user.id, input.id);
       return { success: removed } as const;
     }),
 

@@ -428,7 +428,58 @@ export const brokerBalances = mysqlTable(
 );
 
 export type BrokerBalance = typeof brokerBalances.$inferSelect;
+
+/**
+ * 利息で増える現金性資産（貨幣市場基金・現金宝など）。
+ *
+ * 富途香港の「基金」タブにある貨幣市場基金は、株式ではなく現金に近い。
+ * 年約 3.4% の利息が毎日付いて複利で増えるため、株式の含み損益に混ぜると
+ * 「株で儲かったのか利息で増えたのか」が区別できなくなる。
+ *
+ * 株式（holdings）とは別のテーブルで持ち、収益も配当とは分けて集計する。
+ * 配当は減配・無配のリスクがあるが、こちらは元本がほぼ動かず利率だけが変わる
+ * という性質の違いがあり、同じ「収入」として足し合わせると判断を誤るため。
+ */
+export const interestAssets = mysqlTable(
+  "interestAssets",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    userId: int("userId").notNull(),
+    /** どの証券口座で持っているか */
+    broker: mysqlEnum("broker", BROKER_ENUM).notNull(),
+    /** 商品名（例: 易方達(香港)美元貨幣市場基金） */
+    name: varchar("name", { length: 160 }).notNull(),
+    /** 建玉の通貨（USD / HKD / JPY など） */
+    currency: varchar("currency", { length: 8 }).notNull(),
+    /** 現在の評価額（現地通貨） */
+    amount: decimal("amount", { precision: 20, scale: 2 }).notNull(),
+    /**
+     * 年換算利回り（%）。日次で利息が付く商品は変動するため、
+     * 記録時点の目安として保持する。
+     */
+    annualRatePct: decimal("annualRatePct", { precision: 8, scale: 4 }),
+    /** 前日の受取利息（現地通貨）。実績から利回りを検算するために持つ */
+    dailyIncome: decimal("dailyIncome", { precision: 20, scale: 4 }),
+    /** 累計収益（現地通貨）。買った時からの通算 */
+    cumulativeIncome: decimal("cumulativeIncome", { precision: 20, scale: 2 }),
+    /**
+     * 利息が元本に組み入れられるか（複利）。
+     * 複利なら将来の見込み額を複利で計算する。
+     */
+    compounding: boolean("compounding").default(true).notNull(),
+    /** この情報を記録した時点（スクショの日時） */
+    capturedAt: timestamp("capturedAt").defaultNow().notNull(),
+    notes: text("notes"),
+    createdAt: timestamp("createdAt").defaultNow().notNull(),
+    updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+  },
+  table => ({
+    userBrokerIdx: index("interestAssets_user_broker_idx").on(table.userId, table.broker),
+  })
+);
+export type InterestAsset = typeof interestAssets.$inferSelect;
 export type InsertBrokerBalance = typeof brokerBalances.$inferInsert;
+export type InsertInterestAsset = typeof interestAssets.$inferInsert;
 
 /**
  * 簡易パスコード認証。

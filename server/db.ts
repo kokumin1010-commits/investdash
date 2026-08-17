@@ -11,6 +11,7 @@ import {
   users,
   watchlist,
   brokerBalances,
+  interestAssets,
   type Holding,
   type InsertHolding,
   type InsertImportJob,
@@ -20,6 +21,7 @@ import {
   type InsertUser,
   type InsertWatchlistItem,
   type InsertBrokerBalance,
+  type InsertInterestAsset,
 } from "../drizzle/schema";
 import { ENV } from "./_core/env";
 
@@ -226,6 +228,83 @@ export async function deleteBrokerBalance(userId: number, broker: string): Promi
   const existing = await getBrokerBalance(userId, broker);
   if (!existing) return false;
   await db.delete(brokerBalances).where(eq(brokerBalances.id, existing.id));
+  return true;
+}
+
+/* ----------------------------- interestAssets ----------------------------- */
+/**
+ * 利息で増える現金性資産（貨幣市場基金など）。
+ *
+ * 株式ではないので holdings とは分けて持つ。株価が上下する資産と
+ * 元本がほぼ動かず利息だけ増える資産を同じ表に入れると、
+ * 「含み損益」の意味が変わってしまうため。
+ */
+export async function listInterestAssets(userId: number) {
+  const db = await requireDb();
+  return db.select().from(interestAssets).where(eq(interestAssets.userId, userId));
+}
+export async function getInterestAsset(userId: number, id: number) {
+  const db = await requireDb();
+  const rows = await db
+    .select()
+    .from(interestAssets)
+    .where(and(eq(interestAssets.userId, userId), eq(interestAssets.id, id)))
+    .limit(1);
+  return rows[0] ?? null;
+}
+/**
+ * 同じ口座・同じ商品名なら上書きする。
+ * スクショを上げ直すたびに最新の残高へ更新される想定。
+ */
+export async function upsertInterestAsset(data: InsertInterestAsset): Promise<number> {
+  const db = await requireDb();
+  const rows = await db
+    .select()
+    .from(interestAssets)
+    .where(
+      and(
+        eq(interestAssets.userId, data.userId),
+        eq(interestAssets.broker, data.broker),
+        eq(interestAssets.name, data.name)
+      )
+    )
+    .limit(1);
+  const existing = rows[0];
+  if (existing) {
+    await db.update(interestAssets).set(data).where(eq(interestAssets.id, existing.id));
+    return existing.id;
+  }
+  await db.insert(interestAssets).values(data);
+  // INSERT の戻り値から ID が取れない環境があるため再検索する
+  const after = await db
+    .select()
+    .from(interestAssets)
+    .where(
+      and(
+        eq(interestAssets.userId, data.userId),
+        eq(interestAssets.broker, data.broker),
+        eq(interestAssets.name, data.name)
+      )
+    )
+    .limit(1);
+  return after[0]?.id ?? 0;
+}
+export async function updateInterestAsset(
+  userId: number,
+  id: number,
+  data: Partial<InsertInterestAsset>
+): Promise<boolean> {
+  const db = await requireDb();
+  const existing = await getInterestAsset(userId, id);
+  if (!existing) return false;
+  await db.update(interestAssets).set(data).where(eq(interestAssets.id, id));
+  return true;
+}
+export async function deleteInterestAsset(userId: number, id: number): Promise<boolean> {
+  const db = await requireDb();
+  const existing = await getInterestAsset(userId, id);
+  if (!existing) return false;
+  await db.delete(interestAssets).where(eq(interestAssets.id, id));
   return true;
 }
 

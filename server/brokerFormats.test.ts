@@ -126,9 +126,24 @@ describe("guessFormatFromBrokerName", () => {
     expect(guessFormatFromBrokerName("iSPEED")).toBe("rakuten_ispeed");
   });
 
-  it("富途を判定する", () => {
-    expect(guessFormatFromBrokerName("富途證券")).toBe("futu");
+  /*
+   * 富途は日本版（moomoo）と香港版で口座が別なので、名前で書き分ける必要がある。
+   * 香港版の画面には「富途證券(香港)」「保證金綜合帳戶」が出るため、それを手がかりにする。
+   * ここを取り違えると香港の銘柄が日本版の口座に入り、口座別の資産額が狂う。
+   */
+  it("富途香港を判定する（繁体字の正式名称・保證金綜合帳戶）", () => {
+    expect(guessFormatFromBrokerName("富途證券")).toBe("futu_hk");
+    expect(guessFormatFromBrokerName("富途證券(香港)")).toBe("futu_hk");
+    expect(guessFormatFromBrokerName("富途证券")).toBe("futu_hk");
+    expect(guessFormatFromBrokerName("保證金綜合帳戶")).toBe("futu_hk");
+    expect(guessFormatFromBrokerName("Futu Securities")).toBe("futu_hk");
+    expect(guessFormatFromBrokerName("Futu HK")).toBe("futu_hk");
+  });
+
+  it("香港版と判別できない富途表記は日本版側（futu）に寄せる", () => {
     expect(guessFormatFromBrokerName("Futu")).toBe("futu");
+    expect(guessFormatFromBrokerName("富途")).toBe("futu");
+    expect(guessFormatFromBrokerName("富途牛牛")).toBe("futu");
   });
 
   it("判定できない場合は generic", () => {
@@ -150,6 +165,11 @@ describe("BROKER_FORMAT_OPTIONS", () => {
 
     // 富途は実画面の提供待ちなので未検証のまま
     expect(BROKER_FORMAT_OPTIONS.find(o => o.id === "futu")?.verified).toBe(false);
+
+    // 富途香港は実画面（保證金綜合帳戶 3891）で検証済み
+    const futuHk = BROKER_FORMAT_OPTIONS.find(o => o.id === "futu_hk");
+    expect(futuHk?.label).toBe("富途證券 香港");
+    expect(futuHk?.verified).toBe(true);
   });
 
   it("すべてのフォーマットが含まれる", () => {
@@ -159,8 +179,92 @@ describe("BROKER_FORMAT_OPTIONS", () => {
       "ibkr",
       "sc_sg",
       "futu",
+      "futu_hk",
       "generic",
     ]);
+  });
+});
+
+describe("富途證券 香港（保證金綜合帳戶）", () => {
+  const format = getBrokerFormat("futu_hk");
+
+  it("実画面で検証済みのレイアウト定義を持つ", () => {
+    expect(format.id).toBe("futu_hk");
+    expect(format.layoutPrompt).not.toBeNull();
+  });
+
+  it("複数市場が混在するため通貨を固定しない", () => {
+    // 美股(USD)・港股(HKD)・日股(JPY) が同じ口座に入る
+    expect(format.currency).toBeNull();
+    expect(format.market).toBe("MIXED");
+  });
+
+  /*
+   * 「證券」タブと「基金」タブの区別が最重要。
+   * 貨幣市場基金を株式として取り込むと、1 株あたりの株価がない商品に
+   * 株数と取得単価が割り当てられ、含み損益が意味を失う。
+   */
+  it("基金タブを株式として取り込まないよう指示している", () => {
+    const p = format.layoutPrompt ?? "";
+    expect(p).toContain("基金");
+    expect(p).toContain("株式として取り込んではならない");
+    expect(p).toContain("貨幣市場基金");
+  });
+
+  it("港股の 5 桁ゼロ埋めコードの変換を指示している", () => {
+    const p = format.layoutPrompt ?? "";
+    // 00005 → 0005.HK。ゼロを詰めないと株価が取得できない
+    expect(p).toContain("00005");
+    expect(p).toContain("0005.HK");
+  });
+
+  /*
+   * 「最大購買力」は使っていない与信枠。これを借入として読むと
+   * 純資産が 1 億円以上過小になる。
+   */
+  it("最大購買力を借入と誤認しないよう指示している", () => {
+    const p = format.layoutPrompt ?? "";
+    expect(p).toContain("最大購買力");
+    expect(p).toContain("借入ではない");
+  });
+
+  it("成本がマイナスになる場合の扱いを指示している", () => {
+    const p = format.layoutPrompt ?? "";
+    expect(p).toContain("マイナス");
+    // 実例（AMD の成本）を挙げて、読み取りミスではないことを伝える
+    expect(p).toContain("38.4877");
+    expect(p).toContain("マイナス記号を落とさず");
+    // 富途自身が損益率を +0.00% と表示するので率を信用しない
+    expect(p).toContain("画面の損益率は信用しない");
+  });
+
+  it("端株（小数の数量）を丸めないよう指示している", () => {
+    const p = format.layoutPrompt ?? "";
+    expect(p).toContain("0.5");
+    expect(p).toContain("整数に丸めてはならない");
+  });
+
+  it("市場セクションごとの通貨対応を持つ", () => {
+    const p = format.layoutPrompt ?? "";
+    for (const s of ["美股", "港股", "日股"]) {
+      expect(p).toContain(s);
+    }
+    expect(p).toContain("USD");
+    expect(p).toContain("HKD");
+    expect(p).toContain("JPY");
+  });
+
+  it("持倉件数の不足を検知するよう指示している", () => {
+    // 実際に 12 銘柄のうち 9 銘柄しか見えず 899 万円不足した事例がある
+    const p = format.layoutPrompt ?? "";
+    expect(p).toContain("持倉(12)");
+    expect(p).toContain("推測で埋めてはならない");
+  });
+
+  it("画面から判別できる特徴を持つ", () => {
+    expect(format.signatures).toContain("保證金綜合帳戶");
+    expect(format.signatures).toContain("名稱代碼");
+    expect(format.signatures).toContain("現價/成本");
   });
 });
 
