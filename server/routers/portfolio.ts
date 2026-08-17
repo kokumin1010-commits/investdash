@@ -23,6 +23,12 @@ import {
   listTransitions,
   recordTransitions,
 } from "../services/bandTransitionService";
+import {
+  countUnreadReports,
+  createWeeklyReport,
+  getReport,
+  listReports,
+} from "../services/reportService";
 import { listAiRuns } from "../services/aiRunLog";
 import { generateCandidateSuggestions, addCandidatesToWatchlist } from "../services/candidateService";
 import {
@@ -496,6 +502,43 @@ export const portfolioRouter = router({
   recordBandTransitions: protectedProcedure.mutation(async ({ ctx }) =>
     recordTransitions(ctx.user.id)
   ),
+
+  /** AI レポートの一覧 */
+  reports: protectedProcedure
+    .input(
+      z
+        .object({
+          limit: z.number().int().min(1).max(100).default(50),
+          unreadOnly: z.boolean().default(false),
+        })
+        .optional()
+    )
+    .query(async ({ ctx, input }) =>
+      listReports(ctx.user.id, {
+        limit: input?.limit ?? 50,
+        unreadOnly: input?.unreadOnly ?? false,
+      })
+    ),
+
+  /** AI レポートの本文。開いた時点で既読になる */
+  report: protectedProcedure
+    .input(z.object({ id: z.number().int() }))
+    .query(async ({ ctx, input }) => getReport(ctx.user.id, input.id)),
+
+  /** 未読のレポート件数 */
+  unreadReportCount: protectedProcedure.query(async ({ ctx }) =>
+    countUnreadReports(ctx.user.id)
+  ),
+
+  /**
+   * レポートを今すぐ作る。
+   *
+   * 定期実行を待たずに内容を確認したいときに使う。
+   * days を変えれば期間を広げられる（初回は記録が浅いため）。
+   */
+  generateWeeklyReport: protectedProcedure
+    .input(z.object({ days: z.number().int().min(1).max(90).default(7) }).optional())
+    .mutation(async ({ ctx, input }) => createWeeklyReport(ctx.user.id, input?.days ?? 7)),
 
   /** セクター情報の補完 */
   enrichProfiles: protectedProcedure

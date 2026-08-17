@@ -8,7 +8,7 @@ import { registerStorageProxy } from "./storageProxy";
 import { appRouter } from "../routers";
 import { createContext } from "./context";
 import { serveStatic, setupVite } from "./vite";
-import { syncNewsHandler, syncPricesHandler } from "../scheduled";
+import { syncNewsHandler, syncPricesHandler, weeklyReportHandler } from "../scheduled";
 
 function isPortAvailable(port: number): Promise<boolean> {
   return new Promise(resolve => {
@@ -49,6 +49,7 @@ async function startServer() {
   // Heartbeat（定期実行）コールバック。Vite / 静的配信のフォールスルーより前に登録する。
   app.post("/api/scheduled/syncPrices", syncPricesHandler);
   app.post("/api/scheduled/syncNews", syncNewsHandler);
+  app.post("/api/scheduled/weeklyReport", weeklyReportHandler);
   // development mode uses Vite, production mode uses static files
   if (process.env.NODE_ENV === "development") {
     await setupVite(app, server);

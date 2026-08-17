@@ -120,6 +120,13 @@
       "when": 1786978026893,
       "tag": "0016_sticky_tempest",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "5",
+      "when": 1786978687433,
+      "tag": "0017_rapid_scarecrow",
+      "breakpoints": true
     }
   ]
 }

@@ -10,6 +10,8 @@ import type { Request, Response } from "express";
 import * as db from "./db";
 import { sdk } from "./_core/sdk";
 import { regenerateSignal, syncNewsForUser, syncPrices } from "./services/portfolio";
+import { createWeeklyReport } from "./services/reportService";
+import { recordTransitions } from "./services/bandTransitionService";
 
 /** cron 呼び出しであることを検証する。cron 以外は 403。 */
 async function assertCron(req: Request, res: Response): Promise<boolean> {
@@ -47,12 +49,32 @@ export async function syncPricesHandler(req: Request, res: Response) {
       updated: number;
       failed: number;
       fxRates?: { usdJpy: number | null; sgdJpy: number | null; hkdJpy: number | null };
+      /** 判定が変わった銘柄の数 */
+      transitions?: number;
     }[] = [];
 
     for (const userId of userIds) {
       try {
         const r = await syncPrices(userId);
-        results.push({ userId, updated: r.updated, failed: r.failed.length, fxRates: r.fxRates });
+        /*
+         * 株価が変わったら判定変化を記録する。定期更新のたびに記録することで
+         * 「いつ買い増し圏に入ったか」が途切れずに残る。
+         * 記録の失敗で株価更新を失敗扱いにはしない。
+         */
+        let transitions = 0;
+        try {
+          const t = await recordTransitions(userId);
+          transitions = t.recorded;
+        } catch (error) {
+          console.error(`[cron:syncPrices] transition record failed for user ${userId}:`, error);
+        }
+        results.push({
+          userId,
+          updated: r.updated,
+          failed: r.failed.length,
+          fxRates: r.fxRates,
+          transitions,
+        });
       } catch (error) {
         console.error(`[cron:syncPrices] user ${userId} failed:`, error);
         results.push({ userId, updated: 0, failed: -1 });
@@ -62,6 +84,51 @@ export async function syncPricesHandler(req: Request, res: Response) {
     res.json({ ok: true, users: userIds.length, results });
   } catch (error) {
     console.error("[cron:syncPrices] fatal:", error);
+    res.status(500).json(errorPayload(error, req));
+  }
+}
+
+/**
+ * 週次レポートの生成。
+ *
+ * 材料は事前に機械的に絞ってから 1 回だけ AI を呼ぶ。112 銘柄を
+ * 個別に分析させると 40 分以上かかり、ハンドラの 2 分制限を超える。
+ *
+ * 材料がない週も生成する。「今週は動く必要がない」と分かること自体に
+ * 意味があり、出さないと「レポートが来ないのは壊れているのか」と
+ * 区別できなくなる。
+ */
+export async function weeklyReportHandler(req: Request, res: Response) {
+  if (!(await assertCron(req, res))) return;
+
+  try {
+    const userIds = await db.listAllUserIds();
+    const results: {
+      userId: number;
+      reportId?: number;
+      actionCount?: number;
+      topicCount?: number;
+      error?: string;
+    }[] = [];
+
+    for (const userId of userIds) {
+      try {
+        const r = await createWeeklyReport(userId, 7);
+        results.push({
+          userId,
+          reportId: r.id,
+          actionCount: r.actionCount,
+          topicCount: r.topicCount,
+        });
+      } catch (error) {
+        console.error(`[cron:weeklyReport] user ${userId} failed:`, error);
+        results.push({ userId, error: error instanceof Error ? error.message : String(error) });
+      }
+    }
+
+    res.json({ ok: true, users: userIds.length, results });
+  } catch (error) {
+    console.error("[cron:weeklyReport] fatal:", error);
     res.status(500).json(errorPayload(error, req));
   }
 }

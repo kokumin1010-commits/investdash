@@ -14,6 +14,7 @@ import HoldingDetail from "./pages/HoldingDetail";
 import Holdings from "./pages/Holdings";
 import ImportScreenshot from "./pages/ImportScreenshot";
 import News from "./pages/News";
+import Reports from "./pages/Reports";
 import SettingsPage from "./pages/Settings";
 import Watchlist from "./pages/Watchlist";
 
@@ -25,6 +26,7 @@ function Router() {
       <Route path="/holdings/:id" component={HoldingDetail} />
       <Route path="/dividends" component={Dividends} />
       <Route path="/buy-plans" component={BuyPlans} />
+      <Route path="/reports" component={Reports} />
       <Route path="/watchlist" component={Watchlist} />
       <Route path="/news" component={News} />
       <Route path="/import" component={ImportScreenshot} />

@@ -667,6 +667,60 @@ export type BandTransition = typeof bandTransitions.$inferSelect;
 export type InsertBandTransition = typeof bandTransitions.$inferInsert;
 
 /**
+ * AI が自動生成するレポート。
+ *
+ * 画面を月 1 回しか開かない使い方のため、こちらから見に行かなくても
+ * 「今週見るべきことがあったか」が分かる形にする。
+ *
+ * 定期（WEEKLY）と臨時（EARNINGS / NEWS）を同じテーブルに入れる。
+ * 定期は「何もなかった」ことにも意味があり（見なくてよいと分かる）、
+ * 臨時は出来事が起きた時点で出す必要があるため発行のきっかけが違うが、
+ * 読む側は同じ「レポート一覧」として扱いたい。
+ */
+export const aiReports = mysqlTable(
+  "aiReports",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    userId: int("userId").notNull(),
+    /**
+     * WEEKLY   = 定期の定点観測
+     * EARNINGS = 決算の前後
+     * NEWS     = 重要ニュースが出たとき
+     */
+    kind: mysqlEnum("kind", ["WEEKLY", "EARNINGS", "NEWS"]).notNull(),
+    /** 一覧に出す 1 行。中身を開かなくても要否が判断できる文にする */
+    headline: varchar("headline", { length: 300 }).notNull(),
+    /** 本文（Markdown） */
+    body: text("body").notNull(),
+    /**
+     * 今回のレポートで扱った銘柄（JSON 配列）。
+     * 「この銘柄について何が言われたか」を後から引けるようにする。
+     */
+    symbols: json("symbols").$type<string[]>(),
+    /**
+     * 判断を要する項目の件数。0 なら「今回は動く必要なし」。
+     * 一覧で件数だけ見て開くかどうか決められるようにする。
+     */
+    actionCount: int("actionCount").default(0).notNull(),
+    /** 対象期間の開始（WEEKLY のみ。臨時は null） */
+    periodStart: timestamp("periodStart"),
+    periodEnd: timestamp("periodEnd"),
+    /** 臨時レポートの対象銘柄。決算・ニュース起点のとき使う */
+    triggerSymbol: varchar("triggerSymbol", { length: 24 }),
+    model: varchar("model", { length: 64 }),
+    readAt: timestamp("readAt"),
+    createdAt: timestamp("createdAt").defaultNow().notNull(),
+  },
+  table => ({
+    userKindIdx: index("aiReports_user_kind_idx").on(table.userId, table.kind),
+    createdIdx: index("aiReports_created_idx").on(table.userId, table.createdAt),
+  })
+);
+
+export type AiReport = typeof aiReports.$inferSelect;
+export type InsertAiReport = typeof aiReports.$inferInsert;
+
+/**
  * AI 実行履歴。
  *
  * 過去にログが残っておらず「いつ何をどう判断したのか」を後から追えなかった。
