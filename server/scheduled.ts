@@ -13,6 +13,8 @@ import { regenerateSignal, syncNewsForUser, syncPrices } from "./services/portfo
 import { createWeeklyReport } from "./services/reportService";
 import { createUrgentReports } from "./services/urgentReport";
 import { recordTransitions } from "./services/bandTransitionService";
+import { syncSymbolNotes } from "./services/symbolNoteService";
+import { draftTriggeredCards } from "./services/cardService";
 
 /** cron 呼び出しであることを検証する。cron 以外は 403。 */
 async function assertCron(req: Request, res: Response): Promise<boolean> {
@@ -52,6 +54,8 @@ export async function syncPricesHandler(req: Request, res: Response) {
       fxRates?: { usdJpy: number | null; sgdJpy: number | null; hkdJpy: number | null };
       /** 判定が変わった銘柄の数 */
       transitions?: number;
+      /** 銘柄メモに積んだ件数 */
+      notes?: number;
     }[] = [];
 
     for (const userId of userIds) {
@@ -69,12 +73,24 @@ export async function syncPricesHandler(req: Request, res: Response) {
         } catch (error) {
           console.error(`[cron:syncPrices] transition record failed for user ${userId}:`, error);
         }
+        /*
+         * 判定変化を銘柄メモにも積む。積み忘れた期間だけ経緯が飛ぶと
+         * 相談 AI が「何が起きてきたか」を踏まえられなくなる。
+         */
+        let notes = 0;
+        try {
+          const n = await syncSymbolNotes(userId);
+          notes = n.added;
+        } catch (error) {
+          console.error(`[cron:syncPrices] note sync failed for user ${userId}:`, error);
+        }
         results.push({
           userId,
           updated: r.updated,
           failed: r.failed.length,
           fxRates: r.fxRates,
           transitions,
+          notes,
         });
       } catch (error) {
         console.error(`[cron:syncPrices] user ${userId} failed:`, error);
@@ -154,13 +170,37 @@ export async function urgentReportHandler(req: Request, res: Response) {
       created?: number;
       skipped?: number;
       details?: string[];
+      /** 自動で下書きした投資カードの件数 */
+      cards?: number;
       error?: string;
     }[] = [];
 
     for (const userId of userIds) {
       try {
         const r = await createUrgentReports(userId, 26);
-        results.push({ userId, created: r.created, skipped: r.skipped, details: r.details });
+        /*
+         * 決算や重大ニュースが出た銘柄は「想定が崩れたか」を確認する
+         * 場面なので、カードが無ければここで作る。112 銘柄を機械的に
+         * 埋めるより、必要な瞬間にその時点の情報で作る方が正確。
+         *
+         * 1 銘柄あたり約 16 秒かかるため 1 回 3 件に抑える
+         * （cron ハンドラの 2 分制限に収めるため）。
+         * 残りは翌日の実行で処理される。
+         */
+        let cards = 0;
+        try {
+          const c = await draftTriggeredCards(userId, 3);
+          cards = c.created;
+        } catch (error) {
+          console.error(`[cron:urgentReport] card draft failed for user ${userId}:`, error);
+        }
+        results.push({
+          userId,
+          created: r.created,
+          skipped: r.skipped,
+          details: r.details,
+          cards,
+        });
       } catch (error) {
         console.error(`[cron:urgentReport] user ${userId} failed:`, error);
         results.push({ userId, error: error instanceof Error ? error.message : String(error) });
@@ -215,6 +255,16 @@ export async function syncNewsHandler(req: Request, res: Response) {
 
         // 古いニュースを整理する
         await db.pruneOldNews(userId, 90);
+
+        /*
+         * 取得したニュースを銘柄メモに積む。ニュース自体は 90 日で
+         * 消えるが、メモは残るので後から経緯を辿れる。
+         */
+        try {
+          await syncSymbolNotes(userId);
+        } catch (error) {
+          console.error(`[cron:syncNews] note sync failed for user ${userId}:`, error);
+        }
 
         results.push({ userId, fetched: news.fetched, analyzed: news.analyzed, signals });
       } catch (error) {

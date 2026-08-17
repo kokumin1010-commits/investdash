@@ -128,7 +128,7 @@ function ConsultStart({
             {symbol ? `${symbol} について相談する` : "新しく相談する"}
           </CardTitle>
           <CardDescription>
-            買え・売れの断定はしません。判断材料と確認すべき点を出します。
+            買う・待つ・売るのどれかを結論として出します。最終判断はご自身で行ってください。
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">

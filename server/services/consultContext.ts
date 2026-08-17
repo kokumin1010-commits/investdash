@@ -24,6 +24,7 @@ import {
 } from "../../drizzle/schema";
 import { buildPortfolio } from "./portfolio";
 import { listPlanOverview } from "./priceBandService";
+import { notesForPrompt } from "./symbolNoteService";
 
 /** 個別に明細を渡す銘柄数。多すぎると重要な情報が埋もれる */
 export const TOP_HOLDINGS_LIMIT = 12;
@@ -38,6 +39,13 @@ export const SYMBOL_NEWS_LIMIT = 6;
  * 「前回はこう判断した」を踏まえるには足りる。
  */
 export const PAST_CONSULT_LIMIT = 3;
+/**
+ * 相談対象の銘柄について渡す出来事（メモ）の件数。
+ *
+ * 三菱商事のように 15 件溜まっている銘柄もある。全部渡すと
+ * 本題が埋もれるため、新しいものと重要なものを混ぜて 10 件に絞る。
+ */
+export const NOTES_FOR_PROMPT = 10;
 
 /** 過去の相談から渡す回答の文字数。結論部分だけで足りる */
 export const PAST_ANSWER_CHARS = 400;
@@ -126,6 +134,20 @@ export type ConsultContext = {
    * これがないと同じ質問に毎回違う答えが返り、判断が積み上がらない。
    */
   pastConsults: { askedAt: string; question: string; answerHead: string }[];
+  /**
+   * 相談対象銘柄の出来事の経緯（銘柄メモ）。
+   *
+   * 直近ニュースだけでは「3 か月前の決算で下方修正があった」ことを
+   * 踏まえられない。ニュースは 90 日で整理されるが、メモは残るので
+   * それより前の出来事も辿れる。
+   */
+  focusNotes: {
+    occurredAt: string;
+    kind: string;
+    headline: string;
+    detail: string | null;
+    importance: number | null;
+  }[];
   /**
    * 相談対象銘柄の投資カード。
    * 「何が崩れたら降りるか」を過去に決めているなら、それを踏まえて
@@ -231,6 +253,21 @@ export async function buildConsultContext(
     ? await loadPastConsults(userId, focusSymbol, excludeConsultationId)
     : [];
   const focusCard = focusSymbol ? await loadFocusCard(userId, focusSymbol) : null;
+  /*
+   * 出来事の経緯も相談対象が決まっているときだけ引く。
+   * 全銘柄分を渡すと 700 件超になり本題が埋もれる。
+   */
+  const focusNotes = focusSymbol
+    ? (await notesForPrompt(userId, focusSymbol.toUpperCase(), NOTES_FOR_PROMPT).catch(() => [])).map(
+        n => ({
+          occurredAt: n.occurredAt.toISOString(),
+          kind: n.kind,
+          headline: n.headline,
+          detail: n.detail,
+          importance: n.importance,
+        })
+      )
+    : [];
 
   /*
    * 提案の実績は銘柄を問わず渡す。全体の勝敗は「自分の判断がどれだけ
@@ -285,6 +322,7 @@ export async function buildConsultContext(
     addZone,
     focusNews,
     pastConsults,
+    focusNotes,
     focusCard,
     adviceRecord: {
       judged: record.overall.judged,

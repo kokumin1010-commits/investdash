@@ -8,6 +8,7 @@ import {
   mysqlTable,
   text,
   timestamp,
+  uniqueIndex,
   varchar,
 } from "drizzle-orm/mysql-core";
 import { BROKERS, MARKETS } from "../shared/investing";
@@ -171,6 +172,76 @@ export const investmentCards = mysqlTable(
 
 export type InvestmentCard = typeof investmentCards.$inferSelect;
 export type InsertInvestmentCard = typeof investmentCards.$inferInsert;
+
+/**
+ * 銘柄ごとのメモ（出来事の記録）。
+ *
+ * 【なぜ必要か】
+ * ニュース・決算・判定変化はそれぞれ別の場所に溜まっていて、
+ * 「この銘柄に何が起きてきたか」を一本の時系列で読めなかった。
+ * 相談 AI も直近のニュースしか見ないため、3 か月前に決算で下方修正が
+ * あったことを踏まえずに答えてしまう。
+ *
+ * 自分で書くことは想定していない。判断はもともと AI に相談して
+ * 決めており、手で書く欄にすると投資カードと同じく使われずに終わる。
+ * ニュース・決算・判定変化・相談・提案の実績から機械的に積む。
+ *
+ * 【AI で要約しない】
+ * 出来事の記録に AI を通すと、112 銘柄 × 毎日で費用と時間がかかるうえ、
+ * 要約の過程で数値が変わる恐れがある。ニュースの見出しと影響度、
+ * 判定変化の前後の段など、既にある情報をそのまま写す。
+ * 解釈が必要な場面（相談・レポート）で、まとめて AI に渡す。
+ */
+export const symbolNotes = mysqlTable(
+  "symbolNotes",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    userId: int("userId").notNull(),
+    symbol: varchar("symbol", { length: 24 }).notNull(),
+    /**
+     * 出来事の種類。
+     * NEWS = 通常のニュース、EARNINGS = 決算関連、
+     * BAND = 買い増しプランの判定変化、CONSULT = 相談した、
+     * OUTCOME = 提案の当否が確定した、MANUAL = 手で書いた
+     */
+    kind: mysqlEnum("kind", ["NEWS", "EARNINGS", "BAND", "CONSULT", "OUTCOME", "MANUAL"]).notNull(),
+    /** 一覧で読む 1 行。ニュースなら見出しをそのまま使う */
+    headline: varchar("headline", { length: 512 }).notNull(),
+    /** 補足。ニュースの要約や判定変化の前後など */
+    detail: text("detail"),
+    /**
+     * 重要度 0-100。ニュースは AI が付けた影響度をそのまま使い、
+     * 判定変化は要判断なら 75・参考なら 40 とする。
+     * 相談 AI に渡すときに上位だけを選ぶために使う。
+     */
+    importance: int("importance"),
+    /**
+     * 出来事が起きた日時。ニュースの公開日など。
+     * 記録した日時（createdAt）とは別に持つ。過去のニュースを後から
+     * 取り込んだ場合、記録日で並べると時系列が崩れる。
+     */
+    occurredAt: timestamp("occurredAt").notNull(),
+    /**
+     * 元になったデータの種類と ID。同じ出来事を二重に積まないための鍵。
+     * 例: "news:12345"、"band:678"、"consult:9"
+     */
+    sourceKey: varchar("sourceKey", { length: 120 }),
+    createdAt: timestamp("createdAt").defaultNow().notNull(),
+  },
+  table => ({
+    userSymbolIdx: index("symbolNotes_user_symbol_idx").on(table.userId, table.symbol),
+    occurredIdx: index("symbolNotes_occurred_idx").on(table.userId, table.occurredAt),
+    /**
+     * 同じ出来事を重複して積まないよう一意にする。
+     * 株価更新のたびに走るため、重複を防がないと同じニュースが
+     * 何十件も並んで読めなくなる。
+     */
+    sourceUnique: uniqueIndex("symbolNotes_source_unique").on(table.userId, table.sourceKey),
+  })
+);
+
+export type SymbolNote = typeof symbolNotes.$inferSelect;
+export type InsertSymbolNote = typeof symbolNotes.$inferInsert;
 
 /**
  * ニュース記事と AI によるセンチメント評価。

@@ -12,6 +12,21 @@ import { withAiRunLog } from "./aiRunLog";
 import { normalizeSymbol } from "../../shared/investing";
 import { extractCardFields, mergeField } from "./consultToCard";
 import { getConsultation } from "./consultService";
+import { listPlanOverview } from "./priceBandService";
+import { isEarningsNews } from "../../shared/eventDetect";
+import {
+  CARD_TRIGGER_LABELS,
+  selectCardTargets,
+  type CardCandidate,
+} from "../../shared/cardTrigger";
+
+/**
+ * カード自動生成のきっかけとして見るニュースの日数。
+ *
+ * 長く取ると古い決算で毎回生成対象になり続ける。
+ * 短すぎると週末や取得失敗の日にきっかけを取り逃す。
+ */
+export const TRIGGER_NEWS_DAYS = 14;
 
 /** 投資カードが実質的に空か（AI の下書き対象か）を判定する */
 export function isCardEmpty(card: {
@@ -256,5 +271,97 @@ export async function draftMissingCards(
     created,
     failed,
     remaining: Math.max(0, empty.length - targets.length),
+  };
+}
+
+/**
+ * 「今カードが必要な銘柄」だけを自動で作る。
+ *
+ * 【なぜ全件ではないのか】
+ * 112 銘柄を機械的に埋めると 40 分以上かかり、材料のない銘柄は
+ * 一般論だけのカードになる。カードの目的は「株が下がったとき、
+ * 当初の想定が崩れたのか単に下がっただけかを区別する」ことなので、
+ * 判断が必要になった瞬間にその時点の情報で作られた方が正確。
+ *
+ * 買い増し圏に入った・決算が出た・重大なニュースが出た銘柄を選ぶ。
+ * 選別は shared/cardTrigger.ts の純関数（DB を触らずテストできる）。
+ */
+export async function draftTriggeredCards(
+  userId: number,
+  limit = 5
+): Promise<{
+  processed: number;
+  created: number;
+  failed: string[];
+  remaining: number;
+  reasons: { symbol: string; reason: string; label: string }[];
+}> {
+  const [holdings, portfolio, plans] = await Promise.all([
+    db.listHoldings(userId),
+    buildPortfolio(userId),
+    listPlanOverview(userId).catch(() => []),
+  ]);
+
+  const symbols = Array.from(new Set(holdings.map(h => h.symbol)));
+  const cards = await Promise.all(symbols.map(s => db.getCard(userId, s)));
+  const cardEmptyBySymbol = new Map(symbols.map((s, i) => [s, isCardEmpty(cards[i])]));
+
+  /*
+   * 直近のニュースだけを見る。過去のニュースで毎回生成すると、
+   * 同じ決算をきっかけに何度も作られる（カードが空のままなら
+   * 対象に残り続けるため）。
+   */
+  const since = new Date(Date.now() - TRIGGER_NEWS_DAYS * 86_400_000);
+  const allNews = await db.listNews(userId, { limit: 1000 }).catch(() => []);
+  const news = allNews.filter(n => {
+    const at = n.publishedAt ?? n.createdAt;
+    return at !== null && at.getTime() >= since.getTime();
+  });
+  const earningsSymbols = new Set<string>();
+  const maxImpact = new Map<string, number>();
+  for (const n of news) {
+    if (isEarningsNews(n.title, n.summary)) earningsSymbols.add(n.symbol);
+    const impact = n.impactScore ?? 0;
+    const prev = maxImpact.get(n.symbol) ?? 0;
+    if (impact > prev) maxImpact.set(n.symbol, impact);
+  }
+
+  const planBySymbol = new Map(plans.map(p => [p.symbol, p]));
+  const valueOf = (s: string) =>
+    portfolio.groups.find(g => g.symbol === s)?.marketValueBase ?? 0;
+
+  const candidates: CardCandidate[] = symbols.map(s => ({
+    symbol: s,
+    cardEmpty: cardEmptyBySymbol.get(s) ?? true,
+    valueJpy: valueOf(s),
+    bandAction: planBySymbol.get(s)?.action ?? null,
+    hasEarningsNews: earningsSymbols.has(s),
+    maxImpact: maxImpact.get(s) ?? null,
+  }));
+
+  const { targets, remaining } = selectCardTargets(candidates, limit);
+
+  let created = 0;
+  const failed: string[] = [];
+  for (const t of targets) {
+    try {
+      const r = await draftCardForSymbol(userId, t.symbol, false);
+      if (r.created) created += 1;
+    } catch (error) {
+      console.error(`[cardService] triggered draft failed for ${t.symbol}:`, error);
+      failed.push(t.symbol);
+    }
+  }
+
+  return {
+    processed: targets.length,
+    created,
+    failed,
+    remaining,
+    reasons: targets.map(t => ({
+      symbol: t.symbol,
+      reason: t.reason,
+      label: CARD_TRIGGER_LABELS[t.reason],
+    })),
   };
 }

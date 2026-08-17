@@ -31,7 +31,11 @@ import {
   listReports,
 } from "../services/reportService";
 import { createUrgentReports } from "../services/urgentReport";
-import { draftCardForSymbol, draftMissingCards } from "../services/cardService";
+import {
+  draftCardForSymbol,
+  draftMissingCards,
+  draftTriggeredCards,
+} from "../services/cardService";
 import { listAiRuns } from "../services/aiRunLog";
 import { checkVerdicts } from "../services/outcomeService";
 import { generateCandidateSuggestions, addCandidatesToWatchlist } from "../services/candidateService";
@@ -42,6 +46,11 @@ import {
   listProposalsForSymbol,
 } from "../services/addProposalService";
 import { checkDataHealth } from "../services/dataHealthService";
+import {
+  countNotesBySymbol,
+  listSymbolNotes,
+  syncSymbolNotes,
+} from "../services/symbolNoteService";
 import {
   buildPortfolio,
   enrichProfiles,
@@ -492,6 +501,17 @@ export const portfolioRouter = router({
     } catch (e) {
       console.error("[syncPrices] 提案の当否判定に失敗", e);
     }
+    /*
+     * 判定変化と当否が確定したので、銘柄メモにも積む。
+     * 別操作にすると積み忘れた期間だけ経緯が飛び、相談 AI が
+     * 「何が起きてきたか」を踏まえられなくなる。
+     * ここでも失敗は無視する（株価更新自体は成功しているため）。
+     */
+    try {
+      await syncSymbolNotes(ctx.user.id);
+    } catch (e) {
+      console.error("[syncPrices] 銘柄メモの蓄積に失敗", e);
+    }
     return { ...result, transitions, verdicts };
   }),
 
@@ -838,6 +858,36 @@ export const portfolioRouter = router({
    * 古くなっている銘柄を自分から知らせる。
    */
   dataHealth: protectedProcedure.query(async ({ ctx }) => checkDataHealth(ctx.user.id)),
+
+  /**
+   * 銘柄メモ（出来事の記録）。
+   *
+   * ニュース・決算・判定変化・相談・提案の当否を 1 本の時系列にする。
+   * 「この銘柄に何が起きてきたか」を後から辿れるようにするため。
+   */
+  symbolNotes: protectedProcedure
+    .input(z.object({ symbol: z.string().min(1).max(24) }))
+    .query(async ({ ctx, input }) => listSymbolNotes(ctx.user.id, input.symbol)),
+
+  /** メモの件数（銘柄ごと）。保有一覧に印を出すため */
+  noteCounts: protectedProcedure.query(async ({ ctx }) => {
+    const map = await countNotesBySymbol(ctx.user.id);
+    return Array.from(map.entries()).map(([symbol, count]) => ({ symbol, count }));
+  }),
+
+  /** 溜まっているデータからメモを積み直す（手動実行用） */
+  syncSymbolNotes: protectedProcedure.mutation(async ({ ctx }) => syncSymbolNotes(ctx.user.id)),
+
+  /**
+   * 今カードが必要な銘柄だけ自動で下書きする。
+   *
+   * 買い増し圏に入った・決算が出た・重大ニュースが出た銘柄に絞る。
+   * 112 銘柄を機械的に埋めるより、必要な瞬間にその時点の情報で
+   * 作られた方が正確なため。
+   */
+  draftTriggeredCards: protectedProcedure
+    .input(z.object({ limit: z.number().int().min(1).max(10).default(5) }).optional())
+    .mutation(async ({ ctx, input }) => draftTriggeredCards(ctx.user.id, input?.limit ?? 5)),
 
   /** 1 銘柄の提案履歴。判断がいつ変わったかを追えるようにする */
   addProposalHistory: protectedProcedure

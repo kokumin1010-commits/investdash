@@ -253,6 +253,42 @@ export function buildHistoryText(ctx: ConsultContext): string | null {
   }
 
   /*
+   * 出来事の経緯（銘柄メモ）を渡す。
+   *
+   * 直近ニュースだけでは「3 か月前の決算で下方修正があった」ことを
+   * 踏まえられない。ニュースは 90 日で整理されるが、メモは残るので
+   * それより前の出来事も辿れる。
+   *
+   * 種類を明示するのは、決算での事実と判定変化（株価が動いただけ）を
+   * 区別させるため。混ぜると「業績が悪化した」と「安くなった」を
+   * 同じ重みで扱ってしまう。
+   */
+  if (ctx.focusNotes && ctx.focusNotes.length > 0) {
+    if (lines.length > 0) lines.push("");
+    lines.push(`## ${ctx.focusSymbol} に起きてきたこと（時系列。古い日付が含まれる点に注意）`);
+    for (const n of ctx.focusNotes) {
+      const kindLabel =
+        n.kind === "EARNINGS"
+          ? "決算"
+          : n.kind === "NEWS"
+            ? "ニュース"
+            : n.kind === "BAND"
+              ? "買い増し判定の変化"
+              : n.kind === "CONSULT"
+                ? "相談"
+                : n.kind === "OUTCOME"
+                  ? "提案の当否"
+                  : "メモ";
+      const date = n.occurredAt.slice(0, 10);
+      lines.push(`- ${date}【${kindLabel}】${n.headline}`);
+      if (n.detail) lines.push(`  ${n.detail}`);
+    }
+    lines.push(
+      "この経緯のうち、事業の実態が変わった出来事（決算・事業計画の変更）と、株価が動いただけの出来事を区別して判断すること。"
+    );
+  }
+
+  /*
    * 提案の実績を渡す。
    *
    * 自分の過去の結論が当たったか外れたかを踏まえさせるため。
