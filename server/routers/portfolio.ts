@@ -11,6 +11,7 @@ import {
 } from "../services/interestAssets";
 import {
   generateAndSavePlanForHolding,
+  generateAndSavePlanForWatchItem,
   getPlan,
   listPlanStatus,
   listPlanOverview,
@@ -18,6 +19,7 @@ import {
   updateBand,
 } from "../services/priceBandService";
 import { listAiRuns } from "../services/aiRunLog";
+import { generateCandidateSuggestions, addCandidatesToWatchlist } from "../services/candidateService";
 import {
   buildPortfolio,
   enrichProfiles,
@@ -604,7 +606,17 @@ export const portfolioRouter = router({
     .query(async ({ ctx, input }) => {
       const portfolio = await buildPortfolio(ctx.user.id);
       const view = portfolio.groups.find(g => g.symbol === input.symbol);
-      return await getPlan(ctx.user.id, input.symbol, view?.currentPrice ?? null);
+      /*
+       * 保有していない銘柄（ウォッチリスト）の場合、合算ビューに現在値がない。
+       * その場合はウォッチリストに保存された現在値を使う。
+       * ここで現在値を渡せないと「今どの段にいるか」の判定ができなくなる。
+       */
+      let currentPrice = view?.currentPrice ?? null;
+      if (currentPrice === null) {
+        const watch = await db.getWatchBySymbol(ctx.user.id, input.symbol);
+        if (watch?.currentPrice) currentPrice = Number(watch.currentPrice);
+      }
+      return await getPlan(ctx.user.id, input.symbol, currentPrice);
     }),
 
   /** 買い増しプランを AI で生成する（1 銘柄） */
@@ -615,6 +627,22 @@ export const portfolioRouter = router({
         return await generateAndSavePlanForHolding(ctx.user.id, input.symbol);
       } catch (error) {
         throw toFriendlyAiError(error, "買い増しプランの生成に失敗しました");
+      }
+    }),
+
+  /**
+   * ウォッチリスト銘柄（未保有）の購入プランを AI で生成する。
+   *
+   * 保有銘柄と分けているのは基準が違うため。取得単価が無いので
+   * 52週レンジ・配当利回り・フェアバリューを基準に段を作る。
+   */
+  generateWatchPricePlan: protectedProcedure
+    .input(z.object({ symbol: z.string().min(1).max(24) }))
+    .mutation(async ({ ctx, input }) => {
+      try {
+        return await generateAndSavePlanForWatchItem(ctx.user.id, input.symbol);
+      } catch (error) {
+        throw toFriendlyAiError(error, "購入プランの生成に失敗しました");
       }
     }),
 
@@ -747,6 +775,51 @@ export const portfolioRouter = router({
     )
     .query(async ({ ctx, input }) =>
       listAiRuns(ctx.user.id, { kind: input?.kind, limit: input?.limit ?? 50 })
+    ),
+
+  /**
+   * 保有の偏りを起点に新規候補銘柄を提案する。
+   *
+   * 「今後有望な株を挙げて」と聞くと有名銘柄が並ぶだけになるため、
+   * 出発点を自分のポートフォリオの数字に固定する。
+   * AI が挙げた銘柄は実在検証（株価が取れるか）を通してから返す。
+   */
+  suggestCandidates: protectedProcedure.mutation(async ({ ctx }) => {
+    try {
+      return await generateCandidateSuggestions(ctx.user.id);
+    } catch (error) {
+      throw toFriendlyAiError(error, "候補銘柄の提案に失敗しました");
+    }
+  }),
+
+  /**
+   * 提案された候補のうち選んだものをウォッチリストに取り込む。
+   *
+   * 提案は保存せず画面の状態として持つため、取り込みたい銘柄の情報を
+   * クライアントから送り返す形にしている。
+   * 銘柄名と通貨は取り込み時に再取得するので、送られた name は保険。
+   */
+  addSuggestedToWatchlist: protectedProcedure
+    .input(
+      z.object({
+        candidates: z
+          .array(
+            z.object({
+              symbol: z.string().min(1).max(24),
+              name: z.string().min(1).max(160),
+              market: z.enum(["JP", "US", "SG", "HK", "OTHER"]),
+              priority: z.enum(["HIGH", "MEDIUM", "LOW"]),
+              targetPrice: z.number().min(0).nullable(),
+              reason: z.string().max(1000),
+              concern: z.string().max(1000),
+            })
+          )
+          .min(1)
+          .max(10),
+      })
+    )
+    .mutation(async ({ ctx, input }) =>
+      addCandidatesToWatchlist(ctx.user.id, input.candidates)
     ),
 });
 

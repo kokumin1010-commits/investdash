@@ -502,6 +502,133 @@ export async function generateAndSavePlanForHolding(
   return saved;
 }
 
+/**
+ * ウォッチリスト銘柄（未保有）のプランを AI で生成して保存する。
+ *
+ * 保有銘柄との違いは基準になる数字がないこと。取得単価が無いため
+ * 52週レンジ・配当利回り・フェアバリューを基準にするようプロンプト側で切り替える。
+ * 目標買付価格を登録済みならそれも渡し、本人の意図を無視した段組みにならないようにする。
+ */
+export async function generateAndSavePlanForWatchItem(
+  userId: number,
+  symbol: string
+): Promise<PriceBandPlanView> {
+  const item = await db.getWatchBySymbol(userId, symbol);
+  if (!item) throw new Error(`ウォッチリストに ${symbol} が見つかりません`);
+
+  const [card, news, history] = await Promise.all([
+    db.getCard(userId, symbol),
+    db.listNews(userId, { symbol, limit: 12 }),
+    fetchPriceHistory(symbol, "6mo", "1d"),
+  ]);
+
+  const returnOver = (days: number): number | null => {
+    if (history.length < 2) return null;
+    const last = history[history.length - 1];
+    const cutoff = last.t - days * 24 * 60 * 60 * 1000;
+    const base = history.find(b => b.t >= cutoff);
+    if (!base || base.c === 0) return null;
+    return ((last.c - base.c) / base.c) * 100;
+  };
+
+  const currentPrice = item.currentPrice === null ? null : Number(item.currentPrice);
+
+  /*
+   * 52週高値・安値はウォッチリストのテーブルに持っていないため、
+   * 6か月の価格履歴から算出する。保有銘柄は株価更新時に保存しているが、
+   * ウォッチリストは同じ列を持たないので、ここで計算して渡す。
+   * 6か月しかないので厳密な 52週ではないが、レンジ内の位置を測る目的には足りる。
+   */
+  const closes = history.map(h => h.c).filter(c => Number.isFinite(c) && c > 0);
+  const rangeHigh = closes.length > 0 ? Math.max(...closes) : null;
+  const rangeLow = closes.length > 0 ? Math.min(...closes) : null;
+
+  const targetPrice = item.targetPrice === null ? null : Number(item.targetPrice);
+
+  /*
+   * 目標買付価格と買付条件は投資カードの枠に載せて渡す。
+   * 専用の枠を作るとプロンプトの構造が保有銘柄と分岐して保守が難しくなるため、
+   * 「本人が記録した考え」という同じ意味の枠にまとめる。
+   */
+  const cardBlock = {
+    buyReason: item.watchReason ?? card?.buyReason ?? null,
+    coreThesis: card?.coreThesis ?? null,
+    valuationAssumption: card?.valuationAssumption ?? null,
+    fairValue: card?.fairValue ? Number(card.fairValue) : null,
+    exitConditions: card?.exitConditions ?? null,
+    risks: card?.risks ?? null,
+  };
+
+  const ctx: PlannerContext = {
+    name: item.name,
+    symbol,
+    currency: item.currency,
+    sector: item.sector,
+    industry: item.industry,
+    position: null, // 未保有。これによりプロンプトが新規購入向けに切り替わる
+    currentPrice,
+    fiftyTwoWeekHigh: rangeHigh,
+    fiftyTwoWeekLow: rangeLow,
+    return1m: returnOver(30),
+    return3m: returnOver(90),
+    annualDividend: null,
+    dividendYieldPct: null,
+    card:
+      cardBlock.buyReason ||
+      cardBlock.coreThesis ||
+      cardBlock.fairValue !== null ||
+      targetPrice !== null
+        ? {
+            ...cardBlock,
+            // 目標買付価格があれば本人の想定水準として渡す
+            valuationAssumption: [
+              cardBlock.valuationAssumption,
+              targetPrice !== null
+                ? `本人が登録した目標買付価格: ${targetPrice} ${item.currency}`
+                : null,
+              item.buyConditions ? `買付条件: ${item.buyConditions}` : null,
+            ]
+              .filter(Boolean)
+              .join(" / ") || null,
+          }
+        : null,
+    news: news.map(n => ({
+      title: n.title,
+      sentiment: n.sentiment,
+      impactScore: n.impactScore,
+      summary: n.summary,
+    })),
+  };
+
+  const result = await withAiRunLog(
+    {
+      userId,
+      kind: "price_band_plan",
+      symbol,
+      model: PRICE_BAND_MODEL,
+      summarize: r =>
+        `${r.bands.length} 段を生成（未保有）: ${r.bands
+          .map(b => `${b.action}(${b.lowerPrice ?? "―"}〜${b.upperPrice ?? "―"})`)
+          .join(" / ")}`,
+    },
+    () => generatePriceBandPlan(ctx)
+  );
+
+  await savePlan({
+    userId,
+    symbol,
+    currency: item.currency,
+    scope: "WATCHLIST",
+    result,
+    model: PRICE_BAND_MODEL,
+    editedByUser: false,
+  });
+
+  const saved = await getPlan(userId, symbol, currentPrice);
+  if (!saved) throw new Error("プランの保存に失敗しました");
+  return saved;
+}
+
 /** 保有銘柄すべてのプラン有無を返す（一覧表示・一括生成の進捗確認に使う） */
 export async function runChecksForBand(
   userId: number,

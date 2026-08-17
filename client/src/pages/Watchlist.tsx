@@ -47,6 +47,7 @@ import {
   Trash2,
   TrendingDown,
 } from "lucide-react";
+import { Lightbulb, ChevronDown, ChevronUp } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 
@@ -72,6 +73,53 @@ type WatchRow = {
   signal: { action: "ADD" | "HOLD" | "WATCH" | "REDUCE" | "EXIT"; confidence: number | null; rationale: string; createdAt: Date } | null;
 };
 
+/** AI が提案した候補（実在検証を通ったもの） */
+type SuggestedRow = {
+  symbol: string;
+  name: string;
+  verifiedName: string;
+  market: Market;
+  marketLabel: string;
+  priority: "HIGH" | "MEDIUM" | "LOW";
+  gapKind: string;
+  reason: string;
+  concern: string;
+  targetPrice: number | null;
+  currentPrice: number | null;
+  currency: string;
+  fiftyTwoWeekHigh: number | null;
+  fiftyTwoWeekLow: number | null;
+  sector: string | null;
+  industry: string | null;
+  /** 現在値から買いたい値段までの下落率（%）。サーバー側で算出済み */
+  gapToTargetPct: number | null;
+  /** その値段にした根拠 */
+  targetBasis: string | null;
+  /** 目標価格を補正した場合の説明。補正なしなら null */
+  targetAdjustedNote: string | null;
+};
+
+/*
+ * 買いたい値段は根拠と一緒に見せる。
+ * 数字だけ出しても「なぜその値段か」が分からず判断材料にならない。
+ * 補正した場合はその旨も必ず出す。黙って書き換えると数字を信用できなくなる。
+ */
+
+type SuggestionResult = {
+  gaps: Array<{ kind: string; label: string; evidence: string }>;
+  candidates: SuggestedRow[];
+  overview: string;
+  rejected: Array<{ name: string; symbol: string; reason: string }>;
+};
+
+/** 偏りの種類を日本語にする */
+const GAP_KIND_LABELS: Record<string, string> = {
+  SECTOR: "業種の偏り",
+  REGION: "地域の偏り",
+  YIELD: "利回りの改善",
+  RISK: "下落耐性",
+  SIZE: "規模の偏り",
+};
 export default function Watchlist() {
   const utils = trpc.useUtils();
   const list = trpc.watchlist.list.useQuery();
@@ -80,6 +128,14 @@ export default function Watchlist() {
   const [promoteTarget, setPromoteTarget] = useState<WatchRow | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<WatchRow | null>(null);
   const [signalBusyId, setSignalBusyId] = useState<number | null>(null);
+  /**
+   * AI が提案した候補銘柄。
+   * 保存はせずこの画面の状態として持つ。取り込むまでは「見ただけ」の状態にしたい
+   * （提案が自動で DB に入ると、自分で選んだ銘柄と AI が挙げた銘柄が混ざる）。
+   */
+  const [suggestion, setSuggestion] = useState<SuggestionResult | null>(null);
+  const [gapsOpen, setGapsOpen] = useState(false);
+  const [picked, setPicked] = useState<Set<string>>(new Set());
 
   const syncPrices = trpc.portfolio.syncPrices.useMutation({
     onSuccess: async () => {
@@ -107,8 +163,27 @@ export default function Watchlist() {
     onError: e => toast.error(e.message),
   });
 
+  const suggest = trpc.portfolio.suggestCandidates.useMutation({
+    onSuccess: res => {
+      setSuggestion(res as unknown as SuggestionResult);
+      setPicked(new Set());
+      toast.success(`候補 ${res.candidates.length} 件を提案しました`);
+    },
+    onError: e => toast.error(e.message),
+  });
+
+  const addSuggested = trpc.portfolio.addSuggestedToWatchlist.useMutation({
+    onSuccess: async res => {
+      await utils.watchlist.invalidate();
+      toast.success(`${res.added} 件をウォッチリストに追加しました`);
+      setPicked(new Set());
+    },
+    onError: e => toast.error(e.message),
+  });
+
   const rows = (list.data ?? []) as unknown as WatchRow[];
   const reached = rows.filter(r => r.reachedTarget);
+  const heldSymbols = new Set(rows.map(r => r.symbol));
 
   if (list.isLoading) {
     return (
@@ -139,12 +214,227 @@ export default function Watchlist() {
             <RefreshCw className={`mr-1.5 h-3.5 w-3.5 ${syncPrices.isPending ? "animate-spin" : ""}`} />
             株価更新
           </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={suggest.isPending}
+            onClick={() => suggest.mutate()}
+          >
+            <Lightbulb className={`mr-1.5 h-3.5 w-3.5 ${suggest.isPending ? "animate-pulse" : ""}`} />
+            {suggest.isPending ? "AI が分析中..." : "AI に候補を出させる"}
+          </Button>
           <Button size="sm" onClick={() => setAddOpen(true)}>
             <Plus className="mr-1.5 h-4 w-4" />
             銘柄を追加
           </Button>
         </div>
       </header>
+
+      {suggest.isPending ? (
+        <Card className="border-primary/30 bg-accent/40">
+          <CardContent className="space-y-2 py-5 text-center">
+            <p className="text-sm font-medium">保有 {rows.length > 0 ? "" : ""}銘柄の構成を分析しています</p>
+            <p className="text-xs leading-relaxed text-muted-foreground">
+              業種・地域・配当利回り・借入金利から偏りを探し、それを埋める銘柄を挙げます。
+              挙がった銘柄は株価が実際に取得できるか検証してから表示します（30 秒前後）。
+            </p>
+          </CardContent>
+        </Card>
+      ) : null}
+
+      {suggestion ? (
+        <Card className="border-primary/30">
+          <CardHeader className="pb-3">
+            <div className="flex flex-wrap items-start justify-between gap-2">
+              <div className="space-y-1">
+                <CardTitle className="flex items-center gap-2 text-base">
+                  <Lightbulb className="h-4 w-4 text-primary" />
+                  AI が挙げた候補 {suggestion.candidates.length} 件
+                </CardTitle>
+                <CardDescription className="text-xs">
+                  今の保有の偏りを埋める銘柄です。買う判断はご自身で行ってください。
+                </CardDescription>
+              </div>
+              <Button variant="ghost" size="sm" onClick={() => setSuggestion(null)}>
+                閉じる
+              </Button>
+            </div>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="rounded-lg bg-muted/50 px-3 py-2.5">
+              <p className="text-xs leading-relaxed">{suggestion.overview}</p>
+            </div>
+
+            <div className="space-y-2">
+              <button
+                type="button"
+                className="flex w-full items-center justify-between text-left"
+                onClick={() => setGapsOpen(v => !v)}
+              >
+                <span className="text-xs font-medium text-muted-foreground">
+                  提案の根拠にした偏り {suggestion.gaps.length} 件
+                </span>
+                {gapsOpen ? (
+                  <ChevronUp className="h-3.5 w-3.5 text-muted-foreground" />
+                ) : (
+                  <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
+                )}
+              </button>
+              {gapsOpen ? (
+                <div className="space-y-1.5">
+                  {suggestion.gaps.map((g, i) => (
+                    <div key={i} className="rounded-lg border border-dashed px-3 py-2">
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <Badge variant="outline" className="text-[10px]">
+                          {GAP_KIND_LABELS[g.kind] ?? g.kind}
+                        </Badge>
+                        <span className="text-xs font-medium">{g.label}</span>
+                      </div>
+                      <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground">
+                        {g.evidence}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              ) : null}
+            </div>
+
+            <div className="space-y-2">
+              {suggestion.candidates.map(c => {
+                const already = heldSymbols.has(c.symbol);
+                const checked = picked.has(c.symbol);
+                return (
+                  <div
+                    key={c.symbol}
+                    className={`rounded-lg border px-3 py-2.5 ${checked ? "border-primary bg-accent/40" : ""}`}
+                  >
+                    <div className="flex items-start gap-2.5">
+                      <input
+                        type="checkbox"
+                        className="mt-1 h-4 w-4 shrink-0 accent-[var(--primary)]"
+                        checked={checked}
+                        disabled={already}
+                        onChange={e => {
+                          const next = new Set(picked);
+                          if (e.target.checked) next.add(c.symbol);
+                          else next.delete(c.symbol);
+                          setPicked(next);
+                        }}
+                      />
+                      <div className="min-w-0 flex-1 space-y-1.5">
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <span className="text-sm font-medium">{c.verifiedName}</span>
+                          <span className="tabular text-xs text-muted-foreground">{c.symbol}</span>
+                          <Badge variant="outline" className="text-[10px]">
+                            {c.marketLabel}
+                          </Badge>
+                          <Badge
+                            variant="outline"
+                            className={`text-[10px] ${PRIORITY_STYLES[c.priority]}`}
+                          >
+                            優先度 {PRIORITY_LABELS[c.priority]}
+                          </Badge>
+                          <Badge variant="outline" className="text-[10px]">
+                            {GAP_KIND_LABELS[c.gapKind] ?? c.gapKind}
+                          </Badge>
+                          {already ? (
+                            <Badge variant="outline" className="text-[10px]">
+                              すでに登録済み
+                            </Badge>
+                          ) : null}
+                        </div>
+
+                        <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1 text-xs">
+                          <span className="tabular">
+                            現在値 {formatMoney(c.currentPrice, c.currency)}
+                          </span>
+                          {c.targetPrice != null ? (
+                            <span className="tabular text-gain">
+                              買いたい値段 {formatMoney(c.targetPrice, c.currency)}
+                              {c.gapToTargetPct != null ? (
+                                <span className="ml-1 text-muted-foreground">
+                                  （あと {c.gapToTargetPct.toFixed(1)}%）
+                                </span>
+                              ) : null}
+                            </span>
+                          ) : null}
+                          {c.fiftyTwoWeekLow != null && c.fiftyTwoWeekHigh != null ? (
+                            <span className="tabular text-muted-foreground">
+                              52週 {formatMoney(c.fiftyTwoWeekLow, c.currency)} 〜{" "}
+                              {formatMoney(c.fiftyTwoWeekHigh, c.currency)}
+                            </span>
+                          ) : null}
+                          {c.sector ? (
+                            <span className="text-muted-foreground">{sectorJa(c.sector)}</span>
+                          ) : null}
+                        </div>
+
+                        <p className="text-xs leading-relaxed">{c.reason}</p>
+                        {c.targetBasis ? (
+                          <p className="text-[11px] leading-relaxed text-muted-foreground">
+                            <span className="font-medium">この値段の根拠: </span>
+                            {c.targetBasis}
+                          </p>
+                        ) : null}
+                        {c.targetAdjustedNote ? (
+                          <p className="rounded bg-amber-500/10 px-2 py-1 text-[11px] leading-relaxed text-amber-600 dark:text-amber-400">
+                            {c.targetAdjustedNote}
+                          </p>
+                        ) : null}
+                        <p className="text-[11px] leading-relaxed text-loss">
+                          <span className="font-medium">懸念: </span>
+                          {c.concern}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            {suggestion.rejected.length > 0 ? (
+              <div className="rounded-lg border border-dashed px-3 py-2">
+                <p className="text-[11px] font-medium text-muted-foreground">
+                  株価が取得できず除外した銘柄 {suggestion.rejected.length} 件
+                </p>
+                {suggestion.rejected.map(r => (
+                  <p key={r.symbol} className="mt-1 text-[11px] text-muted-foreground">
+                    {r.name}（{r.symbol}）: {r.reason}
+                  </p>
+                ))}
+              </div>
+            ) : null}
+
+            <div className="flex flex-wrap items-center justify-between gap-2 border-t pt-3">
+              <p className="text-xs text-muted-foreground">
+                {picked.size > 0
+                  ? `${picked.size} 件を選択中`
+                  : "追加したい銘柄にチェックを入れてください"}
+              </p>
+              <Button
+                size="sm"
+                disabled={picked.size === 0 || addSuggested.isPending}
+                onClick={() => {
+                  const targets = suggestion.candidates
+                    .filter(c => picked.has(c.symbol))
+                    .map(c => ({
+                      symbol: c.symbol,
+                      name: c.verifiedName,
+                      market: c.market,
+                      priority: c.priority,
+                      targetPrice: c.targetPrice,
+                      reason: c.reason,
+                      concern: c.concern,
+                    }));
+                  addSuggested.mutate({ candidates: targets });
+                }}
+              >
+                {addSuggested.isPending ? "追加中..." : "ウォッチリストに追加"}
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      ) : null}
 
       {reached.length > 0 ? (
         <Card className="border-gain/40 bg-gain-soft">
@@ -244,14 +534,16 @@ export default function Watchlist() {
                     <MoneyText value={r.targetNum} currency={r.currency} className="text-sm font-medium" />
                   </div>
                   <div className="space-y-0.5">
-                    <p className="text-[11px] text-muted-foreground">目標との差</p>
+                    <p className="text-[11px] text-muted-foreground">目標まで</p>
                     {r.gapPct === null ? (
                       <span className="text-sm text-muted-foreground">—</span>
+                    ) : r.gapPct >= 0 ? (
+                      /* 現在値が目標以下。すでに買える水準に来ている */
+                      <span className="tabular text-sm font-medium text-gain">到達</span>
                     ) : (
                       <span
-                        className={`tabular text-sm font-medium ${r.gapPct <= 0 ? "text-gain" : "text-muted-foreground"}`}
+                        className={`tabular text-sm font-medium ${r.gapPct > -10 ? "text-amber-600 dark:text-amber-400" : "text-muted-foreground"}`}
                       >
-                        {r.gapPct > 0 ? "+" : ""}
                         {r.gapPct.toFixed(1)}%
                       </span>
                     )}
@@ -271,6 +563,8 @@ export default function Watchlist() {
                     <p className="line-clamp-2 text-xs leading-relaxed">{r.buyConditions}</p>
                   </div>
                 ) : null}
+
+                <WatchPlanSummary symbol={r.symbol} currency={r.currency} />
 
                 <div className="flex items-center justify-between gap-2 border-t pt-3">
                   <div className="flex items-center gap-2">
@@ -708,5 +1002,147 @@ function PromoteDialog({ target, onClose }: { target: WatchRow | null; onClose: 
         </DialogFooter>
       </DialogContent>
     </Dialog>
+  );
+}
+
+/**
+ * ウォッチリスト銘柄の購入プラン（価格帯）の要約。
+ *
+ * 保有銘柄の買い増しプランと同じ仕組みを未保有銘柄にも使う。
+ * カード内に置くため全段は出さず「今どの段にいるか」と
+ * 「次の段まであと何 %」だけに絞る。詳細は段を開いて確認する。
+ */
+function WatchPlanSummary({ symbol, currency }: { symbol: string; currency: string }) {
+  const utils = trpc.useUtils();
+  const [open, setOpen] = useState(false);
+  const plan = trpc.portfolio.priceBandPlan.useQuery({ symbol });
+  const generate = trpc.portfolio.generateWatchPricePlan.useMutation({
+    onSuccess: () => {
+      utils.portfolio.priceBandPlan.invalidate({ symbol });
+      toast.success("購入プランを作成しました");
+    },
+    onError: e => toast.error(e.message),
+  });
+
+  /*
+   * 取得中は枠だけを出す。ただし isLoading は「まだ一度も成功していない」状態で、
+   * エラーで止まった場合も true のままになる。それをそのまま出すと
+   * 灰色の空欄が消えずに残り、プランが無いのか読み込み中なのか分からなくなる。
+   * そのためエラーを先に判定する。
+   */
+  if (plan.isError) {
+    return (
+      <p className="rounded-lg border border-dashed px-3 py-2 text-[11px] text-muted-foreground">
+        購入プランを読み込めませんでした（{plan.error.message}）
+      </p>
+    );
+  }
+
+  if (plan.isPending) {
+    return <Skeleton className="h-9 w-full rounded-lg" />;
+  }
+
+  // 未作成。生成を促す
+  if (!plan.data) {
+    return (
+      <Button
+        variant="outline"
+        size="sm"
+        className="w-full bg-background"
+        disabled={generate.isPending}
+        onClick={() => generate.mutate({ symbol })}
+      >
+        <Target className={`mr-1.5 h-3.5 w-3.5 ${generate.isPending ? "animate-pulse" : ""}`} />
+        {generate.isPending ? "AI が価格帯を設計中..." : "AI に購入価格帯を提案させる"}
+      </Button>
+    );
+  }
+
+  const ev = plan.data.evaluation;
+  const current = ev.currentBand;
+  const bands = plan.data.bands;
+
+  return (
+    <div className="space-y-2 rounded-lg border bg-muted/20 px-3 py-2.5">
+      <div className="flex items-center justify-between gap-2">
+        <p className="text-[11px] font-medium text-muted-foreground">AI 提案の購入価格帯</p>
+        <button
+          type="button"
+          className="text-[11px] text-muted-foreground underline-offset-2 hover:underline"
+          onClick={() => setOpen(v => !v)}
+        >
+          {open ? "閉じる" : `全 ${bands.length} 段を見る`}
+        </button>
+      </div>
+
+      {current ? (
+        <div className="space-y-0.5">
+          <p className="text-sm font-semibold leading-snug">{current.actionLabel}</p>
+          <p className="tabular text-[11px] text-muted-foreground">
+            {current.lowerPrice === null ? "―" : formatMoney(current.lowerPrice, currency)}
+            {" 〜 "}
+            {current.upperPrice === null ? "―" : formatMoney(current.upperPrice, currency)}
+            {" の水準"}
+          </p>
+        </div>
+      ) : (
+        <p className="text-sm font-medium text-muted-foreground">
+          {ev.abovePlan
+            ? "登録した価格帯より上です（検討対象外）"
+            : ev.belowPlan
+              ? "登録した価格帯より下です"
+              : "現在値が取得できていません"}
+        </p>
+      )}
+
+      {ev.gapToNextPct !== null ? (
+        <p className="tabular text-[11px] text-muted-foreground">
+          次の段まで {ev.gapToNextPct > 0 ? "+" : ""}
+          {ev.gapToNextPct.toFixed(1)}%
+          {ev.nextBand ? `（${ev.nextBand.actionLabel}）` : ""}
+        </p>
+      ) : null}
+
+      {open ? (
+        <div className="space-y-1.5 border-t pt-2">
+          {bands.map(b => {
+            const isCurrent = current?.id === b.id;
+            return (
+              <div
+                key={b.id}
+                className={`rounded-md px-2 py-1.5 text-[11px] leading-relaxed ${
+                  isCurrent ? "bg-primary/10 font-medium" : "bg-muted/40"
+                }`}
+              >
+                <div className="flex items-baseline justify-between gap-2">
+                  <span className="tabular shrink-0 text-muted-foreground">
+                    {b.lowerPrice === null ? "―" : formatMoney(b.lowerPrice, currency)}
+                    {" 〜 "}
+                    {b.upperPrice === null ? "―" : formatMoney(b.upperPrice, currency)}
+                  </span>
+                  {isCurrent ? (
+                    <Badge variant="outline" className="shrink-0 border-primary/40 text-[10px]">
+                      現在ここ
+                    </Badge>
+                  ) : null}
+                </div>
+                <p className="mt-0.5">{b.actionLabel}</p>
+                {b.reason ? <p className="mt-0.5 text-muted-foreground">{b.reason}</p> : null}
+              </div>
+            );
+          })}
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-7 w-full text-[11px]"
+            disabled={generate.isPending}
+            onClick={() => generate.mutate({ symbol })}
+          >
+            <RefreshCw className={`mr-1 h-3 w-3 ${generate.isPending ? "animate-spin" : ""}`} />
+            作り直す
+          </Button>
+        </div>
+      ) : null}
+    </div>
   );
 }

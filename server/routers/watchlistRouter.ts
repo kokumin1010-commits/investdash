@@ -26,8 +26,15 @@ export const watchlistRouter = router({
         ...w,
         priceNum: price,
         targetNum: target,
-        /** 目標価格までの乖離率（負なら目標より安い＝条件に近い） */
-        gapPct: price !== null && target !== null && target !== 0 ? ((price - target) / target) * 100 : null,
+        /**
+         * 現在値から見て、買いたい値段まであと何 % 動く必要があるか。
+         * 負なら「あと N% 下がれば届く」、正なら「すでに目標より安い」。
+         *
+         * 分母は現在値。目標価格を分母にすると、たとえば現在 3,751 / 目標 1,900 で
+         * 97.4% という数字になり「あと 49.4% 下がれば届く」という実感と大きく食い違う。
+         * 候補提案側（candidateService）も現在値基準なので、画面内で基準を揃える。
+         */
+        gapPct: price !== null && target !== null && price !== 0 ? ((target - price) / price) * 100 : null,
         reachedTarget: price !== null && target !== null ? price <= target : false,
         dayChangePct: price !== null && prev !== null && prev !== 0 ? ((price - prev) / prev) * 100 : null,
         signal: sig && sig.scope === "WATCHLIST"

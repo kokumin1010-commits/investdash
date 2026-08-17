@@ -18,6 +18,7 @@ export type AiRunKind =
   | "signal"
   | "watch_signal"
   | "news_analysis"
+  | "candidate_suggestion"
   | "ocr";
 
 export async function logAiRun(params: {
