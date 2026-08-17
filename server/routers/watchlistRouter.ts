@@ -12,6 +12,7 @@ import {
 import { regenerateWatchSignal } from "../services/portfolio";
 import { summarizeDividends } from "../services/dividend";
 import { computeTargetDistance, targetDistanceNote } from "../../shared/targetDistance";
+import { heldPnlPct, mergeHeldPositions } from "../../shared/heldMerge";
 import {
   reviseTarget,
   TARGET_REVISE_MODEL,
@@ -22,20 +23,41 @@ import { toFriendlyAiError } from "../services/aiErrors";
 
 export const watchlistRouter = router({
   list: protectedProcedure.query(async ({ ctx }) => {
-    const [items, signalMap, news] = await Promise.all([
+    const [items, signalMap, news, holdings] = await Promise.all([
       db.listWatchlist(ctx.user.id),
       db.latestSignals(ctx.user.id),
       db.listNews(ctx.user.id, { limit: 400 }),
+      db.listHoldings(ctx.user.id),
     ]);
 
     const newsCount = new Map<string, number>();
     news.forEach(x => newsCount.set(x.symbol, (newsCount.get(x.symbol) ?? 0) + 1));
+
+    /*
+     * 既に保有している銘柄がウォッチリストに残っていることがある。
+     * AI の候補提案から一括で登録した場合や、買った後に外し忘れた場合。
+     * 「まだ持っていない」前提で目標価格を見ていると、実際には保有済みで
+     * 買い増しの判断をすべき銘柄を新規購入として扱ってしまう。
+     *
+     * 畳み込みは shared の共通関数に任せる。買い増しプラン一覧でも
+     * 同じ突き合わせをするため、式を 2 か所に書くとずれる。
+     */
+    const heldMap = mergeHeldPositions(
+      holdings.map(h => ({
+        symbol: h.symbol,
+        quantity: Number(h.quantity),
+        avgCost: Number(h.avgCost),
+        broker: h.broker,
+      }))
+    );
 
     return items.map(w => {
       const price = w.currentPrice ? Number(w.currentPrice) : null;
       const target = w.targetPrice ? Number(w.targetPrice) : null;
       const prev = w.previousClose ? Number(w.previousClose) : null;
       const sig = signalMap.get(w.symbol);
+      const held = heldMap.get(w.symbol) ?? null;
+      const heldAvgCost = held ? held.avgCost : null;
       /*
        * 目標価格が現在値からどれだけ離れているかは shared の判定に任せる。
        * 画面側で式を書くと、買い増しプラン一覧の判定（同じ閾値を使う）と
@@ -72,6 +94,19 @@ export const watchlistRouter = router({
             }
           : null,
         newsCount: newsCount.get(w.symbol) ?? 0,
+        /**
+         * 既に保有しているか。保有済みなら「新規に買うか」ではなく
+         * 「買い増すか」の判断になるため、画面で区別できるようにする。
+         */
+        alreadyHeld: held !== null,
+        heldQuantity: held?.quantity ?? null,
+        heldAvgCost,
+        heldBrokers: held ? held.brokers : [],
+        /**
+         * 保有している場合の損益率（%）。取得原価が 0 以下の銘柄では
+         * 率に意味がないため null を返す。
+         */
+        heldPnlPct: heldPnlPct(heldAvgCost, price),
       };
     });
   }),

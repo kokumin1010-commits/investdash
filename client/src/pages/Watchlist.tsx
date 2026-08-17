@@ -29,11 +29,13 @@ import {
   PRIORITY_LABELS,
   PRIORITY_STYLES,
   WATCH_PRIORITIES,
+  BROKER_LABELS,
   formatMoney,
   marketLabel,
   sectorJa,
   type WatchPriority,
   type Market,
+  type Broker,
 } from "@shared/investing";
 import {
   TARGET_DISTANCE_LABELS,
@@ -53,6 +55,7 @@ import {
 } from "lucide-react";
 import { Lightbulb, ChevronDown, ChevronUp, AlertTriangle, Wand2 } from "lucide-react";
 import { useState } from "react";
+import { Link } from "wouter";
 import { toast } from "sonner";
 
 type WatchRow = {
@@ -80,6 +83,15 @@ type WatchRow = {
   targetNeedsRework: boolean;
   /** なぜ作り直すべきかの説明。問題なければ null */
   targetNote: string | null;
+  /**
+   * 既に保有しているか。ウォッチリストに残っていても保有済みなら
+   * 「新規に買うか」ではなく「買い増すか」の判断になる。
+   */
+  alreadyHeld: boolean;
+  heldQuantity: number | null;
+  heldAvgCost: number | null;
+  heldBrokers: string[];
+  heldPnlPct: number | null;
   signal: { action: "ADD" | "HOLD" | "WATCH" | "REDUCE" | "EXIT"; confidence: number | null; rationale: string; createdAt: Date } | null;
 };
 
@@ -622,12 +634,73 @@ export default function Watchlist() {
                       ) : null}
                     </div>
                   </div>
-                  <Badge variant="outline" className={`shrink-0 text-[11px] ${PRIORITY_STYLES[r.priority]}`}>
-                    優先度 {PRIORITY_LABELS[r.priority]}
-                  </Badge>
+                  <div className="flex shrink-0 flex-col items-end gap-1">
+                    <Badge variant="outline" className={`text-[11px] ${PRIORITY_STYLES[r.priority]}`}>
+                      優先度 {PRIORITY_LABELS[r.priority]}
+                    </Badge>
+                    {/*
+                      既に持っている銘柄はここで分かるようにする。
+                      「まだ持っていない」前提で目標価格を見ていると、
+                      実際には買い増しの判断をすべき銘柄を新規購入として扱う。
+                    */}
+                    {r.alreadyHeld ? (
+                      <Badge
+                        variant="outline"
+                        className="border-sky-300 bg-sky-100/70 text-[10px] text-sky-700 dark:border-sky-800 dark:bg-sky-950/40 dark:text-sky-300"
+                      >
+                        既に保有
+                      </Badge>
+                    ) : null}
+                  </div>
                 </div>
               </CardHeader>
               <CardContent className="space-y-3">
+                {/*
+                  保有済みの場合は取得単価と損益を出す。買い増しの判断では
+                  「今いくらで持っているか」が目標価格と同じくらい効く。
+                */}
+                {r.alreadyHeld ? (
+                  <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1 rounded-lg border border-sky-200/70 bg-sky-50/60 px-2.5 py-2 text-[11px] dark:border-sky-900/60 dark:bg-sky-950/20">
+                    <span className="font-medium text-sky-700 dark:text-sky-300">
+                      この銘柄は既に持っています
+                    </span>
+                    {r.heldQuantity !== null ? (
+                      <span className="tabular text-muted-foreground">
+                        {r.heldQuantity.toLocaleString("ja-JP")} 株
+                      </span>
+                    ) : null}
+                    {r.heldAvgCost !== null ? (
+                      <span className="text-muted-foreground">
+                        取得単価{" "}
+                        <MoneyText
+                          value={r.heldAvgCost}
+                          currency={r.currency}
+                          className="tabular text-[11px]"
+                        />
+                      </span>
+                    ) : null}
+                    {r.heldPnlPct !== null ? (
+                      <span
+                        className={`tabular font-medium ${r.heldPnlPct >= 0 ? "text-gain" : "text-loss"}`}
+                      >
+                        {r.heldPnlPct >= 0 ? "+" : ""}
+                        {r.heldPnlPct.toFixed(1)}%
+                      </span>
+                    ) : null}
+                    {r.heldBrokers.length > 0 ? (
+                      <span className="text-muted-foreground">
+                        {r.heldBrokers.map(b => BROKER_LABELS[b as Broker] ?? b).join(" / ")}
+                      </span>
+                    ) : null}
+                    <Link
+                      href={`/holdings?symbol=${encodeURIComponent(r.symbol)}`}
+                      className="text-sky-700 underline underline-offset-2 dark:text-sky-300"
+                    >
+                      保有を見る
+                    </Link>
+                  </div>
+                ) : null}
+
                 <div className="grid grid-cols-3 gap-2 rounded-lg bg-muted/40 px-3 py-2.5">
                   <div className="space-y-0.5">
                     <p className="text-[11px] text-muted-foreground">現在値</p>

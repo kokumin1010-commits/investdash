@@ -60,6 +60,7 @@ import {
 } from "recharts";
 import { toast } from "sonner";
 import { Link } from "wouter";
+import { DataHealthCard } from "@/components/investing/DataHealthCard";
 
 export default function Dashboard() {
   const utils = trpc.useUtils();
@@ -483,6 +484,13 @@ export default function Dashboard() {
         <EmptyState />
       ) : (
         <>
+          {/*
+            株価が古くなっていないかを最初に出す。古い株価のまま下の
+            数字を読むと、評価額も買い増し圏の判定も誤ったものになる。
+            正常なときは 1 行に収めて邪魔にならないようにする。
+          */}
+          <DataHealthCard showSyncButton={false} />
+
           {/* サマリーカード */}
           <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
             <StatCard

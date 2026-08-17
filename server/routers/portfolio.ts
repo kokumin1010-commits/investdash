@@ -41,6 +41,7 @@ import {
   listProposals,
   listProposalsForSymbol,
 } from "../services/addProposalService";
+import { checkDataHealth } from "../services/dataHealthService";
 import {
   buildPortfolio,
   enrichProfiles,
@@ -828,6 +829,15 @@ export const portfolioRouter = router({
 
   /** 提案の一覧（銘柄ごとに最新の 1 件） */
   addProposals: protectedProcedure.query(async ({ ctx }) => listProposals(ctx.user.id)),
+
+  /**
+   * 株価データの健全性。
+   *
+   * 自動更新は動いているが失敗した銘柄には気付けない。古い株価で
+   * 買い増し圏を判定すると実際には圏外なのに「買い場」と出るため、
+   * 古くなっている銘柄を自分から知らせる。
+   */
+  dataHealth: protectedProcedure.query(async ({ ctx }) => checkDataHealth(ctx.user.id)),
 
   /** 1 銘柄の提案履歴。判断がいつ変わったかを追えるようにする */
   addProposalHistory: protectedProcedure
