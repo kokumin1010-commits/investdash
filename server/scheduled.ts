@@ -11,6 +11,7 @@ import * as db from "./db";
 import { sdk } from "./_core/sdk";
 import { regenerateSignal, syncNewsForUser, syncPrices } from "./services/portfolio";
 import { createWeeklyReport } from "./services/reportService";
+import { createUrgentReports } from "./services/urgentReport";
 import { recordTransitions } from "./services/bandTransitionService";
 
 /** cron 呼び出しであることを検証する。cron 以外は 403。 */
@@ -129,6 +130,46 @@ export async function weeklyReportHandler(req: Request, res: Response) {
     res.json({ ok: true, users: userIds.length, results });
   } catch (error) {
     console.error("[cron:weeklyReport] fatal:", error);
+    res.status(500).json(errorPayload(error, req));
+  }
+}
+
+/**
+ * 臨時レポート（決算・重大ニュース）の生成。
+ *
+ * 決算日を事前に取得できないため（Yahoo Finance の API に決算予定日が
+ * 含まれず、日本株・香港株・SG 株では決算に関する項目が 1 つも返らない）、
+ * 起きたことをニュースから検知して出す。
+ *
+ * ニュース取得（毎朝 7:00）の後に動かす前提。取得前に動かしても
+ * 新しいニュースがないため何も出ない。
+ */
+export async function urgentReportHandler(req: Request, res: Response) {
+  if (!(await assertCron(req, res))) return;
+
+  try {
+    const userIds = await db.listAllUserIds();
+    const results: {
+      userId: number;
+      created?: number;
+      skipped?: number;
+      details?: string[];
+      error?: string;
+    }[] = [];
+
+    for (const userId of userIds) {
+      try {
+        const r = await createUrgentReports(userId, 26);
+        results.push({ userId, created: r.created, skipped: r.skipped, details: r.details });
+      } catch (error) {
+        console.error(`[cron:urgentReport] user ${userId} failed:`, error);
+        results.push({ userId, error: error instanceof Error ? error.message : String(error) });
+      }
+    }
+
+    res.json({ ok: true, users: userIds.length, results });
+  } catch (error) {
+    console.error("[cron:urgentReport] fatal:", error);
     res.status(500).json(errorPayload(error, req));
   }
 }

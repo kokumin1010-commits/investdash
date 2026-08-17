@@ -29,6 +29,7 @@ import {
   getReport,
   listReports,
 } from "../services/reportService";
+import { createUrgentReports } from "../services/urgentReport";
 import { listAiRuns } from "../services/aiRunLog";
 import { generateCandidateSuggestions, addCandidatesToWatchlist } from "../services/candidateService";
 import {
@@ -539,6 +540,18 @@ export const portfolioRouter = router({
   generateWeeklyReport: protectedProcedure
     .input(z.object({ days: z.number().int().min(1).max(90).default(7) }).optional())
     .mutation(async ({ ctx, input }) => createWeeklyReport(ctx.user.id, input?.days ?? 7)),
+
+  /**
+   * 臨時レポートを今すぐ作る。
+   *
+   * 決算日を事前に取得できないため、起きたことをニュースから検知して出す。
+   * lookbackHours を広げれば過去の出来事も対象にできる。
+   */
+  generateUrgentReports: protectedProcedure
+    .input(z.object({ lookbackHours: z.number().int().min(1).max(720).default(26) }).optional())
+    .mutation(async ({ ctx, input }) =>
+      createUrgentReports(ctx.user.id, input?.lookbackHours ?? 26)
+    ),
 
   /** セクター情報の補完 */
   enrichProfiles: protectedProcedure
