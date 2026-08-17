@@ -34,6 +34,7 @@ import {
   Coins,
   Globe,
   Landmark,
+  PiggyBank,
   RefreshCw,
   ScanLine,
   TrendingUp,
@@ -324,6 +325,26 @@ export default function Dashboard() {
     };
   }, [data?.brokers, dividends, summary]);
 
+  /**
+   * 借入の実効金利（年率 %）。
+   *
+   * 現金性資産の利回りと比べるために使う。利回りが金利を上回っていれば
+   * 借入を返さず現金で置いておく方が得、下回っていれば返済に回した方が得になる。
+   * 複数口座で借りている場合は借入額で重み付けした加重平均にする
+   * （単純平均だと少額の借入の金利が過大に効いてしまう）。
+   */
+  const borrowingRatePct = useMemo(() => {
+    let weighted = 0;
+    let borrowed = 0;
+    for (const b of data?.brokers ?? []) {
+      const interest = b.leverage?.interest;
+      if (!interest || interest.borrowed <= 0) continue;
+      weighted += interest.effectiveRatePct * interest.borrowed;
+      borrowed += interest.borrowed;
+    }
+    return borrowed > 0 ? weighted / borrowed : null;
+  }, [data?.brokers]);
+
   const attention = useMemo(
     () =>
       (data?.groups ?? [])
@@ -445,6 +466,19 @@ export default function Dashboard() {
               sub={
                 hasBorrowing ? (
                   <span className="block space-y-1">
+                    {/*
+                     * 利息で増える現金性資産（富途香港の現金宝など）。
+                     * 株式時価には入っていないので、純資産の内訳として明示する。
+                     * これを出さないと「株式時価 − 借入」と純資産が合わず不審に見える。
+                     */}
+                    {(summary?.interestAssetsBase ?? 0) > 0 && (
+                      <span className="flex items-center justify-between gap-2">
+                        <span className="text-muted-foreground">現金性資産（利息で増える）</span>
+                        <span className="tabular font-medium text-foreground">
+                          +{money(summary?.interestAssetsBase)}
+                        </span>
+                      </span>
+                    )}
                     <span className="flex items-center justify-between gap-2">
                       <span className="text-muted-foreground">借入（信用取引）</span>
                       <span className="tabular font-medium text-loss">
@@ -766,6 +800,127 @@ export default function Dashboard() {
               </CardContent>
             </Card>
           </div>
+
+          {/*
+            利息で増える現金性資産（富途香港の現金宝など）。
+
+            株式時価には含めていないため、ここで独立したカードとして出す。
+            配当と同じ「収入」だが、株価が動かず元本が保証に近い点で性質が違うので
+            配当カードには混ぜず別枠にしている。
+          */}
+          {(data?.interestAssets ?? []).length > 0 ? (
+            <Card>
+              <CardHeader className="pb-3">
+                <CardTitle className="flex items-center gap-1.5 text-base">
+                  <PiggyBank className="h-4 w-4" />
+                  現金性資産（利息で増える）
+                </CardTitle>
+                <CardDescription className="text-xs">
+                  貨幣市場基金・現金宝。株価が動かない代わりに毎日利息が付く。
+                  株式の評価損益には含めていない
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                <div className="grid gap-3 sm:grid-cols-3">
+                  <div className="rounded-lg border bg-muted/30 p-3">
+                    <p className="text-[11px] text-muted-foreground">預けている額</p>
+                    <p className="tabular mt-0.5 text-lg font-semibold">
+                      {money(summary?.interestAssetsBase)}
+                    </p>
+                  </div>
+                  <div className="rounded-lg border bg-muted/30 p-3">
+                    <p className="text-[11px] text-muted-foreground">
+                      年間の利息（見込み）
+                    </p>
+                    <p className="tabular mt-0.5 text-lg font-semibold text-gain">
+                      {money(summary?.interestIncomeBase)}
+                    </p>
+                    <p className="mt-0.5 text-[11px] text-muted-foreground">
+                      月あたり {money((summary?.interestIncomeBase ?? 0) / 12)}
+                    </p>
+                  </div>
+                  <div className="rounded-lg border bg-muted/30 p-3">
+                    <p className="text-[11px] text-muted-foreground">実効の年利回り</p>
+                    <p className="tabular mt-0.5 text-lg font-semibold">
+                      {summary?.interestRatePct !== null && summary?.interestRatePct !== undefined
+                        ? `${summary.interestRatePct.toFixed(2)}%`
+                        : "—"}
+                    </p>
+                    <p className="mt-0.5 text-[11px] text-muted-foreground">
+                      毎日利息が元本に加わるので表示利率より高くなる
+                    </p>
+                  </div>
+                </div>
+
+                {/* 商品ごとの明細。どの通貨でいくら置いているかを出す */}
+                <div className="space-y-1.5">
+                  {(data?.interestAssets ?? []).map(a => (
+                    <div
+                      key={a.id}
+                      className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1 rounded-md border px-3 py-2"
+                    >
+                      <span className="flex min-w-0 items-center gap-2">
+                        <BrokerBadge broker={a.broker} />
+                        <span className="truncate text-sm font-medium">{a.name}</span>
+                      </span>
+                      <span className="flex items-baseline gap-3">
+                        <span className="tabular text-xs text-muted-foreground">
+                          {a.currency}{" "}
+                          {a.amount.toLocaleString(undefined, {
+                            minimumFractionDigits: 2,
+                            maximumFractionDigits: 2,
+                          })}
+                        </span>
+                        <span className="tabular text-sm font-semibold">
+                          {a.amountBase === null ? "換算できません" : money(a.amountBase)}
+                        </span>
+                      </span>
+                      {/*
+                        前日の受取利息から逆算した実績利回り。
+                        記録した年利（3.4%）と大きくずれていれば記録が古い可能性がある。
+                      */}
+                      {a.impliedRatePct !== null ? (
+                        <span className="w-full text-[11px] text-muted-foreground">
+                          前日の利息 {a.currency}{" "}
+                          {a.dailyIncome?.toLocaleString(undefined, {
+                            minimumFractionDigits: 2,
+                            maximumFractionDigits: 2,
+                          })}{" "}
+                          から逆算すると年 {a.impliedRatePct.toFixed(2)}%
+                          {a.cumulativeIncomeBase !== null ? (
+                            <> / これまでの受取 {money(a.cumulativeIncomeBase)}</>
+                          ) : null}
+                        </span>
+                      ) : null}
+                    </div>
+                  ))}
+                </div>
+
+                {/*
+                  借入がある場合、この現金性資産の利回りと借入金利の関係が重要になる。
+                  借入金利より低い利回りで現金を寝かせているなら、返済に回した方が得だと分かる。
+                */}
+                {borrowingRatePct !== null &&
+                summary?.interestRatePct !== null &&
+                summary?.interestRatePct !== undefined ? (
+                  <p className="border-t pt-2 text-[11px] leading-relaxed text-muted-foreground">
+                    借入の実効金利は年{" "}
+                    <span className="tabular font-medium text-foreground">
+                      {borrowingRatePct.toFixed(2)}%
+                    </span>
+                    。この現金性資産の利回り（
+                    <span className="tabular font-medium text-foreground">
+                      {summary.interestRatePct.toFixed(2)}%
+                    </span>
+                    ）
+                    {summary.interestRatePct >= borrowingRatePct
+                      ? "が上回っているため、借入を返さずに現金で置いておく方が有利です。"
+                      : "を上回っています。この現金を借入の返済に回した方が利息の負担が減ります。"}
+                  </p>
+                ) : null}
+              </CardContent>
+            </Card>
+          ) : null}
 
           {/* 証券口座別の内訳。開いた瞬間に「どこにいくら置いているか」が分かるよう上部に配置する */}
           {/* 国・市場別の内訳。米国株は円換算後の損益に為替変動が混ざるため現地通貨でも併記する */}
