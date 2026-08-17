@@ -8,6 +8,7 @@ import ErrorBoundary from "./components/ErrorBoundary";
 import { PasscodeProvider } from "./contexts/PasscodeContext";
 import { ThemeProvider } from "./contexts/ThemeContext";
 import Dashboard from "./pages/Dashboard";
+import BuyPlans from "./pages/BuyPlans";
 import Dividends from "./pages/Dividends";
 import HoldingDetail from "./pages/HoldingDetail";
 import Holdings from "./pages/Holdings";
@@ -23,6 +24,7 @@ function Router() {
       <Route path="/holdings" component={Holdings} />
       <Route path="/holdings/:id" component={HoldingDetail} />
       <Route path="/dividends" component={Dividends} />
+      <Route path="/buy-plans" component={BuyPlans} />
       <Route path="/watchlist" component={Watchlist} />
       <Route path="/news" component={News} />
       <Route path="/import" component={ImportScreenshot} />

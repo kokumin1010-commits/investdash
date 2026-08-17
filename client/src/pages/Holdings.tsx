@@ -102,6 +102,16 @@ export default function Holdings() {
   }, [search]);
   const [marketFilterState, setMarketFilter] = useState<"ALL" | Market>("ALL");
   const marketFilter: "ALL" | Market = marketFromUrl ?? marketFilterState;
+  /*
+   * 買い増しプラン一覧から ?symbol=NKE で開いた場合に、その銘柄だけを表示する。
+   * 一覧から銘柄詳細へ直接飛ぶには保有 ID が必要だが、プランは銘柄単位で持つため
+   * ID を持っていない。検索語として渡して絞り込む。
+   */
+  const symbolFromUrl = useMemo(() => {
+    const params = new URLSearchParams(search.startsWith("?") ? search.slice(1) : search);
+    return params.get("symbol")?.trim() ?? null;
+  }, [search]);
+  const effectiveQuery = symbolFromUrl ?? query;
   const [addOpen, setAddOpen] = useState(false);
   const [editTarget, setEditTarget] = useState<number | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<{ id: number; name: string } | null>(null);
@@ -147,8 +157,8 @@ export default function Holdings() {
 
   const rows = useMemo(() => {
     let list = groups;
-    if (query.trim()) {
-      const q = query.trim().toLowerCase();
+    if (effectiveQuery.trim()) {
+      const q = effectiveQuery.trim().toLowerCase();
       list = list.filter(
         p =>
           p.name.toLowerCase().includes(q) ||
@@ -190,7 +200,7 @@ export default function Holdings() {
       }
     });
     return sorted;
-  }, [groups, query, signalFilter, brokerFilter, marketFilter, sortKey]);
+  }, [groups, effectiveQuery, signalFilter, brokerFilter, marketFilter, sortKey]);
 
   /** 実際に保有がある口座だけを絞り込みの選択肢にする */
   const usedBrokers = useMemo(() => {
