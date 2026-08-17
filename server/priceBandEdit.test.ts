@@ -53,17 +53,36 @@ describe("価格帯の手動編集", () => {
     expect(evaluateBands(0.01, noLower).currentBand?.actionLabel).toBe("静観");
   });
 
-  it("編集で帯の間に隙間ができると判定不能になる（保存時に防ぐ必要がある）", () => {
+  it("隙間が残ると判定不能になる（だから保存時に埋める必要がある）", () => {
     /*
-     * 195〜309.99 の下限を 250 に上げると、210〜250 が空白になる。
+     * 195〜309.99 の下限を 250 に上げると 210〜250 が空白になる。
      * この状態は「どの段にも当てはまらない」ため画面で判断が出せない。
-     * サーバー側で隙間を埋める処理は生成時のみなので、
-     * 手動編集ではこの状態が作れてしまう点をテストで明示しておく。
+     * サーバーの updateBand は保存後に隣接段を詰めてこの状態を解消する。
+     * ここでは「埋めなければ判定できない」ことを明示しておく。
      */
     const bands = [band(1, 250, 309.99, "静観"), band(2, 150, 210, "打診買い")];
     const r = evaluateBands(222.02, bands);
     expect(r.currentBand).toBeNull();
     expect(r.abovePlan).toBe(false);
     expect(r.belowPlan).toBe(false);
+  });
+
+  it("隙間を埋めた形なら、境界のすぐ下の価格でも下の段で判定できる", () => {
+    // 下の段の上限を上の段の下限の直下（249.99）まで引き上げた状態
+    const bands = [band(1, 250, 309.99, "静観"), band(2, 150, 249.99, "打診買い")];
+    expect(evaluateBands(222.02, bands).currentBand?.actionLabel).toBe("打診買い");
+    // 境界そのもの
+    expect(evaluateBands(250, bands).currentBand?.actionLabel).toBe("静観");
+    expect(evaluateBands(249.99, bands).currentBand?.actionLabel).toBe("打診買い");
+  });
+
+  it("重なりが残ると高い段が優先され、意図しない判定になる", () => {
+    /*
+     * 上限を上げすぎて重なった場合（250〜309.99 と 150〜260）、
+     * 255 は両方に当てはまる。高い順に評価するため「静観」が勝つ。
+     * 重なりも保存時に解消する必要がある理由。
+     */
+    const bands = [band(1, 250, 309.99, "静観"), band(2, 150, 260, "打診買い")];
+    expect(evaluateBands(255, bands).currentBand?.actionLabel).toBe("静観");
   });
 });

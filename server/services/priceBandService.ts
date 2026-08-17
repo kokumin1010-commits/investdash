@@ -298,11 +298,97 @@ export async function updateBand(params: {
     })
     .where(eq(priceBands.id, params.bandId));
 
+  /*
+   * 手直しの結果できた隙間・重なりを埋める。
+   *
+   * 例: 195〜309.99 の下限を 250 に上げると 210〜250 が空白になり、
+   * 株価がそこに来たときに何をすべきか出せなくなる（実際に AI 生成でも
+   * 同じ問題が起きて 2 銘柄が判定不能になった）。
+   * 生成時と同じ整え方（下の段の上限を上の段の下限の直下まで引き上げる）を
+   * 編集後にも通すことで、判定不能な状態を残さない。
+   *
+   * 直した段そのものは動かさない。ユーザーが入れた数字を勝手に変えると
+   * 「保存したのに違う値になっている」ことになるため、動かすのは隣接する段だけ。
+   */
+  await resolveGapsAfterEdit(d, row.planId, params.bandId);
+
   // 手で直したことを残す。作り直すと消える点を画面で伝えるため
   await d
     .update(priceBandPlans)
     .set({ editedByUser: true })
     .where(eq(priceBandPlans.id, row.planId));
+}
+
+/**
+ * 手動編集の後、プラン内の段が隙間なく連続するように整える。
+ *
+ * `keepBandId` の段は動かさない（ユーザーが入れた数字をそのまま残す）。
+ * 高い順に並べ、隣接する段の境界が離れていれば下の段の上限を引き上げ、
+ * 重なっていれば下の段の上限を引き下げる。
+ */
+async function resolveGapsAfterEdit(
+  d: Awaited<ReturnType<typeof requireDb>>,
+  planId: number,
+  keepBandId: number
+): Promise<void> {
+  const rows = await d
+    .select()
+    .from(priceBands)
+    .where(eq(priceBands.planId, planId))
+    .orderBy(priceBands.sortOrder);
+
+  type W = { id: number; lower: number | null; upper: number | null };
+  const bands: W[] = rows.map(r => ({
+    id: r.id,
+    lower: r.lowerPrice === null ? null : Number(r.lowerPrice),
+    upper: r.upperPrice === null ? null : Number(r.upperPrice),
+  }));
+
+  // 高い順（上限が大きい順）に並べる。null の上限は「上限なし」なので最上位
+  bands.sort((a, b) => {
+    const au = a.upper ?? Number.POSITIVE_INFINITY;
+    const bu = b.upper ?? Number.POSITIVE_INFINITY;
+    if (au !== bu) return bu - au;
+    return (b.lower ?? Number.NEGATIVE_INFINITY) - (a.lower ?? Number.NEGATIVE_INFINITY);
+  });
+
+  const round2 = (n: number) => Math.round(n * 100) / 100;
+  const changed = new Map<number, { lower: number | null; upper: number | null }>();
+
+  for (let i = 1; i < bands.length; i++) {
+    const above = bands[i - 1];
+    const below = bands[i];
+    if (above.lower === null || below.upper === null) continue;
+
+    const want = round2(above.lower - 0.01);
+    // 0.01 ちょうどで接している状態が正しい。離れていても重なっていても直す
+    if (Math.abs(above.lower - below.upper - 0.01) < 0.005) continue;
+
+    // 直した段は動かさない。代わりに反対側を動かす
+    if (below.id === keepBandId) {
+      // 下の段が編集対象 → 上の段の下限を下の段の上限の直上に合わせる
+      const newLower = round2(below.upper + 0.01);
+      // 上の段の上限を割り込むなら整えられないので諦める（無理に詰めると段が消える）
+      if (above.upper !== null && newLower > above.upper) continue;
+      above.lower = newLower;
+      changed.set(above.id, { lower: above.lower, upper: above.upper });
+    } else {
+      // 下の段の上限を上の段の下限の直下に合わせる
+      if (below.lower !== null && want < below.lower) continue;
+      below.upper = want;
+      changed.set(below.id, { lower: below.lower, upper: below.upper });
+    }
+  }
+
+  for (const [id, v] of Array.from(changed.entries())) {
+    await d
+      .update(priceBands)
+      .set({
+        lowerPrice: v.lower === null ? null : String(v.lower),
+        upperPrice: v.upper === null ? null : String(v.upper),
+      })
+      .where(eq(priceBands.id, id));
+  }
 }
 
 /**
