@@ -34,9 +34,11 @@ import {
   Brain,
   ExternalLink,
   Globe,
+  Loader2,
   Newspaper,
   RefreshCw,
   Save,
+  Sparkles,
   TrendingUp,
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
@@ -738,6 +740,25 @@ function InvestmentCardForm({
     onError: e => toast.error(e.message),
   });
 
+  /*
+   * AI に下書きさせる。
+   *
+   * 手で書く前提だと 112 銘柄は書き切れず、実際に 1 件も作られていなかった。
+   * 購入判断はもともと AI に相談して決めているので、下書きを AI が作り
+   * 必要なら直すだけの形にする。
+   */
+  const draft = trpc.portfolio.draftCard.useMutation({
+    onSuccess: async res => {
+      await utils.portfolio.invalidate();
+      if (res.created) {
+        toast.success("AI が下書きを作りました。内容を確認してください");
+      } else {
+        toast.info(res.reason ?? "すでに内容があるため上書きしていません");
+      }
+    },
+    onError: e => toast.error(e.message),
+  });
+
   const set = (key: keyof typeof form) => (v: string) => {
     setForm(f => ({ ...f, [key]: v }));
     setDirty(true);
@@ -762,9 +783,42 @@ function InvestmentCardForm({
                 「なぜこの銘柄を買ったのか」を忘れないための記録。AI シグナルはこの内容を判断材料に使います。
               </CardDescription>
             </div>
-            <Badge variant={filledCount === FIELDS.length ? "default" : "secondary"}>
-              {filledCount} / {FIELDS.length} 項目 記入済み
-            </Badge>
+            <div className="flex flex-wrap items-center gap-2">
+              <Badge variant={filledCount === FIELDS.length ? "default" : "secondary"}>
+                {filledCount} / {FIELDS.length} 項目 記入済み
+              </Badge>
+              <Button
+                size="sm"
+                variant={filledCount === 0 ? "default" : "outline"}
+                className={filledCount === 0 ? "" : "bg-background"}
+                disabled={draft.isPending}
+                onClick={() => {
+                  /*
+                   * すでに書いてある場合は上書きの確認を取る。
+                   * 手で直した内容が消えると直す気力がなくなる。
+                   */
+                  const force =
+                    filledCount === 0 ||
+                    window.confirm(
+                      "すでに記入がある項目も AI の下書きで置き換えますか。元の内容は残りません。"
+                    );
+                  if (!force && filledCount > 0) return;
+                  draft.mutate({ symbol, force: filledCount > 0 });
+                }}
+              >
+                {draft.isPending ? (
+                  <>
+                    <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />
+                    AI が下書き中
+                  </>
+                ) : (
+                  <>
+                    <Sparkles className="mr-1 h-3.5 w-3.5" />
+                    {filledCount === 0 ? "AI に下書きさせる" : "AI で作り直す"}
+                  </>
+                )}
+              </Button>
+            </div>
           </div>
         </CardHeader>
         <CardContent className="space-y-5">

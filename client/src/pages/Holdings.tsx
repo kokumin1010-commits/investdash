@@ -60,10 +60,12 @@ import {
   Coins,
   ExternalLink,
   FileText,
+  Loader2,
   Newspaper,
   Plus,
   RefreshCw,
   Search,
+  Sparkles,
   Trash2,
 } from "lucide-react";
 import { Fragment, useMemo, useState } from "react";
@@ -121,6 +123,30 @@ export default function Holdings() {
     onSuccess: async res => {
       await utils.portfolio.invalidate();
       toast.success(`${res.updated} 銘柄の株価を更新しました`);
+    },
+    onError: e => toast.error(e.message),
+  });
+  /*
+   * 投資カードをまとめて下書きする。
+   *
+   * 残り件数を出すのは、一度で終わらないことを隠すと
+   * 「押したのに増えない」と誤解されるため。
+   */
+  const draftCards = trpc.portfolio.draftMissingCards.useMutation({
+    onSuccess: async res => {
+      await utils.portfolio.invalidate();
+      if (res.created === 0 && res.processed === 0) {
+        toast.info("下書きが必要な銘柄はありません");
+      } else {
+        toast.success(`${res.created} 銘柄の投資カードを下書きしました`, {
+          description:
+            res.remaining > 0
+              ? `残り ${res.remaining} 銘柄。もう一度押すと続けて下書きします`
+              : res.failed.length > 0
+                ? `失敗: ${res.failed.join(", ")}`
+                : "すべての銘柄に下書きが入りました",
+        });
+      }
     },
     onError: e => toast.error(e.message),
   });
@@ -291,6 +317,24 @@ export default function Holdings() {
               className={`mr-1.5 h-3.5 w-3.5 ${syncPrices.isPending ? "animate-spin" : ""}`}
             />
             株価更新
+          </Button>
+          {/*
+            投資カードをまとめて下書きする。
+            1 銘柄ずつ開いて押すのは 112 銘柄では続かないため入口を用意する。
+            一度に全件回すと 40 分以上かかるので評価額の大きい順に区切って進める。
+          */}
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={draftCards.isPending || positions.length === 0}
+            onClick={() => draftCards.mutate({ limit: 10 })}
+          >
+            {draftCards.isPending ? (
+              <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <Sparkles className="mr-1.5 h-3.5 w-3.5" />
+            )}
+            投資カードを下書き
           </Button>
           <Button size="sm" onClick={() => setAddOpen(true)}>
             <Plus className="mr-1.5 h-4 w-4" />

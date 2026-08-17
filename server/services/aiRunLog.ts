@@ -20,6 +20,7 @@ export type AiRunKind =
   | "news_analysis"
   | "candidate_suggestion"
   | "weekly_report"
+  | "card_draft"
   | "ocr";
 
 export async function logAiRun(params: {

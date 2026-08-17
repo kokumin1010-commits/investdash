@@ -30,6 +30,7 @@ import {
   listReports,
 } from "../services/reportService";
 import { createUrgentReports } from "../services/urgentReport";
+import { draftCardForSymbol, draftMissingCards } from "../services/cardService";
 import { listAiRuns } from "../services/aiRunLog";
 import { generateCandidateSuggestions, addCandidatesToWatchlist } from "../services/candidateService";
 import {
@@ -554,6 +555,23 @@ export const portfolioRouter = router({
     ),
 
   /** セクター情報の補完 */
+  /**
+   * 投資カードを AI に下書きさせる。
+   *
+   * 手で書く前提だと 112 銘柄は書き切れず 1 件も作られていなかった。
+   * AI が下書きし、必要なら直すだけの形にする。
+   */
+  draftCard: protectedProcedure
+    .input(z.object({ symbol: z.string().min(1).max(24), force: z.boolean().default(false) }))
+    .mutation(async ({ ctx, input }) =>
+      draftCardForSymbol(ctx.user.id, input.symbol, input.force)
+    ),
+
+  /** カードが空の銘柄をまとめて下書きする（評価額の大きい順） */
+  draftMissingCards: protectedProcedure
+    .input(z.object({ limit: z.number().int().min(1).max(30).default(10) }).optional())
+    .mutation(async ({ ctx, input }) => draftMissingCards(ctx.user.id, input?.limit ?? 10)),
+
   enrichProfiles: protectedProcedure
     .input(z.object({ force: z.boolean().default(false) }).optional())
     .mutation(async ({ ctx, input }) => {
