@@ -27,6 +27,20 @@ export type DividendCalendarEntry = {
   amountBase: number;
   /** その月の受取額が年間受取額の何割か（0〜1）。年 1 回なら 1 */
   shareOfAnnual: number | null;
+  /**
+   * 現在値に対する年間の配当利回り（%）。株価が未取得なら null。
+   *
+   * その月の受取額ではなく年間ベースの利回りを持たせる。月ごとに割ると
+   * 「3 月だけ 4%」のような、年間の水準と比較できない数字になるため。
+   */
+  yieldPct: number | null;
+  /**
+   * 取得単価に対する年間の配当利回り（%）。
+   * 長期保有では「買った値段に対していくら返ってくるか」が実感に近い。
+   */
+  yieldOnCostPct: number | null;
+  /** 業種（英語の原文）。未取得なら null */
+  sector: string | null;
   /** 特別配当が含まれる銘柄か。含む場合は来期も同額とは限らない */
   hasSpecial: boolean;
   /** 利回りが実勢としてありえない水準か */
@@ -55,12 +69,18 @@ export type CalendarInput = {
   broker: Broker;
   currency: string;
   quantity: number;
+  /** 業種。株価取得時に併せて保存される。未取得なら null */
+  sector: string | null;
   dividend: {
     /** 1 株あたりの月別配当（現地通貨・12 要素）。無ければ null */
     monthlyPerShare: number[] | null;
     /** 月別の受取額（円換算・12 要素）。無ければ null */
     monthlyIncomeBase: number[] | null;
     annualIncomeBase: number | null;
+    /** 現在値に対する年間利回り（%） */
+    yieldPct: number | null;
+    /** 取得単価に対する年間利回り（%） */
+    yieldOnCostPct: number | null;
     hasSpecial: boolean;
     yieldNeedsCheck: boolean;
   } | null;
@@ -116,6 +136,14 @@ export function buildDividendCalendar(items: CalendarInput[]): DividendCalendarM
         amount: local,
         amountBase: base,
         shareOfAnnual: annual !== null && annual > 0 ? base / annual : null,
+        /*
+         * 利回りは呼び出し側で計算済みの値をそのまま渡す。ここで
+         * 再計算すると株価と配当の組み合わせが 2 か所に分かれ、
+         * 銘柄一覧と配当ページで違う利回りが出る恐れがある。
+         */
+        yieldPct: d.yieldPct,
+        yieldOnCostPct: d.yieldOnCostPct,
+        sector: it.sector,
         hasSpecial: d.hasSpecial,
         yieldNeedsCheck: d.yieldNeedsCheck,
       });

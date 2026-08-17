@@ -35,6 +35,7 @@ import {
   type InterestAssetView,
 } from "./interestAssets";
 import { groupPositionsBySymbol, type GroupedPosition } from "./groupPositions";
+import { fillMissingSectors } from "./sectorFill";
 import { buildMarketSlices, type MarketSlice } from "./marketSlices";
 import { computePeriodChange, type PeriodChange } from "./periodChange";
 import {
@@ -431,7 +432,20 @@ export async function buildPortfolio(userId: number): Promise<{
   const toBase = (value: number | null, currency: string): number | null =>
     convertToJpy(value, currency, rates);
 
+  /*
+   * 同一銘柄を複数口座で持つ場合、業種が片方のレコードにしか入っていないことがある。
+   * 業種は企業プロファイル取得時にレコード単位で保存されるため、
+   * 一方だけ未取得のまま残る（実データで F34・D05・7203.T など 8 件が該当した）。
+   *
+   * 業種は銘柄の属性で口座ごとに変わるものではないので、
+   * 同じ銘柄の他レコードに入っている値をそのまま使う。DB は書き換えずに
+   * 表示上だけ補うので、次回のプロファイル取得の対象からは外れない。
+   */
+  const sectorBySymbol = fillMissingSectors(rows);
+
   const partial = rows.map(h => {
+    /** 自分のレコードに業種が無い場合に限り、同一銘柄の他レコードから借りる */
+    const filled = h.sector ? undefined : sectorBySymbol.get(h.symbol);
     const quantity = n(h.quantity) ?? 0;
     const avgCost = n(h.avgCost) ?? 0;
     const currentPrice = n(h.currentPrice);
@@ -499,8 +513,8 @@ export async function buildPortfolio(userId: number): Promise<{
       previousClose,
       fiftyTwoWeekHigh: n(h.fiftyTwoWeekHigh),
       fiftyTwoWeekLow: n(h.fiftyTwoWeekLow),
-      sector: h.sector,
-      industry: h.industry,
+      sector: h.sector ?? filled?.sector ?? null,
+      industry: h.industry ?? filled?.industry ?? null,
       website: h.website,
       businessSummary: h.businessSummary,
       marketValue,

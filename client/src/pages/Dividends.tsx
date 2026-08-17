@@ -742,6 +742,17 @@ export default function Dividends() {
                                   <BrokerBadge broker={e.broker} short />
                                   <span>·</span>
                                   <span>{marketLabel(e.market)}</span>
+                                  {/*
+                                    業種を添える。同じ月に配当が集中していても、
+                                    それが全部エネルギーなら分散が効いていない。
+                                    月の偏りと業種の偏りは別の問題なので両方見せる。
+                                  */}
+                                  {e.sector ? (
+                                    <>
+                                      <span>·</span>
+                                      <span className="truncate">{sectorJa(e.sector)}</span>
+                                    </>
+                                  ) : null}
                                 </div>
                               </div>
                               <div className="shrink-0 text-right">
@@ -759,6 +770,15 @@ export default function Dividends() {
                                     className="block text-[11px] text-muted-foreground"
                                   />
                                 ) : null}
+                                {/*
+                                  年間ベースの利回り。金額だけでは投資額に見合うか
+                                  分からない（20 万円の配当でも投資額 200 万なら 10%、
+                                  2000 万なら 1%）。この月の受取額に対する率ではなく
+                                  年間の水準を出すので、他の月の同じ銘柄でも同じ値になる。
+                                */}
+                                <p className="tabular text-[11px] text-muted-foreground">
+                                  利回り {e.yieldPct !== null ? `${e.yieldPct.toFixed(2)}%` : "—"}
+                                </p>
                               </div>
                             </Link>
                           ))}
