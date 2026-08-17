@@ -2252,6 +2252,12 @@ held=false・weightPct=null なので、保有銘柄と混ざらず未保有と�
 - [ ] AI が銘柄ごとに買い増しの是非を提案する
       ニュース・決算・構成比・資産全体（現金 9,405 万円・レバレッジ 1.18 倍）・
       業種と国の偏りを見て結論を出す。保有・未保有の両方を対象にする。
+- [x] 本番で目標価格の距離判定を確認
+      /watchlist・/buy-plans ともに HTTP 200。本番 API が targetLevel /
+      targetNeedsRework / targetNote を返し、CVX（FAR / -29.0%）と
+      Jパワー（FAR / -20.1%）が警告のみ、作り直し済みの INPEX は
+      3,300 円で NEAR に落ちていることを確認。エラーログ 0 件。
+      テスト 669 件パス。GitHub へプッシュ済み（a53af2c）。
 
 - [x] 本番（investdash-h5pd9fya.manus.space）で相談 AI の強化を確認
       デプロイ成功。トップ・相談・買い増しプランはいずれも HTTP 200。
