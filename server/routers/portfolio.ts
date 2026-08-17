@@ -13,6 +13,7 @@ import {
   generateAndSavePlanForHolding,
   getPlan,
   listPlanStatus,
+  runChecksForBand,
 } from "../services/priceBandService";
 import { listAiRuns } from "../services/aiRunLog";
 import {
@@ -618,6 +619,22 @@ export const portfolioRouter = router({
   priceBandPlanStatus: protectedProcedure.query(async ({ ctx }) =>
     listPlanStatus(ctx.user.id)
   ),
+
+  /**
+   * 価格帯の確認項目をニュースと照合する。
+   *
+   * 現在値がその帯の中にいないと実行できない（サービス層で弾く）。
+   * 常に動かすと AI 利用枠を無駄に使い、まだ関係のない懸念で判断が濁るため。
+   */
+  runBandChecks: protectedProcedure
+    .input(z.object({ bandId: z.number().int().positive() }))
+    .mutation(async ({ ctx, input }) => {
+      try {
+        return await runChecksForBand(ctx.user.id, input.bandId);
+      } catch (error) {
+        throw toFriendlyAiError(error, "確認項目の照合に失敗しました");
+      }
+    }),
 
   /**
    * 全銘柄のプランを生成する（1 リクエスト = 1 バッチ）。

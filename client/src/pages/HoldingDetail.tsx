@@ -75,6 +75,24 @@ export default function HoldingDetail({ params }: { params: { id: string } }) {
     onError: e => toast.error(e.message),
   });
 
+  /*
+   * 確認項目の照合。今いる価格帯の項目だけを対象にする。
+   * サーバー側でも帯の外なら弾くので、押せてしまっても誤った照合は行われない。
+   */
+  const runBandChecks = trpc.portfolio.runBandChecks.useMutation({
+    onSuccess: async res => {
+      await utils.portfolio.priceBandPlan.invalidate();
+      const checked = res.bands.flatMap(b => b.checks ?? []);
+      const concern = checked.filter(c => c.status === "CONCERN").length;
+      toast.success(
+        concern > 0
+          ? `確認しました。懸念材料が ${concern} 件見つかりました`
+          : "確認しました。懸念材料は見つかりませんでした"
+      );
+    },
+    onError: e => toast.error(e.message),
+  });
+
   const regenSignal = trpc.portfolio.regenerateSignal.useMutation({
     onSuccess: async res => {
       await utils.portfolio.invalidate();
@@ -339,6 +357,8 @@ export default function HoldingDetail({ params }: { params: { id: string } }) {
         onGenerate={() => {
           if (symbol) generateBandPlan.mutate({ symbol });
         }}
+        onRunChecks={bandId => runBandChecks.mutate({ bandId })}
+        isCheckingBandId={runBandChecks.isPending ? runBandChecks.variables?.bandId : null}
       />
 
       <Tabs defaultValue="card">

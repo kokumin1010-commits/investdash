@@ -21,6 +21,7 @@ import {
 import { withAiRunLog } from "./aiRunLog";
 import { buildPortfolio } from "./portfolio";
 import { fetchPriceHistory } from "./marketData";
+import { runBandChecks, BAND_CHECKER_MODEL } from "./bandChecker";
 
 /**
  * 買い増しプランの保存・取得・生成をまとめる。
@@ -354,6 +355,105 @@ export async function generateAndSavePlanForHolding(
 }
 
 /** 保有銘柄すべてのプラン有無を返す（一覧表示・一括生成の進捗確認に使う） */
+export async function runChecksForBand(
+  userId: number,
+  bandId: number
+): Promise<PriceBandPlanView> {
+  const d = await requireDb();
+
+  const [band] = await d.select().from(priceBands).where(eq(priceBands.id, bandId)).limit(1);
+  if (!band) throw new Error("価格帯が見つかりません");
+
+  const [plan] = await d
+    .select()
+    .from(priceBandPlans)
+    .where(and(eq(priceBandPlans.id, band.planId), eq(priceBandPlans.userId, userId)))
+    .limit(1);
+  if (!plan) throw new Error("この価格帯を参照する権限がありません");
+
+  const items = (band.checkItems as string[] | null) ?? [];
+  if (items.length === 0) throw new Error("この価格帯には確認項目が設定されていません");
+
+  const holdings = await db.listHoldings(userId);
+  const holding = holdings.find(h => h.symbol === plan.symbol);
+  if (!holding) throw new Error(`保有銘柄に ${plan.symbol} が見つかりません`);
+
+  const [news, portfolio] = await Promise.all([
+    db.listNews(userId, { symbol: plan.symbol, limit: 20 }),
+    buildPortfolio(userId),
+  ]);
+  const view = portfolio.groups.find(g => g.symbol === plan.symbol);
+  const currentPrice = view?.currentPrice ?? null;
+
+  /*
+   * 価格帯に入っていない段の確認は実行しない。
+   * 常に動かすと AI 利用枠を無駄に消費するうえ、まだ関係のない懸念材料を
+   * 目にすることで判断が濁る。確認は必要な場面に絞る。
+   */
+  const lower = band.lowerPrice === null ? null : Number(band.lowerPrice);
+  const upper = band.upperPrice === null ? null : Number(band.upperPrice);
+  const inBand =
+    currentPrice !== null &&
+    (lower === null || currentPrice >= lower) &&
+    (upper === null || currentPrice <= upper);
+  if (!inBand) {
+    throw new Error(
+      `現在値${currentPrice !== null ? `（${currentPrice}）` : ""}はこの価格帯の外です。この価格帯に入ってから確認してください。`
+    );
+  }
+
+  const outcomes = await withAiRunLog(
+    {
+      userId,
+      kind: "band_check",
+      symbol: plan.symbol,
+      model: BAND_CHECKER_MODEL,
+      summarize: rows =>
+        `${rows.length} 項目を照合: ` +
+        `懸念 ${rows.filter(r => r.status === "CONCERN").length} / ` +
+        `問題なし ${rows.filter(r => r.status === "CLEAR").length} / ` +
+        `不明 ${rows.filter(r => r.status === "UNKNOWN").length}`,
+    },
+    () =>
+      runBandChecks({
+        name: holding.name,
+        symbol: plan.symbol,
+        actionLabel: band.actionLabel,
+        checkItems: items,
+        news: news.map(n => ({
+          title: n.title,
+          summary: n.summary,
+          sentiment: n.sentiment,
+          impactScore: n.impactScore,
+          publishedAt: n.publishedAt,
+          source: n.source,
+        })),
+      })
+  );
+
+  /*
+   * 同じ項目を再確認した場合は古い結果を消してから入れる。
+   * 残しておくと「いつの判断か」が混ざり、古い懸念を今のものと誤読する。
+   */
+  for (const o of outcomes) {
+    await d
+      .delete(bandCheckResults)
+      .where(and(eq(bandCheckResults.bandId, bandId), eq(bandCheckResults.checkItem, o.checkItem)));
+    await d.insert(bandCheckResults).values({
+      userId,
+      bandId,
+      checkItem: o.checkItem,
+      status: o.status,
+      finding: o.finding,
+      sourceCount: o.sourceCount,
+    });
+  }
+
+  const saved = await getPlan(userId, plan.symbol, currentPrice);
+  if (!saved) throw new Error("プランを取得できませんでした");
+  return saved;
+}
+
 export async function listPlanStatus(
   userId: number
 ): Promise<Array<{ symbol: string; name: string; hasPlan: boolean; generatedAt: Date | null }>> {
