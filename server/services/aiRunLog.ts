@@ -23,6 +23,7 @@ export type AiRunKind =
   | "card_draft"
   | "consult"
   | "target_revise"
+  | "add_proposal"
   | "ocr";
 
 export async function logAiRun(params: {

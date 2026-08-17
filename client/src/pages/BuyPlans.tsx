@@ -19,6 +19,7 @@ import { AlertTriangle, ArrowDown, Search, TrendingUp } from "lucide-react";
 import { useMemo, useState } from "react";
 import { Link } from "wouter";
 import { TransitionHistoryCard } from "@/components/investing/TransitionHistoryCard";
+import { AddProposalCard } from "@/components/investing/AddProposalCard";
 
 /**
  * 買い増しプランの一覧。
@@ -140,6 +141,13 @@ export default function BuyPlans() {
           </CardContent>
         </Card>
       )}
+
+      {/*
+        AI の結論を一覧より前に置く。
+        月 1 回しか開かない使い方では、123 行から自分で探させるのではなく
+        「どれを買うべきか」の結論が先に見えている方が判断が始まる。
+      */}
+      <AddProposalCard />
 
       <div className="flex flex-wrap items-center gap-2">
         {FILTERS.map(f => (

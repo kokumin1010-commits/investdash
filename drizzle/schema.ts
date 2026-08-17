@@ -915,3 +915,53 @@ export const consultOutcomes = mysqlTable(
 );
 export type ConsultOutcome = typeof consultOutcomes.$inferSelect;
 export type InsertConsultOutcome = typeof consultOutcomes.$inferInsert;
+
+/**
+ * 銘柄ごとの買い増し提案。
+ *
+ * 相談（consultations）と分けているのは、こちらは質問を待たずに
+ * システム側から出すものだから。相談は「聞かれたら答える」、これは
+ * 「株価が動いたら勝手に出しておく」という違いがある。月に 1 回しか
+ * 画面を見ない使い方では、見た瞬間に結論が並んでいる方が役に立つ。
+ *
+ * 保存するのは最新の 1 件だけにしない。過去にどう判断したかを残さないと
+ * 「先月は見送りと言っていたのに今月は買いと言う」変化に気付けない。
+ */
+export const addProposals = mysqlTable(
+  "addProposals",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    userId: int("userId").notNull(),
+    symbol: varchar("symbol", { length: 24 }).notNull(),
+    /** 提案時点で保有していたか。未保有なら新規購入の提案になる */
+    held: boolean("held").notNull().default(true),
+    /**
+     * 結論。BUY = 買う / WAIT = 待つ / SKIP = 見送る（対象から外す）。
+     * 売却はこの機能では扱わない（買い増しの是非を判断する用途に絞る）。
+     */
+    stance: mysqlEnum("stance", ["BUY", "WAIT", "SKIP"]).notNull(),
+    /** 結論の 1 文。一覧に並べる */
+    conclusion: text("conclusion").notNull(),
+    /** 根拠。なぜその結論かを数字付きで */
+    rationale: text("rationale").notNull(),
+    /** 買う場合の金額（基準通貨・円）。待つ・見送る場合は null */
+    amountBase: decimal("amountBase", { precision: 20, scale: 2 }),
+    /** 買う場合の指値の目安（現地通貨） */
+    limitPrice: decimal("limitPrice", { precision: 20, scale: 4 }),
+    /** 提案時点の株価（現地通貨）。後から当否を測る基準 */
+    priceAtProposal: decimal("priceAtProposal", { precision: 20, scale: 4 }),
+    /** 提案時点の構成比（%） */
+    sharePctAtProposal: decimal("sharePctAtProposal", { precision: 10, scale: 4 }),
+    /** 結論を覆す条件。何が起きたら考えを変えるか */
+    invalidation: text("invalidation"),
+    /** 使ったモデル */
+    model: varchar("model", { length: 64 }),
+    createdAt: timestamp("createdAt").defaultNow().notNull(),
+  },
+  table => ({
+    userSymbolIdx: index("add_proposals_user_symbol_idx").on(table.userId, table.symbol),
+    createdIdx: index("add_proposals_created_idx").on(table.userId, table.createdAt),
+  })
+);
+export type AddProposal = typeof addProposals.$inferSelect;
+export type InsertAddProposal = typeof addProposals.$inferInsert;

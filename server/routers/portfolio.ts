@@ -36,6 +36,12 @@ import { listAiRuns } from "../services/aiRunLog";
 import { checkVerdicts } from "../services/outcomeService";
 import { generateCandidateSuggestions, addCandidatesToWatchlist } from "../services/candidateService";
 import {
+  generateProposal,
+  generateProposalBatch,
+  listProposals,
+  listProposalsForSymbol,
+} from "../services/addProposalService";
+import {
   buildPortfolio,
   enrichProfiles,
   syncDividends,
@@ -786,6 +792,47 @@ export const portfolioRouter = router({
   priceBandPlanStatus: protectedProcedure.query(async ({ ctx }) =>
     listPlanStatus(ctx.user.id)
   ),
+
+  /**
+   * 買い増しの是非を AI が結論付ける（1 銘柄）。
+   *
+   * 相談 AI と分けているのは、こちらは質問を待たずに出すものだから。
+   * 金額は資産全体から機械的に算定した範囲に収める（AI に自由に
+   * 決めさせると根拠のない額が出る）。
+   */
+  generateAddProposal: protectedProcedure
+    .input(z.object({ symbol: z.string().min(1).max(24) }))
+    .mutation(async ({ ctx, input }) => {
+      try {
+        return await generateProposal(ctx.user.id, input.symbol);
+      } catch (error) {
+        throw toFriendlyAiError(error, "買い増し提案の生成に失敗しました");
+      }
+    }),
+
+  /**
+   * 判断が必要な銘柄をまとめて提案する。
+   *
+   * 112 銘柄すべてに走らせると 30 分以上かかるため、買い増しの段に
+   * いる・懸念がある・次の段が近い銘柄だけに絞る。
+   */
+  generateAddProposalBatch: protectedProcedure
+    .input(z.object({ limit: z.number().int().min(1).max(12).optional() }).optional())
+    .mutation(async ({ ctx, input }) => {
+      try {
+        return await generateProposalBatch(ctx.user.id, input?.limit);
+      } catch (error) {
+        throw toFriendlyAiError(error, "買い増し提案の生成に失敗しました");
+      }
+    }),
+
+  /** 提案の一覧（銘柄ごとに最新の 1 件） */
+  addProposals: protectedProcedure.query(async ({ ctx }) => listProposals(ctx.user.id)),
+
+  /** 1 銘柄の提案履歴。判断がいつ変わったかを追えるようにする */
+  addProposalHistory: protectedProcedure
+    .input(z.object({ symbol: z.string().min(1).max(24) }))
+    .query(async ({ ctx, input }) => listProposalsForSymbol(ctx.user.id, input.symbol)),
 
   /**
    * 全銘柄の「今どの段にいるか」の一覧。
