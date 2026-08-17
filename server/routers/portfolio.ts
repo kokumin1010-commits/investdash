@@ -10,6 +10,12 @@ import {
   summarizeInterestAssets,
 } from "../services/interestAssets";
 import {
+  generateAndSavePlanForHolding,
+  getPlan,
+  listPlanStatus,
+} from "../services/priceBandService";
+import { listAiRuns } from "../services/aiRunLog";
+import {
   buildPortfolio,
   enrichProfiles,
   syncDividends,
@@ -582,6 +588,105 @@ export const portfolioRouter = router({
   signalHistory: protectedProcedure
     .input(z.object({ symbol: z.string().min(1).max(24) }))
     .query(async ({ ctx, input }) => db.signalHistory(ctx.user.id, input.symbol, 20)),
+
+  /**
+   * 買い増しプラン（価格帯ごとの行動）の取得。
+   *
+   * 現在値は保有一覧の合算ビューから取る。段の判定に使う価格は現地通貨。
+   * 表示通貨に換算した価格で判定すると、実際に注文できない水準になってしまう。
+   */
+  priceBandPlan: protectedProcedure
+    .input(z.object({ symbol: z.string().min(1).max(24) }))
+    .query(async ({ ctx, input }) => {
+      const portfolio = await buildPortfolio(ctx.user.id);
+      const view = portfolio.groups.find(g => g.symbol === input.symbol);
+      return await getPlan(ctx.user.id, input.symbol, view?.currentPrice ?? null);
+    }),
+
+  /** 買い増しプランを AI で生成する（1 銘柄） */
+  generatePriceBandPlan: protectedProcedure
+    .input(z.object({ symbol: z.string().min(1).max(24) }))
+    .mutation(async ({ ctx, input }) => {
+      try {
+        return await generateAndSavePlanForHolding(ctx.user.id, input.symbol);
+      } catch (error) {
+        throw toFriendlyAiError(error, "買い増しプランの生成に失敗しました");
+      }
+    }),
+
+  /** 保有銘柄のプラン有無の一覧（一括生成の進捗確認に使う） */
+  priceBandPlanStatus: protectedProcedure.query(async ({ ctx }) =>
+    listPlanStatus(ctx.user.id)
+  ),
+
+  /**
+   * 全銘柄のプランを生成する（1 リクエスト = 1 バッチ）。
+   *
+   * シグナル生成と同じ理由でバッチ分割する。本番のリクエスト上限が 180 秒で、
+   * 1 銘柄あたり 10〜16 秒かかるため、一度に処理できるのは 6 件程度。
+   */
+  generateAllPriceBandPlans: protectedProcedure
+    .input(
+      z
+        .object({
+          offset: z.number().int().min(0).default(0),
+          batchSize: z.number().int().min(1).max(10).default(6),
+          /** すでにプランがある銘柄も作り直すか */
+          force: z.boolean().default(false),
+        })
+        .default({ offset: 0, batchSize: 6, force: false })
+    )
+    .mutation(async ({ ctx, input }) => {
+      const status = await listPlanStatus(ctx.user.id);
+      const targets = input.force ? status : status.filter(s => !s.hasPlan);
+      const total = targets.length;
+      const batch = targets.slice(input.offset, input.offset + input.batchSize);
+
+      let ok = 0;
+      const failed: string[] = [];
+      let quotaExhausted = false;
+
+      for (const t of batch) {
+        try {
+          await generateAndSavePlanForHolding(ctx.user.id, t.symbol);
+          ok += 1;
+        } catch (error) {
+          console.warn(`[portfolio] price band plan failed for ${t.symbol}:`, error);
+          failed.push(t.symbol);
+          if (isQuotaError(error)) {
+            quotaExhausted = true;
+            break;
+          }
+        }
+      }
+
+      const processed = input.offset + batch.length;
+      const nextOffset = quotaExhausted || processed >= total ? null : processed;
+
+      if (quotaExhausted && ok === 0 && input.offset === 0) {
+        throw new TRPCError({
+          code: "TOO_MANY_REQUESTS",
+          message:
+            "AI の利用枠を使い切ったため生成できませんでした。時間をおいてから再度お試しください（通常は数時間で回復します）。",
+        });
+      }
+
+      return { ok, failed, quotaExhausted, total, processed, nextOffset } as const;
+    }),
+
+  /** AI 実行履歴（いつ何をどう判断したかを後から追えるようにする） */
+  aiRunHistory: protectedProcedure
+    .input(
+      z
+        .object({
+          kind: z.string().max(48).optional(),
+          limit: z.number().int().min(1).max(200).default(50),
+        })
+        .optional()
+    )
+    .query(async ({ ctx, input }) =>
+      listAiRuns(ctx.user.id, { kind: input?.kind, limit: input?.limit ?? 50 })
+    ),
 });
 
 export type PortfolioRouter = typeof portfolioRouter;

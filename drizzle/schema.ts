@@ -482,6 +482,167 @@ export type InsertBrokerBalance = typeof brokerBalances.$inferInsert;
 export type InsertInterestAsset = typeof interestAssets.$inferInsert;
 
 /**
+ * 買い増しプラン（価格帯ごとの行動）。
+ *
+ * ユーザーは「この値段になったらこうする」という段組みで判断している。
+ * 例（Marvell）:
+ *   160〜170 ドル → 持有、急いで買い増さない
+ *   145〜152 ドル → 小幅追加
+ *   125〜138 ドル → ファンダメンタルズに問題がなければ主力で買い増す
+ *   110 ドル以下  → 大口顧客の喪失や AI 受注の悪化を確認してから判断
+ *
+ * 目標価格を 1 点だけ持つ設計では表現できないため、銘柄ごとに複数段を持つ。
+ * 段は AI が自動提案し、ユーザーが必要なら数字を直せる。
+ */
+export const priceBandPlans = mysqlTable(
+  "priceBandPlans",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    userId: int("userId").notNull(),
+    /**
+     * 対象銘柄。holdings.id ではなく symbol で紐付ける。
+     * 同じ銘柄を複数口座で持っていてもプランは 1 つで足りるため。
+     */
+    symbol: varchar("symbol", { length: 24 }).notNull(),
+    /** 価格帯の通貨（銘柄の現地通貨）。換算した数字で判断すると注文に使えない */
+    currency: varchar("currency", { length: 8 }).notNull(),
+    /**
+     * 保有銘柄の買い増し判断か、未保有銘柄の新規購入判断か。
+     * 同じ仕組みを両方に使えるようにする。
+     */
+    scope: mysqlEnum("scope", ["HOLDING", "WATCHLIST"]).default("HOLDING").notNull(),
+    /** 全体の考え方。なぜこの段組みにしたかの説明 */
+    strategy: text("strategy"),
+    /** 提案の根拠。数字だけ出しても信用できないため必ず持つ */
+    rationale: text("rationale"),
+    /** 生成に使ったモデル。後から精度を振り返るために残す */
+    model: varchar("model", { length: 64 }),
+    /** AI 提案をユーザーが手で直したか */
+    editedByUser: boolean("editedByUser").default(false).notNull(),
+    generatedAt: timestamp("generatedAt").defaultNow().notNull(),
+    createdAt: timestamp("createdAt").defaultNow().notNull(),
+    updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+  },
+  table => ({
+    userSymbolIdx: index("priceBandPlans_user_symbol_idx").on(table.userId, table.symbol),
+  })
+);
+
+export type PriceBandPlan = typeof priceBandPlans.$inferSelect;
+export type InsertPriceBandPlan = typeof priceBandPlans.$inferInsert;
+
+/**
+ * 価格帯の 1 段。
+ *
+ * 上限・下限はどちらも省略可能にする。「110 ドル以下」のように片側しか
+ * 決まっていない段が実際に存在するため。
+ */
+export const priceBands = mysqlTable(
+  "priceBands",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    planId: int("planId").notNull(),
+    /** 帯の下限（この値以上）。null なら下限なし */
+    lowerPrice: decimal("lowerPrice", { precision: 20, scale: 4 }),
+    /** 帯の上限（この値以下）。null なら上限なし */
+    upperPrice: decimal("upperPrice", { precision: 20, scale: 4 }),
+    /**
+     * その帯での行動の種類。表示の色分けと並び順に使う。
+     * HOLD=様子見 / ADD_SMALL=小幅追加 / ADD_MAIN=主力で買い増す /
+     * VERIFY=条件を確認してから判断 / REDUCE=減らす
+     */
+    action: mysqlEnum("action", ["HOLD", "ADD_SMALL", "ADD_MAIN", "VERIFY", "REDUCE"]).notNull(),
+    /** ユーザーの言葉に近い行動の記述（例: 基本面未変時に主力で買い増す） */
+    actionLabel: varchar("actionLabel", { length: 160 }).notNull(),
+    /** その価格帯をそう判断する理由 */
+    reason: text("reason"),
+    /**
+     * この帯に入ったときに確認すべき項目（JSON 配列）。
+     * 例: ["大口顧客の喪失", "AI 受注の悪化"]
+     * 帯に入るまでは照合しない（無駄な AI 呼び出しを避けるため）。
+     */
+    checkItems: json("checkItems").$type<string[]>(),
+    /** 想定投資額（現地通貨）。段によって金額が違う */
+    plannedAmount: decimal("plannedAmount", { precision: 20, scale: 2 }),
+    /** 上の段から順に 0,1,2... 表示順の固定に使う */
+    sortOrder: int("sortOrder").default(0).notNull(),
+    createdAt: timestamp("createdAt").defaultNow().notNull(),
+  },
+  table => ({
+    planIdx: index("priceBands_plan_idx").on(table.planId),
+  })
+);
+
+export type PriceBand = typeof priceBands.$inferSelect;
+export type InsertPriceBand = typeof priceBands.$inferInsert;
+
+/**
+ * 確認項目に対するニュース照合の結果。
+ *
+ * 株価がその帯に入ったときだけ実行する。
+ * 「該当情報が見つかったか」「見つかったなら何か」を残し、
+ * 買え・売れの断定はしない（判断は本人がする）。
+ */
+export const bandCheckResults = mysqlTable(
+  "bandCheckResults",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    userId: int("userId").notNull(),
+    bandId: int("bandId").notNull(),
+    /** 確認項目の文言。band 側を編集しても当時の項目が分かるように複製して持つ */
+    checkItem: varchar("checkItem", { length: 200 }).notNull(),
+    /** 懸念に該当する情報が見つかったか */
+    status: mysqlEnum("status", ["CLEAR", "CONCERN", "UNKNOWN"]).notNull(),
+    /** 見つかった内容、または「見つからなかった」旨 */
+    finding: text("finding").notNull(),
+    /** 根拠にしたニュースの件数 */
+    sourceCount: int("sourceCount").default(0).notNull(),
+    /** 照合時の株価。後から見たときに状況を再現できるように */
+    priceAtCheck: decimal("priceAtCheck", { precision: 20, scale: 4 }),
+    model: varchar("model", { length: 64 }),
+    createdAt: timestamp("createdAt").defaultNow().notNull(),
+  },
+  table => ({
+    bandIdx: index("bandCheckResults_band_idx").on(table.bandId),
+  })
+);
+
+export type BandCheckResult = typeof bandCheckResults.$inferSelect;
+export type InsertBandCheckResult = typeof bandCheckResults.$inferInsert;
+
+/**
+ * AI 実行履歴。
+ *
+ * 過去にログが残っておらず「いつ何をどう判断したのか」を後から追えなかった。
+ * AI を呼ぶ処理はすべてここに記録する。成功・失敗の両方を残す。
+ */
+export const aiRunLogs = mysqlTable(
+  "aiRunLogs",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    userId: int("userId").notNull(),
+    /** 何の処理か（例: price_band_plan / band_check / signal / news_analysis / ocr） */
+    kind: varchar("kind", { length: 48 }).notNull(),
+    /** 対象銘柄。銘柄に紐づかない処理は null */
+    symbol: varchar("symbol", { length: 24 }),
+    model: varchar("model", { length: 64 }),
+    status: mysqlEnum("status", ["SUCCESS", "FAILED"]).notNull(),
+    /** 処理にかかった時間（ミリ秒）。遅いモデルの特定に使う */
+    durationMs: int("durationMs"),
+    /** 結果の要約、または失敗時のエラー内容 */
+    detail: text("detail"),
+    createdAt: timestamp("createdAt").defaultNow().notNull(),
+  },
+  table => ({
+    userKindIdx: index("aiRunLogs_user_kind_idx").on(table.userId, table.kind),
+    createdIdx: index("aiRunLogs_created_idx").on(table.createdAt),
+  })
+);
+
+export type AiRunLog = typeof aiRunLogs.$inferSelect;
+export type InsertAiRunLog = typeof aiRunLogs.$inferInsert;
+
+/**
  * 簡易パスコード認証。
  *
  * Manus OAuth の代わりに、4〜6 桁の数字だけでアクセスできるようにする。

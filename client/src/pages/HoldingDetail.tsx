@@ -3,6 +3,7 @@ import { BrokerBadge } from "@/components/investing/BrokerBadge";
 import { MoneyText, PctText, PnlText } from "@/components/investing/Figures";
 import { CurrencyToggle } from "@/components/investing/CurrencyToggle";
 import { SignalBadge, SignalPlaceholder } from "@/components/investing/SignalBadge";
+import { PriceBandPlanCard } from "@/components/investing/PriceBandPlanCard";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -55,6 +56,24 @@ export default function HoldingDetail({ params }: { params: { id: string } }) {
   const [, setLocation] = useLocation();
   const utils = trpc.useUtils();
   const detail = trpc.portfolio.detail.useQuery({ id }, { enabled: Number.isFinite(id) && id > 0 });
+
+  /*
+   * 買い増しプランは銘柄（symbol）単位。detail が読めてからでないと symbol が
+   * 分からないため、取得できるまでクエリを止めておく。
+   */
+  const symbol = detail.data?.holding.symbol;
+  const bandPlan = trpc.portfolio.priceBandPlan.useQuery(
+    { symbol: symbol ?? "" },
+    { enabled: !!symbol }
+  );
+
+  const generateBandPlan = trpc.portfolio.generatePriceBandPlan.useMutation({
+    onSuccess: async () => {
+      await utils.portfolio.priceBandPlan.invalidate();
+      toast.success("買い増しプランを作成しました");
+    },
+    onError: e => toast.error(e.message),
+  });
 
   const regenSignal = trpc.portfolio.regenerateSignal.useMutation({
     onSuccess: async res => {
@@ -306,6 +325,21 @@ export default function HoldingDetail({ params }: { params: { id: string } }) {
           </CardContent>
         </Card>
       )}
+
+      {/*
+        買い増しプラン（価格帯ごとの行動）。
+        「この値段になったらこうする」を段組みで持ち、今の株価がどの段にいるかを示す。
+        シグナル（今の総合判断）とは役割が違うので独立したカードにする。
+      */}
+      <PriceBandPlanCard
+        plan={bandPlan.data}
+        isGenerating={generateBandPlan.isPending}
+        isLoading={bandPlan.isLoading}
+        errorMessage={bandPlan.error?.message ?? null}
+        onGenerate={() => {
+          if (symbol) generateBandPlan.mutate({ symbol });
+        }}
+      />
 
       <Tabs defaultValue="card">
         <TabsList>
