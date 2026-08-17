@@ -1,4 +1,4 @@
-import { and, asc, desc, eq } from "drizzle-orm";
+import { and, asc, desc, eq, inArray } from "drizzle-orm";
 import { getDb } from "../db";
 import * as db from "../db";
 import {
@@ -10,6 +10,7 @@ import {
 import {
   evaluateBands,
   type BandEvaluation,
+  type BandAction,
   type BandInput,
 } from "../../shared/priceBands";
 import {
@@ -477,6 +478,122 @@ export async function listPlanStatus(
       name: h.name,
       hasPlan: !!plan,
       generatedAt: plan?.generatedAt ?? null,
+    });
+  }
+  return out;
+}
+
+/** 買い増しプランの一覧（今どの段にいるかを横断で見るため） */
+export type PlanOverviewRow = {
+  symbol: string;
+  name: string;
+  currency: string;
+  currentPrice: number | null;
+  /** 現在いる段。帯の外なら null */
+  action: BandAction | null;
+  actionLabel: string | null;
+  /** 帯の外にいるか（登録した価格帯より上／下） */
+  outsideDirection: "ABOVE" | "BELOW" | null;
+  /** 次の段までの変化率（%）。すでに一番下ならnull */
+  nextGapPct: number | null;
+  nextActionLabel: string | null;
+  /** 確認が必要な段にいて、まだ照合していない項目があるか */
+  needsCheck: boolean;
+  /** 照合済みで懸念ありの件数 */
+  concernCount: number;
+  generatedAt: Date;
+};
+
+/**
+ * 全銘柄のプランを 1 回のクエリでまとめて評価する。
+ *
+ * 銘柄ごとに getPlan を呼ぶと 112 銘柄 × 3 クエリになり実用にならないため、
+ * プラン・段・照合結果をそれぞれ 1 回引いてメモリ上で突き合わせる。
+ */
+export async function listPlanOverview(userId: number): Promise<PlanOverviewRow[]> {
+  const d = await requireDb();
+  const [holdings, plans] = await Promise.all([
+    db.listHoldings(userId),
+    d.select().from(priceBandPlans).where(eq(priceBandPlans.userId, userId)),
+  ]);
+  if (plans.length === 0) return [];
+
+  const planIds = plans.map(p => p.id);
+  const [bandRows, checkRows] = await Promise.all([
+    d.select().from(priceBands).where(inArray(priceBands.planId, planIds)),
+    d.select().from(bandCheckResults).where(eq(bandCheckResults.userId, userId)),
+  ]);
+
+  const bandsByPlan = new Map<number, typeof bandRows>();
+  for (const r of bandRows) {
+    const list = bandsByPlan.get(r.planId) ?? [];
+    list.push(r);
+    bandsByPlan.set(r.planId, list);
+  }
+
+  /*
+   * 現在値は保有から取る。同じ銘柄を複数口座で持つ場合はどれも同じ株価なので
+   * 最初に見つかったものを使う。名前も保有側の表記に合わせる。
+   */
+  const priceBySymbol = new Map<string, { price: number | null; name: string }>();
+  for (const h of holdings) {
+    if (priceBySymbol.has(h.symbol)) continue;
+    priceBySymbol.set(h.symbol, {
+      price: h.currentPrice === null ? null : Number(h.currentPrice),
+      name: h.name,
+    });
+  }
+
+  const out: PlanOverviewRow[] = [];
+  for (const plan of plans) {
+    const info = priceBySymbol.get(plan.symbol);
+    // 保有から外れた銘柄のプランは一覧に出さない（売却済みなど）
+    if (!info) continue;
+
+    const bands: BandInput[] = (bandsByPlan.get(plan.id) ?? []).map(r => ({
+      id: r.id,
+      lowerPrice: r.lowerPrice === null ? null : Number(r.lowerPrice),
+      upperPrice: r.upperPrice === null ? null : Number(r.upperPrice),
+      action: r.action,
+      actionLabel: r.actionLabel,
+      reason: r.reason,
+      checkItems: (r.checkItems as string[] | null) ?? null,
+      plannedAmount: r.plannedAmount === null ? null : Number(r.plannedAmount),
+      sortOrder: r.sortOrder,
+    }));
+
+    const ev = evaluateBands(info.price, bands);
+    const current = ev.currentBand;
+
+    /*
+     * 「確認が必要」は、確認項目がある段にいて、まだ照合していない項目が
+     * 残っている場合だけ立てる。帯の外にいる銘柄では立てない。
+     */
+    let needsCheck = false;
+    let concernCount = 0;
+    if (current?.checkItems?.length) {
+      const done = new Set(
+        checkRows.filter(c => c.bandId === current.id).map(c => c.checkItem)
+      );
+      needsCheck = current.checkItems.some(item => !done.has(item));
+      concernCount = checkRows.filter(
+        c => c.bandId === current.id && c.status === "CONCERN"
+      ).length;
+    }
+
+    out.push({
+      symbol: plan.symbol,
+      name: info.name,
+      currency: plan.currency,
+      currentPrice: info.price,
+      action: current?.action ?? null,
+      actionLabel: current?.actionLabel ?? null,
+      outsideDirection: ev.abovePlan ? "ABOVE" : ev.belowPlan ? "BELOW" : null,
+      nextGapPct: ev.gapToNextPct,
+      nextActionLabel: ev.nextBand?.actionLabel ?? null,
+      needsCheck,
+      concernCount,
+      generatedAt: plan.generatedAt,
     });
   }
   return out;

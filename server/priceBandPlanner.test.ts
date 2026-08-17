@@ -29,7 +29,9 @@ describe("価格帯の正規化", () => {
       band({ lowerPrice: 160, upperPrice: 170 }),
       band({ lowerPrice: 145, upperPrice: 152 }),
     ]);
-    expect(result.map(b => b.upperPrice)).toEqual([170, 152, 138]);
+    // 並び順が高い順になっていることを確認する（上限は隙間埋めで引き上がる）
+    expect(result.map(b => b.lowerPrice)).toEqual([160, 145, 125]);
+    expect(result.map(b => b.upperPrice)).toEqual([170, 159.99, 144.99]);
   });
 
   it("下限と上限が逆になっていたら入れ替える", () => {
@@ -96,7 +98,13 @@ describe("価格帯の正規化", () => {
     expect(result[0].lowerPrice).toBe(150);
   });
 
-  it("隙間のある段はそのまま保つ（飛び飛びの水準は現実的な指定）", () => {
+  /*
+   * 当初は「飛び飛びの水準も現実的な指定」として隙間を保っていたが、
+   * 実データで判定不能が発生したため埋める方針に変えた。
+   * 155 のような隙間の価格では何をすべきか出せず「判定できません」になり、
+   * 一番知りたい場面で答えが出ないため。
+   */
+  it("段の間の隙間は埋める（下の段の上限を引き上げる）", () => {
     const result = normalizeBands([
       band({ lowerPrice: 160, upperPrice: 170 }),
       band({ lowerPrice: 145, upperPrice: 152 }),
@@ -104,19 +112,20 @@ describe("価格帯の正規化", () => {
     ]);
     expect(result.map(b => [b.lowerPrice, b.upperPrice])).toEqual([
       [160, 170],
-      [145, 152],
-      [125, 138],
+      [145, 159.99],
+      [125, 144.99],
     ]);
   });
 
-  it("下限なしの段（〜以下）を最下段として保つ", () => {
+  it("下限なしの段（〜以下）を最下段として保つ（上限は隙間を埋めて引き上がる）", () => {
     const result = normalizeBands([
       band({ lowerPrice: 125, upperPrice: 138 }),
       band({ lowerPrice: null, upperPrice: 110, action: "VERIFY" }),
     ]);
     expect(result).toHaveLength(2);
     expect(result[1].lowerPrice).toBeNull();
-    expect(result[1].upperPrice).toBe(110);
+    // 110〜125 が空白だと 120 で何をすべきか出せないため 124.99 に引き上げる
+    expect(result[1].upperPrice).toBe(124.99);
     expect(result[1].action).toBe("VERIFY");
   });
 
@@ -131,6 +140,86 @@ describe("価格帯の正規化", () => {
 
   it("空配列を渡しても落ちない", () => {
     expect(normalizeBands([])).toEqual([]);
+  });
+});
+
+/**
+ * 実測で見つかった判定不能のリグレッション。
+ *
+ * AI はきれいな数字（250, 285, 310）を選ぶため段の間に隙間ができ、
+ * 現在値がそこに入ると「判定できません」になっていた。
+ * 112 銘柄の生成で 2 件（ALAB・PFE）発生した。
+ */
+describe("実データで発生した判定不能の解消", () => {
+  function toInputs(bands: PlannedBand[]): BandInput[] {
+    return bands.map((b, i) => ({
+      id: i + 1,
+      lowerPrice: b.lowerPrice,
+      upperPrice: b.upperPrice,
+      action: b.action,
+      actionLabel: b.actionLabel,
+      reason: b.reason,
+      checkItems: b.checkItems,
+      plannedAmount: null,
+      sortOrder: i,
+    }));
+  }
+
+  it("ALAB: 310〜350 が空白で現在値 321.61 が判定できなかった", () => {
+    const out = normalizeBands([
+      band({ lowerPrice: 350, upperPrice: null }),
+      band({ lowerPrice: 285, upperPrice: 310, action: "ADD_SMALL" }),
+      band({ lowerPrice: 210, upperPrice: 250, action: "ADD_MAIN" }),
+      band({ lowerPrice: null, upperPrice: 190, action: "VERIFY" }),
+    ]);
+    expect(out[1].upperPrice).toBe(349.99);
+    expect(out[2].upperPrice).toBe(284.99);
+    expect(out[3].upperPrice).toBe(209.99);
+
+    // 現在値がどこかの段に入る
+    const r = evaluateBands(321.61, toInputs(out));
+    expect(r.currentBand).not.toBeNull();
+    expect(r.currentBand?.action).toBe("ADD_SMALL");
+  });
+
+  it("PFE: 26.5〜27 が空白で現在値 26.79 が判定できなかった", () => {
+    const out = normalizeBands([
+      band({ lowerPrice: 27, upperPrice: null }),
+      band({ lowerPrice: 25.5, upperPrice: 26.5, action: "ADD_SMALL" }),
+      band({ lowerPrice: 24, upperPrice: 25, action: "ADD_MAIN" }),
+      band({ lowerPrice: null, upperPrice: 23.5, action: "VERIFY" }),
+    ]);
+    expect(out[1].upperPrice).toBe(26.99);
+
+    const r = evaluateBands(26.79, toInputs(out));
+    expect(r.currentBand?.action).toBe("ADD_SMALL");
+  });
+
+  it("埋めた後はどの価格でも必ず 1 つの段に入る（上限なしの段があれば）", () => {
+    const out = toInputs(
+      normalizeBands([
+        band({ lowerPrice: 350, upperPrice: null }),
+        band({ lowerPrice: 285, upperPrice: 310, action: "ADD_SMALL" }),
+        band({ lowerPrice: 210, upperPrice: 250, action: "ADD_MAIN" }),
+        band({ lowerPrice: null, upperPrice: 190, action: "VERIFY" }),
+      ])
+    );
+    for (const price of [1, 100, 190, 209.99, 210, 284.99, 285, 349.99, 350, 9999]) {
+      const hits = out.filter(
+        b =>
+          (b.lowerPrice === null || price >= b.lowerPrice) &&
+          (b.upperPrice === null || price <= b.upperPrice)
+      );
+      expect(hits.length, `価格 ${price} で該当 ${hits.length} 件`).toBe(1);
+    }
+  });
+
+  it("すでに接している段は動かさない", () => {
+    const out = normalizeBands([
+      band({ lowerPrice: 200, upperPrice: null }),
+      band({ lowerPrice: 150, upperPrice: 199.99, action: "ADD_SMALL" }),
+    ]);
+    expect(out[1].upperPrice).toBe(199.99);
   });
 });
 

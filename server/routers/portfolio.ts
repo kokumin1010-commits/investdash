@@ -13,6 +13,7 @@ import {
   generateAndSavePlanForHolding,
   getPlan,
   listPlanStatus,
+  listPlanOverview,
   runChecksForBand,
 } from "../services/priceBandService";
 import { listAiRuns } from "../services/aiRunLog";
@@ -618,6 +619,16 @@ export const portfolioRouter = router({
   /** 保有銘柄のプラン有無の一覧（一括生成の進捗確認に使う） */
   priceBandPlanStatus: protectedProcedure.query(async ({ ctx }) =>
     listPlanStatus(ctx.user.id)
+  ),
+
+  /**
+   * 全銘柄の「今どの段にいるか」の一覧。
+   *
+   * 112 銘柄を 1 つずつ開いて確認するのは現実的でないため、
+   * 買い増し圏に入っている銘柄と確認が必要な銘柄を横断で拾えるようにする。
+   */
+  priceBandOverview: protectedProcedure.query(async ({ ctx }) =>
+    listPlanOverview(ctx.user.id)
   ),
 
   /**

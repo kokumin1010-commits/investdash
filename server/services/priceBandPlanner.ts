@@ -93,8 +93,9 @@ const PLANNER_SYSTEM = `あなたは長期保有を前提とする個人投資�
 
 1. **価格は現地通貨で、実際に注文できる水準で示す。** 円換算した数字を出してはならない。
 
-2. **段は重ならないように、高い順に設計する。** 隣接する段の間に隙間があってもよい
-   （現実の判断では飛び飛びの水準を意識するため）。
+2. **段は重ならず、かつ隙間なく連続するように高い順に設計する。**
+   隣の段の境界は必ず接すること（例: 上の段が 285 以上なら、次の段の上限は 285 未満にする）。
+   隙間があるとその価格になったときに何をすべきか分からなくなる。
 
 3. **各段の reason には「なぜその価格なのか」を必ず書く。** 根拠として使えるもの:
    - 取得単価との関係（取得単価を下回る水準か）
@@ -265,7 +266,15 @@ ${newsLines}
 価格はすべて ${ctx.currency} で示してください。`;
 }
 
-/** 段が重なっていないか、順序が正しいかを検証して整える */
+/**
+ * 段が重なっていないか、順序が正しいかを検証して整える。
+ *
+ * 隙間も埋める。AI はきれいな数字（250, 285, 310）を選ぶため、
+ * プロンプトで指示しても隙間が残ることがある。
+ * 実測で ALAB は「350 以上 / 285〜310 / 210〜250 / 190 以下」を返し、
+ * 現在値 321.61 がどの段にも入らず「判定できません」になった。
+ * 隙間が残ると、株価がそこに来たときに何をすべきか分からなくなる。
+ */
 export function normalizeBands(bands: PlannedBand[]): PlannedBand[] {
   // 高い順に並べる（上限が大きい順）
   const sorted = [...bands].sort((a, b) => {
@@ -296,7 +305,32 @@ export function normalizeBands(bands: PlannedBand[]): PlannedBand[] {
 
     result.push({ ...band, lowerPrice, upperPrice });
   }
+
+  /*
+   * 隙間を埋める。上の段の下限と下の段の上限が離れている場合、
+   * 下の段の上限を上の段の下限の直下まで引き上げる。
+   *
+   * 上に引き上げるのは、下の段（より安い＝より積極的に買う段）の範囲を
+   * 広げる方向なので安全側。逆に上の段の下限を下げると
+   * 「静観」の範囲が広がって買い場を逃すことになる。
+   */
+  for (let i = 1; i < result.length; i++) {
+    const upper = result[i - 1];
+    const lower = result[i];
+    if (upper.lowerPrice === null || lower.upperPrice === null) continue;
+    const gap = upper.lowerPrice - lower.upperPrice;
+    // 0.01 は「接している」状態。それより離れていれば隙間
+    if (gap > 0.011) {
+      lower.upperPrice = round2(upper.lowerPrice - 0.01);
+    }
+  }
+
   return result;
+}
+
+/** 価格は小数第 2 位まで（0.01 刻みで境界を作るため） */
+function round2(n: number): number {
+  return Math.round(n * 100) / 100;
 }
 
 export async function generatePriceBandPlan(ctx: PlannerContext): Promise<PlanResult> {
@@ -307,8 +341,23 @@ export async function generatePriceBandPlan(ctx: PlannerContext): Promise<PlanRe
       { role: "user", content: buildPlannerPrompt(ctx) },
     ],
     responseFormat: PLANNER_SCHEMA,
-    maxTokens: 4096,
+    /*
+     * 5 段 × 根拠 + 確認項目 4 件の日本語で 3,000 トークンを超えることがある。
+     * 4096 では中国平安（2318.HK）で途中で切れ、JSON が壊れて生成に失敗した。
+     * 余裕を持たせる。
+     */
+    maxTokens: 8192,
   });
+
+  /*
+   * 途中で切れた応答は JSON として壊れている。パースエラーだけを見せると
+   * 「AI の応答を解析できませんでした」となり原因が分からないため先に判定する。
+   */
+  if (res.choices?.[0]?.finish_reason === "length") {
+    throw new Error(
+      "買い増しプランの生成が途中で打ち切られました。もう一度お試しください。"
+    );
+  }
 
   const text = res.choices?.[0]?.message?.content;
   const parsed = parseLlmJson<PlanResult>(text, "買い増しプランの応答");
