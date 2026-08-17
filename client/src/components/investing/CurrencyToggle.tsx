@@ -31,7 +31,9 @@ export function CurrencyToggle({ className }: { className?: string }) {
          * 選べてしまうと金額が「—」になり、壊れて見えるため。
          */
         const unavailable =
-          (c === "USD" && !(fx.usdJpy > 0)) || (c === "SGD" && !(fx.sgdJpy > 0));
+          (c === "USD" && !(fx.usdJpy > 0)) ||
+          (c === "SGD" && !(fx.sgdJpy > 0)) ||
+          (c === "HKD" && !(fx.hkdJpy > 0));
         const active = currency === c;
         return (
           <Tooltip key={c}>
@@ -60,4 +62,3 @@ export function CurrencyToggle({ className }: { className?: string }) {
     </div>
   );
 }
-

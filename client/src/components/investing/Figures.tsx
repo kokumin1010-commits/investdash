@@ -87,12 +87,31 @@ export function PctText({
   value,
   className,
   digits = 2,
+  costValue,
 }: {
   value: number | null | undefined;
   className?: string;
   digits?: number;
+  /**
+   * 取得原価。マイナスなら「原価回収済み」と出す。
+   *
+   * 率が出ない理由は「株価が未取得」と「原価がマイナスで率に意味がない」の
+   * 2 通りある。前者は「—」、後者は理由を書くことで、
+   * データ欠損と混同されないようにする。
+   */
+  costValue?: number | null;
 }) {
   if (value === null || value === undefined || Number.isNaN(value)) {
+    if (costValue !== null && costValue !== undefined && costValue < 0) {
+      return (
+        <span
+          className={cn("text-[11px] font-medium text-gain", className)}
+          title="オプションのプレミアム受取などで取得原価がマイナスになっており、損益率を計算できません（投資元本は回収済み）"
+        >
+          原価回収済み
+        </span>
+      );
+    }
     return <span className={cn("text-muted-foreground tabular", className)}>—</span>;
   }
   const tone = value > 0 ? "text-gain" : value < 0 ? "text-loss" : "text-muted-foreground";

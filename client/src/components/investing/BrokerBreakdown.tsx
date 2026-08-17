@@ -16,6 +16,11 @@ export type BreakdownEntry = {
   pnl: number | null;
   pnlPct: number | null;
   currency: string;
+  /**
+   * 現地通貨の取得原価。マイナスなら率の代わりに「原価回収済み」と出す。
+   * 率が null になる理由（未取得か原価マイナスか）を書き分けるために渡す。
+   */
+  costValue?: number | null;
   /** 損益の円換算。表示通貨に追随させるために使う */
   pnlBase?: number | null;
   /**
@@ -74,7 +79,7 @@ export function BrokerBreakdown({
                 className="text-[11px]"
               />
               <span className="text-[10px]">
-                <PctText value={e.pnlPct} />
+                <PctText value={e.pnlPct} costValue={e.costValue} />
               </span>
             </div>
           </div>

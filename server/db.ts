@@ -164,6 +164,7 @@ export async function updateSettings(
     baseCurrency: string;
     usdJpyRate: string;
     sgdJpyRate: string;
+    hkdJpyRate: string;
     concentrationThreshold: number;
     sectorConcentrationThreshold: number;
     cashBalance: string;

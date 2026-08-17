@@ -1,4 +1,5 @@
 import type { PositionView } from "./portfolio";
+import { calcPnlPct } from "../../shared/pnlLabel";
 
 /**
  * 同一銘柄を複数の証券口座で保有している場合の合算ビュー。
@@ -202,7 +203,12 @@ export function groupPositionsBySymbol(
       marketValue,
       costValue,
       pnl,
-      pnlPct: pnl === null || costValue === 0 ? null : (pnl / costValue) * 100,
+      /*
+       * 取得原価がマイナスの銘柄は率を出さない。
+       * 同一銘柄を複数口座で持つ場合、合算した原価がマイナスになることもある
+       * （富途香港の AMD のようにプレミアム受取が購入代金を上回るケース）。
+       */
+      pnlPct: calcPnlPct(pnl, costValue),
       dayChangePct,
       marketValueBase,
       costValueBase,

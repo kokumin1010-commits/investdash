@@ -75,6 +75,7 @@ export default function Dashboard() {
       const fxParts: string[] = [];
       if (res.fxRates.usdJpy !== null) fxParts.push(`${res.fxRates.usdJpy.toFixed(2)} 円/ドル`);
       if (res.fxRates.sgdJpy !== null) fxParts.push(`${res.fxRates.sgdJpy.toFixed(2)} 円/SGD`);
+      if (res.fxRates.hkdJpy !== null) fxParts.push(`${res.fxRates.hkdJpy.toFixed(2)} 円/HKD`);
       const fx = fxParts.length > 0 ? `／為替 ${fxParts.join(" ・ ")}` : "";
       toast.success(
         res.failed.length > 0
@@ -492,7 +493,10 @@ export default function Dashboard() {
               sub={
                 <span className="block space-y-1.5">
                   <span className="flex items-center gap-1.5">
-                    <PctText value={summary?.totalPnlPct ?? null} />
+                    <PctText
+                      value={summary?.totalPnlPct ?? null}
+                      costValue={summary?.totalCostBase ?? null}
+                    />
                     <span className="text-muted-foreground">
                       / 取得原価 {money(summary?.totalCostBase)}
                     </span>
@@ -515,7 +519,11 @@ export default function Dashboard() {
                               compact
                               className="text-xs font-medium"
                             />
-                            <PctText value={b.pnlPct} className="text-[10px]" />
+                            <PctText
+                              value={b.pnlPct}
+                              costValue={b.value - b.pnl}
+                              className="text-[10px]"
+                            />
                           </span>
                         </span>
                       ))}
@@ -810,7 +818,7 @@ export default function Dashboard() {
                             compact
                             className="text-xs"
                           />
-                          <PctText value={m.pnlPct} className="text-xs" />
+                          <PctText value={m.pnlPct} costValue={m.cost} className="text-xs" />
                         </span>
                         <span className="tabular text-xs text-muted-foreground">
                           全体の {m.pct.toFixed(1)}%
@@ -936,7 +944,11 @@ export default function Dashboard() {
                             compact
                             className="text-xs"
                           />
-                          <PctText value={b.pnlPct} className="text-xs" />
+                          <PctText
+                            value={b.pnlPct}
+                            costValue={b.value - b.pnl}
+                            className="text-xs"
+                          />
                         </span>
                         <span className="tabular text-xs text-muted-foreground">
                           全体の {b.pct.toFixed(1)}%
@@ -1767,7 +1779,7 @@ export default function Dashboard() {
                           <p className="text-[10px] text-muted-foreground">
                             {pnlLabel(p.pnlPct)}
                           </p>
-                          <PctText value={p.pnlPct} className="text-sm" />
+                          <PctText value={p.pnlPct} costValue={p.costValue} className="text-sm" />
                           <p className="mt-1 text-[10px] text-muted-foreground">構成比</p>
                           <p className="tabular text-xs text-muted-foreground">
                             {p.weightPct !== null ? `${p.weightPct.toFixed(1)}%` : "—"}

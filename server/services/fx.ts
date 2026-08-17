@@ -1,7 +1,7 @@
 /**
  * 通貨換算。
  *
- * 保有銘柄の価格は現地通貨（JPY / USD / SGD）で記録されている。総資産や
+ * 保有銘柄の価格は現地通貨（JPY / USD / SGD / HKD）で記録されている。総資産や
  * 構成比を出すには基準通貨（円）に揃える必要があるため、ここで一元化する。
  *
  * 換算処理を各所に散らすと、通貨を増やしたときに一部だけ未対応になり
@@ -13,10 +13,12 @@ export type FxRates = {
   usdJpy: number;
   /** 1 SGD が何円か */
   sgdJpy: number;
+  /** 1 HKD が何円か */
+  hkdJpy: number;
 };
 
 /** 為替レートが取れなかった場合に使う保守的な既定値 */
-export const FX_FALLBACK: FxRates = { usdJpy: 150, sgdJpy: 115 };
+export const FX_FALLBACK: FxRates = { usdJpy: 150, sgdJpy: 115, hkdJpy: 19 };
 
 /**
  * 現地通貨の金額を円に換算する。
@@ -41,6 +43,8 @@ export function convertToJpy(
       return amount * rates.usdJpy;
     case "SGD":
       return amount * rates.sgdJpy;
+    case "HKD":
+      return amount * rates.hkdJpy;
     default:
       return null;
   }

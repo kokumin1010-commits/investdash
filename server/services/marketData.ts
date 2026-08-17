@@ -272,3 +272,14 @@ export async function fetchSgdJpyRate(): Promise<number | null> {
   const q = await fetchQuote("SGDJPY=X");
   return q?.price ?? null;
 }
+
+/**
+ * HKD/JPY レートを取得する。失敗時は null。
+ *
+ * 富途香港口座は港股（HKD 建て）と港元貨幣基金を持つ。HKD は米ドルペッグ
+ * （約 7.75〜7.85）だが、USD/HKD からの間接換算は近似になるため直接レートを使う。
+ */
+export async function fetchHkdJpyRate(): Promise<number | null> {
+  const q = await fetchQuote("HKDJPY=X");
+  return q?.price ?? null;
+}

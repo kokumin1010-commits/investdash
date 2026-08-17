@@ -46,7 +46,7 @@ export async function syncPricesHandler(req: Request, res: Response) {
       userId: number;
       updated: number;
       failed: number;
-      fxRates?: { usdJpy: number | null; sgdJpy: number | null };
+      fxRates?: { usdJpy: number | null; sgdJpy: number | null; hkdJpy: number | null };
     }[] = [];
 
     for (const userId of userIds) {

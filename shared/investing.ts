@@ -73,19 +73,34 @@ export const PRIORITY_STYLES: Record<WatchPriority, string> = {
   LOW: "bg-muted text-muted-foreground border-border",
 };
 
-export type Market = "JP" | "US" | "SG" | "OTHER";
+export type Market = "JP" | "US" | "SG" | "HK" | "OTHER";
 
 /* ------------------------------------------------------------------ *
  * 証券プラットフォーム（どの口座で保有しているか）
  * ------------------------------------------------------------------ */
 
-export const BROKERS = ["moomoo_jp", "rakuten_ispeed", "futu", "ibkr", "sc_sg", "other"] as const;
+/**
+ * 口座の一覧。
+ * futu（富途牛牛）と futu_hk（富途香港）は同じ富途系だが別口座として扱う。
+ * 口座番号・基軸通貨・扱う商品（香港は貨幣市場基金あり）が違うため、
+ * まとめてしまうと口座単位の検算ができなくなる。
+ */
+export const BROKERS = [
+  "moomoo_jp",
+  "rakuten_ispeed",
+  "futu",
+  "futu_hk",
+  "ibkr",
+  "sc_sg",
+  "other",
+] as const;
 export type Broker = (typeof BROKERS)[number];
 
 export const BROKER_LABELS: Record<Broker, string> = {
   moomoo_jp: "moomoo 日本版",
   rakuten_ispeed: "楽天証券 iSPEED",
   futu: "富途牛牛 / Futu",
+  futu_hk: "富途證券 香港",
   ibkr: "IBKR シンガポール",
   sc_sg: "渣打銀行 シンガポール",
   other: "その他",
@@ -96,6 +111,7 @@ export const BROKER_SHORT: Record<Broker, string> = {
   moomoo_jp: "moomoo",
   rakuten_ispeed: "楽天",
   futu: "富途",
+  futu_hk: "富途HK",
   ibkr: "IBKR",
   sc_sg: "渣打",
   other: "その他",
@@ -109,6 +125,7 @@ export const BROKER_STYLES: Record<Broker, string> = {
   moomoo_jp: "bg-orange-500/15 text-orange-600 border-orange-500/30 dark:text-orange-400",
   rakuten_ispeed: "bg-red-500/15 text-red-600 border-red-500/30 dark:text-red-400",
   futu: "bg-blue-500/15 text-blue-600 border-blue-500/30 dark:text-blue-400",
+  futu_hk: "bg-sky-500/15 text-sky-600 border-sky-500/30 dark:text-sky-400",
   ibkr: "bg-violet-500/15 text-violet-600 border-violet-500/30 dark:text-violet-400",
   sc_sg: "bg-teal-500/15 text-teal-700 border-teal-500/30 dark:text-teal-400",
   other: "bg-muted text-muted-foreground border-border",
@@ -119,6 +136,7 @@ export const BROKER_HEX: Record<Broker, string> = {
   moomoo_jp: "#f97316",
   rakuten_ispeed: "#dc2626",
   futu: "#2563eb",
+  futu_hk: "#0284c7",
   ibkr: "#7c3aed",
   sc_sg: "#0d9488",
   other: "#94a3b8",
@@ -132,6 +150,12 @@ export const BROKER_BASE_CURRENCY: Record<Broker, string> = {
   moomoo_jp: "JPY",
   rakuten_ispeed: "JPY",
   futu: "HKD",
+  /*
+    香港口座は保有が USD/HKD/JPY 混在だが、アプリの資産淨值は JPY で
+    表示される（口座の設定通貨が JPY）。検算をアプリ画面と突き合わせるため
+    基軸を JPY にする。
+  */
+  futu_hk: "JPY",
   ibkr: "SGD",
   sc_sg: "SGD",
   other: "JPY",
@@ -166,6 +190,8 @@ export function brokerFromFormatId(formatId?: string | null): Broker {
       return "rakuten_ispeed";
     case "futu":
       return "futu";
+    case "futu_hk":
+      return "futu_hk";
     case "ibkr":
       return "ibkr";
     case "sc_sg":
@@ -223,9 +249,10 @@ export function normalizeSymbol(raw: string): { symbol: string; tickerCode: stri
     const [code, suffix] = input.split(".");
     /*
      * Yahoo Finance のサフィックスから市場を判定する。
-     * .T = 東証、.SI = シンガポール取引所（SGX）。
+     * .T = 東証、.SI = シンガポール取引所（SGX）、.HK = 香港取引所（HKEX）。
      */
-    const market: Market = suffix === "T" ? "JP" : suffix === "SI" ? "SG" : "OTHER";
+    const market: Market =
+      suffix === "T" ? "JP" : suffix === "SI" ? "SG" : suffix === "HK" ? "HK" : "OTHER";
     return { symbol: input, tickerCode: code, market };
   }
 
@@ -241,6 +268,7 @@ export function marketLabel(market: Market): string {
   if (market === "JP") return "日本株";
   if (market === "US") return "米国株";
   if (market === "SG") return "シンガポール株";
+  if (market === "HK") return "香港株";
   return "その他";
 }
 
@@ -249,6 +277,7 @@ export const MARKET_CURRENCY: Record<Market, string> = {
   JP: "JPY",
   US: "USD",
   SG: "SGD",
+  HK: "HKD",
   OTHER: "USD",
 };
 
@@ -276,6 +305,17 @@ export function resolveByExchange(
     return { symbol: `${code}.SI`, tickerCode: code, market: "SG", currency: "SGD" };
   }
 
+  /*
+    香港取引所。Yahoo Finance は 4 桁ゼロ埋め + .HK を使う。
+    富途は 5 桁ゼロ埋め（00005）で表示するため、数値化して 4 桁に詰め直す。
+    例: 00005 → 0005.HK、02318 → 2318.HK
+  */
+  if (ex === "HKEX" || ex === "HKG" || ex === "SEHK" || ex === "HK") {
+    const digits = code.replace(/[^0-9]/g, "");
+    const padded = digits ? String(Number(digits)).padStart(4, "0") : code;
+    return { symbol: `${padded}.HK`, tickerCode: code, market: "HK", currency: "HKD" };
+  }
+
   // 米国市場はサフィックスなし
   if (ex.startsWith("NYSE") || ex.startsWith("NASDAQ") || ex === "AMEX" || ex === "ARCA") {
     return { symbol: code, tickerCode: code, market: "US", currency: "USD" };
@@ -294,6 +334,7 @@ export const MARKET_HEX: Record<Market, string> = {
   JP: "#0f766e",
   US: "#4338ca",
   SG: "#b45309",
+  HK: "#be123c",
   OTHER: "#94a3b8",
 };
 
@@ -303,7 +344,7 @@ export function marketHex(market?: string | null): string {
 }
 
 /** 市場フィルタの選択肢。null は「すべて」 */
-export const MARKETS: readonly Market[] = ["JP", "US", "SG", "OTHER"] as const;
+export const MARKETS: readonly Market[] = ["JP", "US", "SG", "HK", "OTHER"] as const;
 
 /* ------------------------------------------------------------------ *
  * 信用取引（レバレッジ）の追証リスク表示

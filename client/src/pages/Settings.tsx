@@ -21,6 +21,7 @@ export default function SettingsPage() {
 
   const [usdJpy, setUsdJpy] = useState("");
   const [sgdJpy, setSgdJpy] = useState("");
+  const [hkdJpy, setHkdJpy] = useState("");
   const [posThreshold, setPosThreshold] = useState("");
   const [secThreshold, setSecThreshold] = useState("");
   const [cash, setCash] = useState("");
@@ -32,6 +33,7 @@ export default function SettingsPage() {
     if (!settings.data) return;
     setUsdJpy(settings.data.usdJpyRate ?? "150");
     setSgdJpy(settings.data.sgdJpyRate ?? "115");
+    setHkdJpy(settings.data.hkdJpyRate ?? "19");
     setPosThreshold(String(settings.data.concentrationThreshold));
     setSecThreshold(String(settings.data.sectorConcentrationThreshold));
     setCash(settings.data.cashBalance ?? "0");
@@ -65,6 +67,7 @@ export default function SettingsPage() {
       const parts: string[] = [];
       if (res.usdJpy !== null) parts.push(`${res.usdJpy.toFixed(2)} 円/ドル`);
       if (res.sgdJpy !== null) parts.push(`${res.sgdJpy.toFixed(2)} 円/SGD`);
+      if (res.hkdJpy !== null) parts.push(`${res.hkdJpy.toFixed(2)} 円/HKD`);
       toast.success(`為替レートを更新しました（${parts.join(" ・ ")}）`);
     },
     onError: e => toast.error(e.message),
@@ -97,7 +100,7 @@ export default function SettingsPage() {
           <CardTitle className="text-base">資産計算</CardTitle>
           <CardDescription className="text-xs">
             外貨建て銘柄の評価額は、ここの為替レートで円換算されます（米国株は USD/JPY、シンガポール株と
-            IBKR の SGD 建て残高は SGD/JPY）。自動取得を有効にすると、株価更新のたびに最新レートへ更新されます。
+            IBKR の SGD 建て残高は SGD/JPY、港股と富途香港の港元基金は HKD/JPY）。自動取得を有効にすると、株価更新のたびに最新レートへ更新されます。
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -167,6 +170,23 @@ export default function SettingsPage() {
               />
               <p className="text-xs text-muted-foreground">
                 シンガポール株（SGX）と IBKR の借入・証拠金の円換算に使います
+              </p>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="hkdjpy">HKD/JPY レート</Label>
+              <Input
+                id="hkdjpy"
+                type="number"
+                inputMode="decimal"
+                value={hkdJpy}
+                onChange={e => {
+                  setHkdJpy(e.target.value);
+                  mark();
+                }}
+                className="tabular"
+              />
+              <p className="text-xs text-muted-foreground">
+                香港株（HKEX）と富途香港の港元貨幣基金の円換算に使います
               </p>
             </div>
             <div className="space-y-2">
@@ -322,6 +342,7 @@ export default function SettingsPage() {
               // 「まだ自動取得していません」と表示されてしまうため、手動時のみ送る
               usdJpyRate: !fxAuto && Number(usdJpy) > 0 ? Number(usdJpy) : undefined,
               sgdJpyRate: !fxAuto && Number(sgdJpy) > 0 ? Number(sgdJpy) : undefined,
+              hkdJpyRate: !fxAuto && Number(hkdJpy) > 0 ? Number(hkdJpy) : undefined,
               concentrationThreshold: Number(posThreshold) > 0 ? Number(posThreshold) : undefined,
               sectorConcentrationThreshold:
                 Number(secThreshold) > 0 ? Number(secThreshold) : undefined,

@@ -352,6 +352,10 @@ export const userSettings = mysqlTable("userSettings", {
    */
   sgdJpyRate: decimal("sgdJpyRate", { precision: 12, scale: 4 }).default("115.0000").notNull(),
   /**
+   * 1 HKD が何円か。富途香港口座の港股・港元基金の円換算に使う。
+   */
+  hkdJpyRate: decimal("hkdJpyRate", { precision: 12, scale: 4 }).default("19.0000").notNull(),
+  /**
    * 為替レートを株価更新と同時に自動取得するか。
    * false にすると usdJpyRate / sgdJpyRate の手動設定値を使い続ける。
    */

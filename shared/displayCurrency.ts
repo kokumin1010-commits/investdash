@@ -12,13 +12,14 @@
  * 円換算した率には為替変動が混ざり、「株で儲かったのか円安で儲かったのか」が
  * 区別できなくなるため。
  */
-export const DISPLAY_CURRENCIES = ["USD", "JPY", "SGD", "LOCAL"] as const;
+export const DISPLAY_CURRENCIES = ["USD", "JPY", "SGD", "HKD", "LOCAL"] as const;
 export type DisplayCurrency = (typeof DISPLAY_CURRENCIES)[number];
 
 export const DISPLAY_CURRENCY_LABELS: Record<DisplayCurrency, string> = {
   USD: "米ドルに統一",
   JPY: "円に統一",
   SGD: "SGD に統一",
+  HKD: "香港ドルに統一",
   LOCAL: "現地通貨のまま",
 };
 
@@ -27,6 +28,7 @@ export const DISPLAY_CURRENCY_SHORT: Record<DisplayCurrency, string> = {
   USD: "USD",
   JPY: "円",
   SGD: "SGD",
+  HKD: "HKD",
   LOCAL: "現地",
 };
 
@@ -38,6 +40,7 @@ export function isDisplayCurrency(v: unknown): v is DisplayCurrency {
 export type FxRates = {
   usdJpy: number;
   sgdJpy: number;
+  hkdJpy: number;
 };
 
 /**
@@ -60,6 +63,8 @@ export function convertFromBase(
       return fx.usdJpy > 0 ? baseJpy / fx.usdJpy : null;
     case "SGD":
       return fx.sgdJpy > 0 ? baseJpy / fx.sgdJpy : null;
+    case "HKD":
+      return fx.hkdJpy > 0 ? baseJpy / fx.hkdJpy : null;
     /*
      * LOCAL は「換算しない」という選択なので、円換算値からは復元できない。
      * 呼び出し側が現地通貨の値をそのまま使うべきであることを示すため null を返す。

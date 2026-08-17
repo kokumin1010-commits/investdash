@@ -1,4 +1,5 @@
 import { marketLabel, type Market } from "../../shared/investing";
+import { calcPnlPct } from "../../shared/pnlLabel";
 
 /**
  * 国・市場別の資産集計。
@@ -72,7 +73,7 @@ type MarketInput = {
 };
 
 /** 市場の表示順。日本株を先頭に、その他を末尾にする */
-const MARKET_ORDER: Record<Market, number> = { JP: 0, US: 1, SG: 2, OTHER: 3 };
+const MARKET_ORDER: Record<Market, number> = { JP: 0, US: 1, SG: 2, HK: 3, OTHER: 4 };
 
 /**
  * 銘柄単位の保有から市場別の集計を作る。
@@ -132,10 +133,10 @@ export function buildMarketSlices(items: MarketInput[], totalValueBase: number):
         count: v.count,
         cost: v.cost,
         pnl,
-        pnlPct: v.cost > 0 ? (pnl / v.cost) * 100 : null,
+        pnlPct: calcPnlPct(pnl, v.cost),
         currency: v.currency,
         localPnl,
-        localPnlPct: v.localCost > 0 ? (localPnl / v.localCost) * 100 : null,
+        localPnlPct: calcPnlPct(localPnl, v.localCost),
         isForeign: v.currency !== "JPY",
         dividendIncomeBase: v.dividendIncome,
         dividendYieldPct: v.value > 0 ? (v.dividendIncome / v.value) * 100 : null,

@@ -59,8 +59,9 @@ export function DisplayCurrencyProvider({ children }: { children: React.ReactNod
     () => ({
       usdJpy: Number(settings.data?.usdJpyRate ?? 0) || 0,
       sgdJpy: Number(settings.data?.sgdJpyRate ?? 0) || 0,
+      hkdJpy: Number(settings.data?.hkdJpyRate ?? 0) || 0,
     }),
-    [settings.data?.usdJpyRate, settings.data?.sgdJpyRate]
+    [settings.data?.usdJpyRate, settings.data?.sgdJpyRate, settings.data?.hkdJpyRate]
   );
 
   const value = useMemo<Ctx>(
@@ -87,7 +88,7 @@ export function useDisplayCurrency(): Ctx {
      * Provider の外で呼ばれた場合に落とさない。
      * 通貨切り替えは表示上の都合なので、欠けていても現地通貨で表示できれば実害がない。
      */
-    const fallbackFx: FxRates = { usdJpy: 0, sgdJpy: 0 };
+    const fallbackFx: FxRates = { usdJpy: 0, sgdJpy: 0, hkdJpy: 0 };
     return {
       currency: "LOCAL",
       setCurrency: () => {},

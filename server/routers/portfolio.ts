@@ -30,6 +30,7 @@ export const portfolioRouter = router({
       z.object({
         usdJpyRate: z.number().positive().optional(),
         sgdJpyRate: z.number().positive().optional(),
+        hkdJpyRate: z.number().positive().optional(),
         concentrationThreshold: z.number().int().min(1).max(100).optional(),
         sectorConcentrationThreshold: z.number().int().min(1).max(100).optional(),
         cashBalance: z.number().min(0).optional(),
@@ -41,13 +42,16 @@ export const portfolioRouter = router({
       return db.updateSettings(ctx.user.id, {
         usdJpyRate: input.usdJpyRate !== undefined ? String(input.usdJpyRate) : undefined,
         sgdJpyRate: input.sgdJpyRate !== undefined ? String(input.sgdJpyRate) : undefined,
+        hkdJpyRate: input.hkdJpyRate !== undefined ? String(input.hkdJpyRate) : undefined,
         concentrationThreshold: input.concentrationThreshold,
         sectorConcentrationThreshold: input.sectorConcentrationThreshold,
         cashBalance: input.cashBalance !== undefined ? String(input.cashBalance) : undefined,
         autoNewsEnabled: input.autoNewsEnabled,
         fxAutoUpdate: input.fxAutoUpdate,
         // 手動でレートを入れたときは、自動取得の時刻表示が実態と合わなくなるため消す
-        ...(input.usdJpyRate !== undefined || input.sgdJpyRate !== undefined
+        ...(input.usdJpyRate !== undefined ||
+        input.sgdJpyRate !== undefined ||
+        input.hkdJpyRate !== undefined
           ? { fxRateUpdatedAt: undefined }
           : {}),
       });
@@ -59,8 +63,8 @@ export const portfolioRouter = router({
    */
   syncFxRate: protectedProcedure.mutation(async ({ ctx }) => {
     const rates = await syncFxRate(ctx.user.id, true);
-    // どちらも取れなかった場合だけ失敗として扱う（片方でも取れれば前進している）
-    if (rates.usdJpy === null && rates.sgdJpy === null) {
+    // すべて取れなかった場合だけ失敗として扱う（1 つでも取れれば前進している）
+    if (rates.usdJpy === null && rates.sgdJpy === null && rates.hkdJpy === null) {
       throw new TRPCError({
         code: "INTERNAL_SERVER_ERROR",
         message:

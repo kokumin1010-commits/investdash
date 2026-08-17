@@ -221,7 +221,13 @@ export default function HoldingDetail({ params }: { params: { id: string } }) {
               />
             }
             sub={undefined}
-            subNode={<PctText value={view?.pnlPct ?? null} className="text-xs" />}
+            subNode={
+              <PctText
+                value={view?.pnlPct ?? null}
+                costValue={view?.costValue ?? null}
+                className="text-xs"
+              />
+            }
           />
           <Metric
             label="52週レンジ"

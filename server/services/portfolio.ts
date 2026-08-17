@@ -13,6 +13,7 @@ import {
   fetchQuotes,
   fetchUsdJpyRate,
   fetchSgdJpyRate,
+  fetchHkdJpyRate,
 } from "./marketData";
 import {
   annualIncome,
@@ -27,6 +28,7 @@ import {
   type DividendFrequency,
 } from "./dividend";
 import { buildNewsQuery, filterNoise, searchNews } from "./news";
+import { calcPnlPct } from "../../shared/pnlLabel";
 import { groupPositionsBySymbol, type GroupedPosition } from "./groupPositions";
 import { buildMarketSlices, type MarketSlice } from "./marketSlices";
 import { computePeriodChange, type PeriodChange } from "./periodChange";
@@ -207,6 +209,8 @@ export type PortfolioSummary = {
   usdJpyRate: number;
   /** SGD/JPY レート。SGX 銘柄と IBKR の SGD 建て残高の円換算に使う */
   sgdJpyRate: number;
+  /** HKD/JPY レート。港股と富途香港の港元基金の円換算に使う */
+  hkdJpyRate: number;
   /** 為替レートを自動取得しているか。false なら手動設定値 */
   fxAutoUpdate: boolean;
   /** 為替レートを最後に自動取得できた時刻。null なら手動値のまま */
@@ -375,6 +379,7 @@ export async function buildPortfolio(userId: number): Promise<{
   const rates: FxRates = {
     usdJpy: n(settings.usdJpyRate) ?? FX_FALLBACK.usdJpy,
     sgdJpy: n(settings.sgdJpyRate) ?? FX_FALLBACK.sgdJpy,
+    hkdJpy: n(settings.hkdJpyRate) ?? FX_FALLBACK.hkdJpy,
   };
   const cardSymbols = new Set(cards.map(c => c.symbol));
 
@@ -401,7 +406,11 @@ export async function buildPortfolio(userId: number): Promise<{
     const marketValue = currentPrice === null ? null : currentPrice * quantity;
     const costValue = avgCost * quantity;
     const pnl = marketValue === null ? null : marketValue - costValue;
-    const pnlPct = pnl === null || costValue === 0 ? null : (pnl / costValue) * 100;
+    /*
+     * 取得原価がマイナスの銘柄（オプションのプレミアム受取が購入代金を上回った場合）は
+     * 率を出さない。詳細は calcPnlPct のコメント参照。
+     */
+    const pnlPct = calcPnlPct(pnl, costValue);
     const dayChangePct =
       currentPrice === null || previousClose === null || previousClose === 0
         ? null
@@ -616,8 +625,7 @@ export async function buildPortfolio(userId: number): Promise<{
     totalValueBase,
     totalCostBase,
     totalPnl: totalValueBase - totalCostBase,
-    totalPnlPct:
-      totalCostBase > 0 ? ((totalValueBase - totalCostBase) / totalCostBase) * 100 : null,
+    totalPnlPct: calcPnlPct(totalValueBase - totalCostBase, totalCostBase),
     dayChangeBase,
     dayChangePct:
       dayChangeBase !== null && prevValueBase > 0 ? (dayChangeBase / prevValueBase) * 100 : null,
@@ -628,6 +636,7 @@ export async function buildPortfolio(userId: number): Promise<{
     baseCurrency: settings.baseCurrency,
     usdJpyRate: rates.usdJpy,
     sgdJpyRate: rates.sgdJpy,
+    hkdJpyRate: rates.hkdJpy,
     fxAutoUpdate: settings.fxAutoUpdate,
     fxRateUpdatedAt: settings.fxRateUpdatedAt,
     lastPriceSyncAt: settings.lastPriceSyncAt,
@@ -762,7 +771,7 @@ export async function buildPortfolio(userId: number): Promise<{
           count: v.count,
           /** 口座単位の含み損益。口座ごとの成績を比較できるようにする */
           pnl: v.value - v.cost,
-          pnlPct: v.cost > 0 ? ((v.value - v.cost) / v.cost) * 100 : null,
+          pnlPct: calcPnlPct(v.value - v.cost, v.cost),
           /** 借入がある口座のみ信用情報を付ける（現物口座は null） */
           leverage: leverageByBroker.get(key) ?? null,
           dividendIncomeBase,
@@ -993,7 +1002,7 @@ export async function syncPrices(userId: number): Promise<{
   updated: number;
   failed: string[];
   /** 更新できた為替レート。取得に失敗した通貨は null */
-  fxRates: { usdJpy: number | null; sgdJpy: number | null };
+  fxRates: { usdJpy: number | null; sgdJpy: number | null; hkdJpy: number | null };
 }> {
   const [hs, ws, settings] = await Promise.all([
     db.listHoldings(userId),
@@ -1094,16 +1103,17 @@ export async function syncPrices(userId: number): Promise<{
 export async function syncFxRate(
   userId: number,
   enabled = true
-): Promise<{ usdJpy: number | null; sgdJpy: number | null }> {
-  if (!enabled) return { usdJpy: null, sgdJpy: null };
+): Promise<{ usdJpy: number | null; sgdJpy: number | null; hkdJpy: number | null }> {
+  if (!enabled) return { usdJpy: null, sgdJpy: null, hkdJpy: null };
 
   /*
-   * USD/JPY と SGD/JPY を個別に扱う。片方の取得に失敗しても、
-   * もう片方は更新できたほうが評価額は正確になる。
+   * 通貨ごとに個別に扱う。1 つの取得に失敗しても、他が更新できたほうが
+   * 評価額は正確になる。
    */
-  const [usdResult, sgdResult] = await Promise.allSettled([
+  const [usdResult, sgdResult, hkdResult] = await Promise.allSettled([
     fetchUsdJpyRate(),
     fetchSgdJpyRate(),
+    fetchHkdJpyRate(),
   ]);
 
   const pick = (
@@ -1127,10 +1137,21 @@ export async function syncFxRate(
   const usdJpy = pick(usdResult, "USD/JPY", 50, 500);
   // SGD/JPY は USD/JPY の 7〜8 割程度で推移するため、より狭い範囲で検査する
   const sgdJpy = pick(sgdResult, "SGD/JPY", 40, 400);
+  /*
+    HKD は米ドルペッグ（1 USD ≒ 7.75〜7.85 HKD）なので、HKD/JPY は
+    USD/JPY のおよそ 8 分の 1 になる。桁違いの値を弾くために範囲を絞る。
+  */
+  const hkdJpy = pick(hkdResult, "HKD/JPY", 5, 60);
 
-  const patch: { usdJpyRate?: string; sgdJpyRate?: string; fxRateUpdatedAt?: Date } = {};
+  const patch: {
+    usdJpyRate?: string;
+    sgdJpyRate?: string;
+    hkdJpyRate?: string;
+    fxRateUpdatedAt?: Date;
+  } = {};
   if (usdJpy !== null) patch.usdJpyRate = usdJpy.toFixed(4);
   if (sgdJpy !== null) patch.sgdJpyRate = sgdJpy.toFixed(4);
+  if (hkdJpy !== null) patch.hkdJpyRate = hkdJpy.toFixed(4);
 
   if (Object.keys(patch).length > 0) {
     patch.fxRateUpdatedAt = new Date();
@@ -1138,11 +1159,11 @@ export async function syncFxRate(
       await db.updateSettings(userId, patch);
     } catch (error) {
       console.warn("[portfolio] 為替レートの保存に失敗:", error);
-      return { usdJpy: null, sgdJpy: null };
+      return { usdJpy: null, sgdJpy: null, hkdJpy: null };
     }
   }
 
-  return { usdJpy, sgdJpy };
+  return { usdJpy, sgdJpy, hkdJpy };
 }
 
 /**

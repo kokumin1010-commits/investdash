@@ -333,7 +333,11 @@ export default function Holdings() {
                   currency={summary?.baseCurrency}
                   className="text-base font-semibold"
                 />
-                <PctText value={filterSummary.pnlPct} className="text-xs" />
+                <PctText
+                  value={filterSummary.pnlPct}
+                  costValue={filterSummary.cost}
+                  className="text-xs"
+                />
               </span>
               <Button
                 variant="outline"
@@ -539,7 +543,7 @@ export default function Holdings() {
                         className="text-base font-semibold"
                       />
                       <div className="text-xs">
-                        <PctText value={p.pnlPct} />
+                        <PctText value={p.pnlPct} costValue={p.costValue} />
                       </div>
                     </div>
                   </div>
@@ -832,7 +836,7 @@ export default function Holdings() {
                           className="text-sm"
                         />
                         <div className="text-xs">
-                          <PctText value={p.pnlPct} />
+                          <PctText value={p.pnlPct} costValue={p.costValue} />
                         </div>
                       </div>
                     </TableCell>
@@ -1037,7 +1041,7 @@ export default function Holdings() {
                                 className="text-xs"
                               />
                               <div className="text-[10px]">
-                                <PctText value={e.pnlPct} />
+                                <PctText value={e.pnlPct} costValue={e.costValue} />
                               </div>
                             </div>
                           </TableCell>
