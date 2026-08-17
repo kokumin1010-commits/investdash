@@ -27,12 +27,13 @@ export default function PasscodeGate() {
       setError(null);
       try {
         // 万一サーバー応答が返らない場合でも操作不能にならないよう上限を設ける
+        // 内部で最大 2 回まで自動再試行するため、その分の余裕を持たせる
         await Promise.race([
           unlock(passcode),
           new Promise<never>((_, reject) =>
             window.setTimeout(
               () => reject(new Error("応答がありません。通信状況を確認して再度お試しください。")),
-              30_000
+              40_000
             )
           ),
         ]);

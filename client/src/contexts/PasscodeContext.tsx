@@ -7,6 +7,7 @@
 import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from "react";
 import { trpc } from "@/lib/trpc";
 import { clearToken, getStoredToken, storeToken } from "@/lib/passcodeSession";
+import { unlockWithRetry } from "../../../shared/unlockRetry";
 
 type PasscodeContextValue = {
   /** 認証済みかどうか */
@@ -37,9 +38,21 @@ export function PasscodeProvider({ children }: { children: ReactNode }) {
 
   const unlockMutation = trpc.auth.unlock.useMutation();
 
+  /**
+   * 解錠は一時的な失敗を自分で吸収する。
+   *
+   * デプロイの切り替え中や起動直後は、サーバーが JSON ではなく HTML の
+   * エラーページを返すことがある。そのとき tRPC は
+   * 「Unexpected token '<', "<html><hea"... is not valid JSON」という
+   * 内部的な例外をそのまま投げる。パスコードが合っているのに解錠できず、
+   * しかも文面から原因が分からないため、利用者は何度も入力し直すしかない。
+   *
+   * 一時的な失敗（通信・サーバー起動待ち）と本当の間違い（パスコード違い）
+   * を区別し、前者は自動で再試行する。
+   */
   const unlock = useCallback(
     async (passcode: string) => {
-      const res = await unlockMutation.mutateAsync({ passcode });
+      const res = await unlockWithRetry(() => unlockMutation.mutateAsync({ passcode }));
       storeToken(res.token);
       setToken(res.token);
       setJustUnlocked(true);
