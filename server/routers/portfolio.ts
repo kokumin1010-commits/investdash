@@ -15,6 +15,7 @@ import {
   listPlanStatus,
   listPlanOverview,
   runChecksForBand,
+  updateBand,
 } from "../services/priceBandService";
 import { listAiRuns } from "../services/aiRunLog";
 import {
@@ -26,6 +27,7 @@ import {
   syncPrices,
 } from "../services/portfolio";
 import { BROKERS, normalizeSymbol } from "../../shared/investing";
+import { BAND_ACTIONS } from "../../shared/priceBands";
 
 const decimalString = z.union([z.number(), z.string()]).transform(v => String(v));
 
@@ -645,6 +647,37 @@ export const portfolioRouter = router({
       } catch (error) {
         throw toFriendlyAiError(error, "確認項目の照合に失敗しました");
       }
+    }),
+
+  /**
+   * 価格帯を手で書き換える。
+   *
+   * AI の提案が自分の考えと違う場合に直せるようにする。
+   * 段を直すと、その段に紐づく過去の照合結果はサービス層で削除される
+   * （古い価格帯に対する判断が別の価格帯の材料として読まれるのを防ぐため）。
+   */
+  updatePriceBand: protectedProcedure
+    .input(
+      z.object({
+        bandId: z.number().int().positive(),
+        lowerPrice: z.number().min(0).nullable(),
+        upperPrice: z.number().min(0).nullable(),
+        action: z.enum(BAND_ACTIONS),
+        actionLabel: z.string().min(1).max(120),
+        reason: z.string().max(2000).nullable(),
+      })
+    )
+    .mutation(async ({ ctx, input }) => {
+      await updateBand({
+        userId: ctx.user.id,
+        bandId: input.bandId,
+        lowerPrice: input.lowerPrice,
+        upperPrice: input.upperPrice,
+        action: input.action,
+        actionLabel: input.actionLabel,
+        reason: input.reason,
+      });
+      return { success: true } as const;
     }),
 
   /**

@@ -93,6 +93,20 @@ export default function HoldingDetail({ params }: { params: { id: string } }) {
     onError: e => toast.error(e.message),
   });
 
+  /*
+   * 段を手で直す。AI の提案が自分の考えと合わない場合に使う。
+   * 保存すると、その段に紐づく過去の照合結果はサーバー側で消える
+   * （古い価格帯に対する判断が別の価格帯の材料として読まれるのを防ぐため）。
+   */
+  const updateBand = trpc.portfolio.updatePriceBand.useMutation({
+    onSuccess: async () => {
+      await utils.portfolio.priceBandPlan.invalidate();
+      await utils.portfolio.priceBandOverview.invalidate();
+      toast.success("価格帯を保存しました");
+    },
+    onError: e => toast.error(e.message),
+  });
+
   const regenSignal = trpc.portfolio.regenerateSignal.useMutation({
     onSuccess: async res => {
       await utils.portfolio.invalidate();
@@ -359,6 +373,8 @@ export default function HoldingDetail({ params }: { params: { id: string } }) {
         }}
         onRunChecks={bandId => runBandChecks.mutate({ bandId })}
         isCheckingBandId={runBandChecks.isPending ? runBandChecks.variables?.bandId : null}
+        onSaveBand={params => updateBand.mutate(params)}
+        savingBandId={updateBand.isPending ? (updateBand.variables?.bandId ?? null) : null}
       />
 
       <Tabs defaultValue="card">

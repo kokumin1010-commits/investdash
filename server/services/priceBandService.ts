@@ -245,6 +245,67 @@ export async function savePlan(params: {
 }
 
 /**
+ * 段の価格・行動・理由を手で書き換える。
+ *
+ * AI の提案が気に入らない場合に直せるようにするための機能。
+ * ただし段を編集すると帯の範囲が変わるため、その段に紐づく過去の照合結果は
+ * 消す。古い価格帯に対する「懸念なし」がそのまま残ると、
+ * 別の価格帯の判断材料として誤って読まれるため。
+ */
+export async function updateBand(params: {
+  userId: number;
+  bandId: number;
+  lowerPrice: number | null;
+  upperPrice: number | null;
+  action: BandAction;
+  actionLabel: string;
+  reason: string | null;
+}): Promise<void> {
+  const d = await requireDb();
+
+  // 他人の段を書き換えられないよう、プラン経由で持ち主を確かめる
+  const [row] = await d
+    .select({ bandId: priceBands.id, userId: priceBandPlans.userId, planId: priceBandPlans.id })
+    .from(priceBands)
+    .innerJoin(priceBandPlans, eq(priceBands.planId, priceBandPlans.id))
+    .where(eq(priceBands.id, params.bandId))
+    .limit(1);
+  if (!row || row.userId !== params.userId) {
+    throw new Error("この価格帯は編集できません");
+  }
+
+  /*
+   * 下限が上限を上回る指定は受け付けない。
+   * 通ってしまうと「どの価格でも当てはまらない段」ができ、判定不能になる。
+   */
+  if (
+    params.lowerPrice !== null &&
+    params.upperPrice !== null &&
+    params.lowerPrice > params.upperPrice
+  ) {
+    throw new Error("下限が上限を上回っています");
+  }
+
+  await d.delete(bandCheckResults).where(eq(bandCheckResults.bandId, params.bandId));
+  await d
+    .update(priceBands)
+    .set({
+      lowerPrice: params.lowerPrice === null ? null : String(params.lowerPrice),
+      upperPrice: params.upperPrice === null ? null : String(params.upperPrice),
+      action: params.action,
+      actionLabel: params.actionLabel,
+      reason: params.reason,
+    })
+    .where(eq(priceBands.id, params.bandId));
+
+  // 手で直したことを残す。作り直すと消える点を画面で伝えるため
+  await d
+    .update(priceBandPlans)
+    .set({ editedByUser: true })
+    .where(eq(priceBandPlans.id, row.planId));
+}
+
+/**
  * 保有銘柄のプランを AI で生成して保存する。
  *
  * シグナル生成と同じ材料（投資カード・ニュース・52週レンジ・騰落率）に

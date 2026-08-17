@@ -1,9 +1,19 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
 import { Separator } from "@/components/ui/separator";
-import { Layers, RefreshCw, TrendingDown, AlertTriangle, CheckCircle2, HelpCircle } from "lucide-react";
+import {
+  Layers,
+  RefreshCw,
+  TrendingDown,
+  AlertTriangle,
+  CheckCircle2,
+  HelpCircle,
+  Pencil,
+  X,
+} from "lucide-react";
 import {
   BAND_ACTION_LABELS,
   BAND_ACTION_STYLES,
@@ -78,6 +88,120 @@ function CheckStatusIcon({ status }: { status: "CLEAR" | "CONCERN" | "UNKNOWN" }
   return <HelpCircle className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />;
 }
 
+/**
+ * 段の数字と行動を手で直すフォーム。
+ *
+ * 空欄は「上限なし／下限なし」を意味する（最上段と最下段で使う）。
+ * 0 と空欄を区別しないと「0 円以下」という無意味な段ができてしまうため、
+ * 空文字は null として扱う。
+ */
+function BandEditForm({
+  band,
+  currency,
+  isSaving,
+  onCancel,
+  onSave,
+}: {
+  band: Band;
+  currency: string;
+  isSaving: boolean;
+  onCancel: () => void;
+  onSave: (params: {
+    bandId: number;
+    lowerPrice: number | null;
+    upperPrice: number | null;
+    action: BandAction;
+    actionLabel: string;
+    reason: string | null;
+  }) => void;
+}) {
+  const [lower, setLower] = useState(band.lowerPrice === null ? "" : String(band.lowerPrice));
+  const [upper, setUpper] = useState(band.upperPrice === null ? "" : String(band.upperPrice));
+  const [label, setLabel] = useState(band.actionLabel);
+  const [reason, setReason] = useState(band.reason ?? "");
+
+  const parse = (v: string): number | null => {
+    const t = v.trim();
+    if (t === "") return null;
+    const n = Number(t);
+    return Number.isFinite(n) && n >= 0 ? n : null;
+  };
+
+  const lowerNum = parse(lower);
+  const upperNum = parse(upper);
+  // 下限が上限を上回る指定は判定不能な段を作るため保存させない
+  const invalid = lowerNum !== null && upperNum !== null && lowerNum > upperNum;
+
+  return (
+    <div className="mt-2 space-y-2 rounded border border-current/30 bg-background/60 p-2">
+      <div className="flex items-center gap-1.5">
+        <Input
+          value={lower}
+          onChange={e => setLower(e.target.value)}
+          placeholder="下限なし"
+          inputMode="decimal"
+          className="h-7 flex-1 text-xs"
+        />
+        <span className="text-xs opacity-60">〜</span>
+        <Input
+          value={upper}
+          onChange={e => setUpper(e.target.value)}
+          placeholder="上限なし"
+          inputMode="decimal"
+          className="h-7 flex-1 text-xs"
+        />
+        <span className="text-[10px] opacity-60">{currency}</span>
+      </div>
+      <Input
+        value={label}
+        onChange={e => setLabel(e.target.value)}
+        placeholder="この価格帯での行動"
+        className="h-7 text-xs"
+      />
+      <Input
+        value={reason}
+        onChange={e => setReason(e.target.value)}
+        placeholder="そう決めた理由（任意）"
+        className="h-7 text-xs"
+      />
+      {invalid ? (
+        <p className="text-[10px] text-rose-600">下限が上限を上回っています</p>
+      ) : (
+        <p className="text-[10px] opacity-60">
+          空欄にすると「上限なし」「下限なし」になります。作り直すと手直しは消えます。
+        </p>
+      )}
+      <div className="flex gap-1.5">
+        <Button
+          size="sm"
+          className="h-7 flex-1 text-[11px]"
+          disabled={isSaving || invalid || label.trim() === ""}
+          onClick={() =>
+            onSave({
+              bandId: band.id,
+              lowerPrice: lowerNum,
+              upperPrice: upperNum,
+              action: band.action,
+              actionLabel: label.trim(),
+              reason: reason.trim() === "" ? null : reason.trim(),
+            })
+          }
+        >
+          {isSaving ? "保存中…" : "保存"}
+        </Button>
+        <Button
+          size="sm"
+          variant="outline"
+          className="h-7 bg-transparent text-[11px]"
+          onClick={onCancel}
+        >
+          やめる
+        </Button>
+      </div>
+    </div>
+  );
+}
+
 export function PriceBandPlanCard({
   plan,
   isGenerating,
@@ -86,6 +210,8 @@ export function PriceBandPlanCard({
   isCheckingBandId,
   isLoading = false,
   errorMessage = null,
+  onSaveBand,
+  savingBandId = null,
 }: {
   plan: Plan | null | undefined;
   isGenerating: boolean;
@@ -96,7 +222,20 @@ export function PriceBandPlanCard({
   isLoading?: boolean;
   /** 取得に失敗した場合のメッセージ。黙って未作成扱いにしてはいけない */
   errorMessage?: string | null;
+  /** 段を手で直したときの保存。渡されなければ編集ボタンを出さない */
+  onSaveBand?: (params: {
+    bandId: number;
+    lowerPrice: number | null;
+    upperPrice: number | null;
+    action: BandAction;
+    actionLabel: string;
+    reason: string | null;
+  }) => void;
+  savingBandId?: number | null;
 }) {
+  /** 編集中の段。1 つずつしか開かない（同時に開くと保存漏れが分かりにくい） */
+  const [editingBandId, setEditingBandId] = useState<number | null>(null);
+
   /** 現在値がどの帯にいるかを見出しに出すための文言 */
   const headline = useMemo(() => {
     if (!plan || plan.currentPrice === null) {
@@ -259,13 +398,46 @@ export function PriceBandPlanCard({
                     <span className="text-[11px] font-medium opacity-80">
                       {BAND_ACTION_LABELS[band.action]}
                     </span>
+                    {onSaveBand ? (
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="h-6 w-6 p-0"
+                        title={editingBandId === band.id ? "編集をやめる" : "この段の数字を直す"}
+                        onClick={() =>
+                          setEditingBandId(editingBandId === band.id ? null : band.id)
+                        }
+                      >
+                        {editingBandId === band.id ? (
+                          <X className="h-3 w-3" />
+                        ) : (
+                          <Pencil className="h-3 w-3" />
+                        )}
+                      </Button>
+                    ) : null}
                   </div>
                 </div>
 
+                {/* 手で直すフォーム。AI の提案が自分の考えと違う場合に使う */}
+                {editingBandId === band.id && onSaveBand ? (
+                  <BandEditForm
+                    band={band}
+                    currency={plan.currency}
+                    isSaving={savingBandId === band.id}
+                    onCancel={() => setEditingBandId(null)}
+                    onSave={params => {
+                      onSaveBand(params);
+                      setEditingBandId(null);
+                    }}
+                  />
+                ) : (
+                  <>
                 <p className="mt-1 text-xs font-medium leading-snug">{band.actionLabel}</p>
                 {band.reason ? (
                   <p className="mt-0.5 text-[11px] leading-relaxed opacity-80">{band.reason}</p>
                 ) : null}
+                  </>
+                )}
 
                 {/* 確認項目。帯に入るまでは照合しないので項目だけ出す */}
                 {band.checkItems && band.checkItems.length > 0 ? (
