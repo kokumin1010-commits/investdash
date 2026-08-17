@@ -13,7 +13,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
 import { trpc } from "@/lib/trpc";
-import { ArrowLeft, Loader2, MessageSquare, Send, Trash2 } from "lucide-react";
+import { ArrowLeft, FileText, Loader2, MessageSquare, Send, Trash2 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { useSearch } from "wouter";
@@ -49,6 +49,11 @@ export default function Consult() {
    */
   const search = useSearch();
   const symbolParam = new URLSearchParams(search).get("symbol");
+  /*
+   * 銘柄詳細の相談タブから特定の相談を開き直せるようにする。
+   * 一覧から探し直させると、銘柄が多い場合に目的の相談まで辿れない。
+   */
+  const idParam = new URLSearchParams(search).get("id");
   const [openId, setOpenId] = useState<number | null>(null);
 
   /*
@@ -58,6 +63,11 @@ export default function Consult() {
   useEffect(() => {
     if (symbolParam) setOpenId(null);
   }, [symbolParam]);
+
+  useEffect(() => {
+    const n = Number(idParam);
+    if (idParam && Number.isFinite(n) && n > 0) setOpenId(n);
+  }, [idParam]);
 
   if (openId !== null) {
     return <ConsultThread id={openId} onBack={() => setOpenId(null)} />;
@@ -247,6 +257,27 @@ function ConsultThread({ id, onBack }: { id: number; onBack: () => void }) {
   });
 
   /*
+   * 相談の内容を投資カードに書き戻す。
+   * 何が反映され何が反映されなかったかを出す。「反映しました」だけだと
+   * 触れていない項目も書かれたと誤解する。
+   */
+  const applyToCard = trpc.consult.applyToCard.useMutation({
+    onSuccess: async res => {
+      await utils.portfolio.invalidate();
+      if (res.applied.length === 0) {
+        toast.info(
+          res.note ?? "投資カードに残せる内容が相談から見つかりませんでした"
+        );
+      } else {
+        const skipped =
+          res.skipped.length > 0 ? `（${res.skipped.join("・")}は該当なし）` : "";
+        toast.success(`${res.applied.join("・")}に追記しました${skipped}`);
+      }
+    },
+    onError: err => toast.error(err.message),
+  });
+
+  /*
    * 回答が増えたら末尾へ寄せる。長い回答が付くと下が見えず、
    * 答えが返ってきたことに気付きにくい。
    */
@@ -278,6 +309,44 @@ function ConsultThread({ id, onBack }: { id: number; onBack: () => void }) {
               {data.consultation.symbol ? ` ・ ${data.consultation.symbol}` : ""}
             </p>
           </div>
+
+          {/*
+            相談で出た撤退条件やリスクを投資カードに移せるようにする。
+            相談画面の中に置いておくと、次に株価が動いたときに参照されない。
+            銘柄を指定していない相談はどのカードに書くか決められないので出さない。
+          */}
+          {data.consultation.symbol ? (
+            <Card className="border-primary/30 bg-primary/5">
+              <CardContent className="flex flex-wrap items-center justify-between gap-3 py-3">
+                <div className="min-w-0">
+                  <p className="text-sm font-medium">この相談を投資カードに残す</p>
+                  <p className="text-muted-foreground mt-0.5 text-xs">
+                    出てきた撤退条件・リスク・前提を {data.consultation.symbol} のカードに
+                    追記します（既存の内容は消しません）
+                  </p>
+                </div>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="bg-background shrink-0"
+                  disabled={applyToCard.isPending}
+                  onClick={() => applyToCard.mutate({ consultationId: id, mode: "append" })}
+                >
+                  {applyToCard.isPending ? (
+                    <>
+                      <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                      整理中…
+                    </>
+                  ) : (
+                    <>
+                      <FileText className="mr-1.5 h-3.5 w-3.5" />
+                      投資カードに反映
+                    </>
+                  )}
+                </Button>
+              </CardContent>
+            </Card>
+          ) : null}
 
           <div className="space-y-3">
             {data.messages.map(m =>

@@ -61,6 +61,7 @@ import {
   ExternalLink,
   FileText,
   Loader2,
+  MessageSquare,
   Newspaper,
   Plus,
   RefreshCw,
@@ -81,6 +82,12 @@ type SortKey = "value" | "pnlPct" | "weight" | "name" | "dividend" | "dividendYi
 export default function Holdings() {
   const utils = trpc.useUtils();
   const overview = trpc.portfolio.overview.useQuery();
+  /*
+   * 相談の状況は overview に混ぜず別のクエリで引く。
+   * overview は 112 銘柄の集計で重く、相談の印は無くても一覧は成立するため
+   * 相談側の取得が遅れても一覧の表示を止めない。
+   */
+  const consultStats = trpc.consult.symbolStats.useQuery();
   const [query, setQuery] = useState("");
   const [sortKey, setSortKey] = useState<SortKey>("value");
   const [signalFilter, setSignalFilter] = useState<"ALL" | SignalAction | "NONE">("ALL");
@@ -180,6 +187,17 @@ export default function Holdings() {
    */
   const groups = overview.data?.groups ?? [];
   const summary = overview.data?.summary;
+
+  /*
+   * 銘柄ごとの相談状況を引きやすくする。配列のまま毎行探すと
+   * 112 行 × 相談件数の走査になるため Map にしておく。
+   */
+  const consultBySymbol = useMemo(() => {
+    const list = consultStats.data ?? [];
+    const map = new Map<string, (typeof list)[number]>();
+    for (const s of list) map.set(s.symbol, s);
+    return map;
+  }, [consultStats.data]);
 
   const rows = useMemo(() => {
     let list = groups;
@@ -540,6 +558,14 @@ export default function Holdings() {
                       <div className="flex items-center gap-1.5">
                         <span className="truncate font-medium">{p.name}</span>
                         {p.hasCard ? <FileText className="h-3.5 w-3.5 shrink-0 text-primary" /> : null}
+                        {consultBySymbol.get(p.symbol) ? (
+                          <span className="flex shrink-0 items-center gap-0.5 text-primary">
+                            <MessageSquare className="h-3.5 w-3.5" />
+                            <span className="tabular text-[10px] font-semibold">
+                              {consultBySymbol.get(p.symbol)!.consultCount}
+                            </span>
+                          </span>
+                        ) : null}
                         {p.negativeNewsCount > 0 ? (
                           <span className="flex shrink-0 items-center gap-0.5 text-loss">
                             <Newspaper className="h-3.5 w-3.5" />
@@ -805,6 +831,29 @@ export default function Holdings() {
                                 <FileText className="h-3.5 w-3.5 text-primary" />
                               </TooltipTrigger>
                               <TooltipContent>投資カード記入済み</TooltipContent>
+                            </Tooltip>
+                          ) : null}
+                          {/*
+                            過去に相談した銘柄が分かるようにする。相談画面を開かないと
+                            分からない状態だと「前に検討した」ことに気付けない。
+                          */}
+                          {consultBySymbol.get(p.symbol) ? (
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <span className="flex items-center gap-0.5 text-primary">
+                                  <MessageSquare className="h-3.5 w-3.5" />
+                                  <span className="tabular text-[10px] font-semibold">
+                                    {consultBySymbol.get(p.symbol)!.consultCount}
+                                  </span>
+                                </span>
+                              </TooltipTrigger>
+                              <TooltipContent>
+                                AI に相談済み {consultBySymbol.get(p.symbol)!.consultCount} 件（最終{" "}
+                                {new Date(
+                                  consultBySymbol.get(p.symbol)!.lastConsultedAt
+                                ).toLocaleDateString()}
+                                ）
+                              </TooltipContent>
                             </Tooltip>
                           ) : null}
                           {p.negativeNewsCount > 0 ? (

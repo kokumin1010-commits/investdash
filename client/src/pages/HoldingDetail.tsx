@@ -4,6 +4,7 @@ import { MoneyText, PctText, PnlText } from "@/components/investing/Figures";
 import { CurrencyToggle } from "@/components/investing/CurrencyToggle";
 import { SignalBadge, SignalPlaceholder } from "@/components/investing/SignalBadge";
 import { PriceBandPlanCard } from "@/components/investing/PriceBandPlanCard";
+import { SymbolConsultList } from "@/components/investing/SymbolConsultList";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -66,6 +67,15 @@ export default function HoldingDetail({ params }: { params: { id: string } }) {
    */
   const symbol = detail.data?.holding.symbol;
   const bandPlan = trpc.portfolio.priceBandPlan.useQuery(
+    { symbol: symbol ?? "" },
+    { enabled: !!symbol }
+  );
+
+  /*
+   * この銘柄について過去に相談した記録。
+   * 相談画面を開かないと分からない状態だと「前に検討した」ことに気付けない。
+   */
+  const consults = trpc.consult.bySymbol.useQuery(
     { symbol: symbol ?? "" },
     { enabled: !!symbol }
   );
@@ -397,6 +407,7 @@ export default function HoldingDetail({ params }: { params: { id: string } }) {
           <TabsTrigger value="chart">価格チャート</TabsTrigger>
           <TabsTrigger value="news">ニュース ({news.length})</TabsTrigger>
           <TabsTrigger value="history">シグナル履歴 ({signalHistory.length})</TabsTrigger>
+          <TabsTrigger value="consult">相談 ({consults.data?.length ?? 0})</TabsTrigger>
         </TabsList>
 
         <TabsContent value="card" className="mt-4">
@@ -406,6 +417,14 @@ export default function HoldingDetail({ params }: { params: { id: string } }) {
             currency={currency}
             currentPrice={view?.currentPrice ?? null}
             card={card}
+          />
+        </TabsContent>
+
+        <TabsContent value="consult" className="mt-4">
+          <SymbolConsultList
+            symbol={holding.symbol}
+            rows={consults.data ?? []}
+            isPending={consults.isPending}
           />
         </TabsContent>
 

@@ -38,6 +38,77 @@ export type ConsultationDetail = {
 /** 一覧に出す会話数の上限 */
 export const LIST_LIMIT = 50;
 
+/** 銘柄ごとの相談の状況 */
+export type SymbolConsultStat = {
+  symbol: string;
+  /** その銘柄を対象にした相談の件数 */
+  consultCount: number;
+  /** 最後に相談した日時 */
+  lastConsultedAt: Date;
+  /** 直近の相談（銘柄詳細から開き直すため） */
+  lastConsultationId: number;
+  lastTitle: string;
+};
+
+/**
+ * 銘柄ごとの相談の状況をまとめて返す。
+ *
+ * 保有一覧で「この銘柄は前に相談した」と分かるようにするため。
+ * 112 銘柄それぞれで問い合わせると一覧が遅くなるので 1 回で引いて
+ * メモリ上で集計する。
+ */
+export async function listSymbolConsultStats(
+  userId: number
+): Promise<Map<string, SymbolConsultStat>> {
+  const db = await getDb();
+  const stats = new Map<string, SymbolConsultStat>();
+  if (!db) return stats;
+
+  const rows = await db
+    .select({
+      id: consultations.id,
+      symbol: consultations.symbol,
+      title: consultations.title,
+      updatedAt: consultations.updatedAt,
+    })
+    .from(consultations)
+    .where(eq(consultations.userId, userId))
+    .orderBy(desc(consultations.updatedAt));
+
+  for (const r of rows) {
+    /*
+     * 銘柄を指定しない相談（全体の方針など）は対象外。
+     * 特定の銘柄の印として出すと、関係ない銘柄に印が付く。
+     */
+    if (!r.symbol) continue;
+
+    const existing = stats.get(r.symbol);
+    if (existing) {
+      existing.consultCount += 1;
+      continue;
+    }
+    // 降順で引いているので最初に見つかったものが直近
+    stats.set(r.symbol, {
+      symbol: r.symbol,
+      consultCount: 1,
+      lastConsultedAt: r.updatedAt,
+      lastConsultationId: r.id,
+      lastTitle: r.title,
+    });
+  }
+
+  return stats;
+}
+
+/** 特定の銘柄の相談だけを新しい順に返す（銘柄詳細で使う） */
+export async function listConsultationsBySymbol(
+  userId: number,
+  symbol: string
+): Promise<ConsultationSummary[]> {
+  const all = await listConsultations(userId);
+  return all.filter(c => c.symbol === symbol);
+}
+
 export async function listConsultations(userId: number): Promise<ConsultationSummary[]> {
   const db = await getDb();
   if (!db) return [];

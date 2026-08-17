@@ -11,13 +11,34 @@ import {
   deleteConsultation,
   getConsultation,
   listConsultations,
+  listConsultationsBySymbol,
+  listSymbolConsultStats,
 } from "../services/consultService";
+import { applyConsultToCard } from "../services/cardService";
 
 export const consultRouter = router({
   /** 相談の履歴一覧 */
   list: protectedProcedure.query(async ({ ctx }) => {
     return await listConsultations(ctx.user.id);
   }),
+
+  /**
+   * 銘柄ごとの相談の状況。
+   *
+   * 保有一覧で「前に相談した銘柄」に印を出すために使う。
+   * Map は tRPC を通せないので配列にして返す。
+   */
+  symbolStats: protectedProcedure.query(async ({ ctx }) => {
+    const stats = await listSymbolConsultStats(ctx.user.id);
+    return Array.from(stats.values());
+  }),
+
+  /** 特定の銘柄の相談だけを返す（銘柄詳細で使う） */
+  bySymbol: protectedProcedure
+    .input(z.object({ symbol: z.string().min(1).max(24) }))
+    .query(async ({ ctx, input }) => {
+      return await listConsultationsBySymbol(ctx.user.id, input.symbol);
+    }),
 
   /** 1 件の相談を開く（続きを聞くために全発言を返す） */
   get: protectedProcedure
@@ -44,6 +65,27 @@ export const consultRouter = router({
         question: input.question,
         consultationId: input.consultationId ?? null,
         symbol: input.symbol ?? null,
+      });
+    }),
+
+  /**
+   * 相談の内容を投資カードに書き戻す。
+   *
+   * 既定は追記。上書きにすると手で書いた内容が消えるため、
+   * 明示的に選んだときだけ置き換える。
+   */
+  applyToCard: protectedProcedure
+    .input(
+      z.object({
+        consultationId: z.number().int().positive(),
+        mode: z.enum(["append", "overwrite"]).default("append"),
+      })
+    )
+    .mutation(async ({ ctx, input }) => {
+      return await applyConsultToCard({
+        userId: ctx.user.id,
+        consultationId: input.consultationId,
+        mode: input.mode,
       });
     }),
 

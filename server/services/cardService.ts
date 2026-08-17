@@ -10,6 +10,8 @@ import { fetchCompanyProfile } from "./marketData";
 import { draftCard, CARD_MODEL, type CardDraftContext } from "./cardDrafter";
 import { withAiRunLog } from "./aiRunLog";
 import { normalizeSymbol } from "../../shared/investing";
+import { extractCardFields, mergeField } from "./consultToCard";
+import { getConsultation } from "./consultService";
 
 /** 投資カードが実質的に空か（AI の下書き対象か）を判定する */
 export function isCardEmpty(card: {
@@ -119,6 +121,99 @@ export async function draftCardForSymbol(
 
 /**
  * カードが空の銘柄を評価額の大きい順に下書きする。
+ */
+
+/**
+ * 相談の内容を投資カードに書き戻す。
+ *
+ * 相談では「何が崩れたら降りるか」が出るが、相談画面の中に埋もれると
+ * 次に株価が動いたときに参照されない。カードに移せば AI シグナルも
+ * その条件を判断材料に使う。
+ *
+ * @param mode append=既存に追記（既定） / overwrite=置き換え
+ */
+export async function applyConsultToCard(params: {
+  userId: number;
+  consultationId: number;
+  mode?: "append" | "overwrite";
+}): Promise<{
+  symbol: string;
+  applied: string[];
+  skipped: string[];
+  note: string | null;
+}> {
+  const { userId, consultationId, mode = "append" } = params;
+
+  const detail = await getConsultation(userId, consultationId);
+  if (!detail) throw new Error("相談が見つかりません");
+
+  const symbol = detail.consultation.symbol;
+  /*
+   * 銘柄を指定しない相談（全体の方針など）はどのカードに書けばよいか
+   * 決められない。勝手に選ぶと関係ない銘柄に書き込まれる。
+   */
+  if (!symbol) {
+    throw new Error("この相談は銘柄を指定していないため、投資カードに反映できません");
+  }
+
+  const holdings = await db.listHoldings(userId);
+  const holding = holdings.find(h => h.symbol === symbol);
+  if (!holding) throw new Error(`保有銘柄に ${symbol} が見つかりません`);
+
+  const extracted = await extractCardFields({
+    userId,
+    symbol,
+    name: holding.name,
+    turns: detail.messages.map(m => ({ role: m.role, content: m.content })),
+  });
+
+  const existing = await db.getCard(userId, symbol);
+  const today = new Date().toLocaleDateString("ja-JP");
+
+  const fields = [
+    { key: "exitConditions", label: "エグジット条件" },
+    { key: "risks", label: "想定リスク" },
+    { key: "coreThesis", label: "コア投資ロジック" },
+    { key: "valuationAssumption", label: "バリュエーション前提" },
+  ] as const;
+
+  const applied: string[] = [];
+  const skipped: string[] = [];
+  const next: Record<string, string | null> = {};
+
+  for (const f of fields) {
+    const value = extracted[f.key];
+    if (!value) {
+      skipped.push(f.label);
+      next[f.key] = existing?.[f.key] ?? null;
+      continue;
+    }
+    next[f.key] =
+      mode === "overwrite" ? value : mergeField(existing?.[f.key], value, today);
+    applied.push(f.label);
+  }
+
+  await db.upsertCard({
+    userId,
+    symbol,
+    holdingId: holding.id,
+    // 相談で触れていない項目は既存のまま残す（消すと手で書いた内容が失われる）
+    buyReason: existing?.buyReason ?? null,
+    coreThesis: next.coreThesis,
+    valuationAssumption: next.valuationAssumption,
+    exitConditions: next.exitConditions,
+    risks: next.risks,
+    keyFinancials: existing?.keyFinancials ?? null,
+    fairValue: existing?.fairValue ?? null,
+    horizon: existing?.horizon ?? null,
+    conviction: existing?.conviction ?? null,
+  });
+
+  return { symbol, applied, skipped, note: extracted.note };
+}
+
+/**
+ * （以下は既存の一括下書き）
  *
  * 評価額順にするのは、金額の大きい銘柄ほど判断を誤ったときの
  * 影響が大きいため。上限を設けるのは、全 112 銘柄を一度に回すと
