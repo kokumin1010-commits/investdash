@@ -42,6 +42,8 @@ import {
   buildDividendCalendar,
   type DividendCalendarMonth,
 } from "./dividendCalendar";
+import { buildSectorDividends } from "./dividendSector";
+import type { SectorDividendRow } from "./dividendSector";
 import {
   computeBrokerLeverage,
   marginRiskLevel,
@@ -195,6 +197,16 @@ export type DividendSummaryView = {
    * 毎月均等なら 0.25、少数の月に集中していれば 1 に近づく。
    */
   concentration: number | null;
+  /**
+   * 業種別の内訳。
+   * 月別の偏りだけでは「どの産業に配当が依存しているか」が分からない。
+   * 金利が下がる局面で金融の配当が削られる、といった影響を事前に把握するために持つ。
+   */
+  sectors: SectorDividendRow[];
+  /** 最も配当額が大きい業種名（未分類は除く） */
+  topSector: string | null;
+  /** その業種が年間配当の何 % を占めるか */
+  topSectorSharePct: number | null;
 };
 
 export type PortfolioSummary = {
@@ -929,6 +941,26 @@ function buildDividendSummary(
     if (t && (updatedAt === null || t > updatedAt)) updatedAt = t;
   }
 
+  /*
+   * 業種別の内訳。
+   *
+   * 金額は口座レコード単位（positions）で足す。同じ銘柄を複数口座で持てば
+   * 受取額は株数の合計に比例するため。銘柄数は集計側が symbol で重複を除く。
+   *
+   * 業種は口座ごとに変わるものではないが、レコードによって取得できていない
+   * 場合があるため、同一銘柄の他レコードから補った値（groups の sector）を使う。
+   */
+  const sectorBySymbol = new Map<string, string | null>();
+  for (const g of groups) sectorBySymbol.set(g.symbol, g.sector);
+  const sectorBreakdown = buildSectorDividends(
+    positions.map(p => ({
+      symbol: p.symbol,
+      sector: sectorBySymbol.get(p.symbol) ?? p.sector,
+      annualIncomeBase: p.dividend?.annualIncomeBase ?? null,
+      marketValueBase: p.marketValueBase,
+    })),
+  );
+
   return {
     annualIncomeBase,
     yieldPct: totalValueBase > 0 ? (annualIncomeBase / totalValueBase) * 100 : null,
@@ -943,6 +975,9 @@ function buildDividendSummary(
     monthlyIncomeBase: monthlyTotals,
     peakMonth: peakDividendMonth(monthlyTotals),
     concentration: dividendConcentration(monthlyTotals),
+    sectors: sectorBreakdown.rows,
+    topSector: sectorBreakdown.topSector,
+    topSectorSharePct: sectorBreakdown.topSharePct,
   };
 }
 

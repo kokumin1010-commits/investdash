@@ -44,6 +44,7 @@ import {
   Search,
 } from "lucide-react";
 import { useMemo, useState } from "react";
+import { SectorDividendView } from "@/components/investing/SectorDividendView";
 import {
   Bar,
   BarChart,
@@ -75,7 +76,7 @@ import { Link, useSearch } from "wouter";
 type SortKey = "amount" | "yield" | "yieldOnCost" | "name";
 
 /** 表示の切り替え。月から見るか、銘柄から見るか */
-type ViewMode = "month" | "stock";
+type ViewMode = "month" | "stock" | "sector";
 
 const MONTH_LABELS = [
   "1月",
@@ -452,6 +453,7 @@ export default function Dividends() {
               <SelectContent>
                 <SelectItem value="month">月から見る</SelectItem>
                 <SelectItem value="stock">銘柄から見る</SelectItem>
+                <SelectItem value="sector">業種から見る</SelectItem>
               </SelectContent>
             </Select>
             {view === "stock" ? (
@@ -808,6 +810,14 @@ export default function Dividends() {
                 </Card>
               )}
             </>
+          ) : view === "sector" ? (
+            <SectorDividendView
+              sectors={dividends?.sectors ?? []}
+              topSector={dividends?.topSector ?? null}
+              topSectorSharePct={dividends?.topSectorSharePct ?? null}
+              stockRows={stockRows}
+              money={money}
+            />
           ) : (
             /* 銘柄から見る */
             <Card>
