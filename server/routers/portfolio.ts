@@ -18,6 +18,11 @@ import {
   runChecksForBand,
   updateBand,
 } from "../services/priceBandService";
+import {
+  acknowledgeTransitions,
+  listTransitions,
+  recordTransitions,
+} from "../services/bandTransitionService";
 import { listAiRuns } from "../services/aiRunLog";
 import { generateCandidateSuggestions, addCandidatesToWatchlist } from "../services/candidateService";
 import {
@@ -446,8 +451,51 @@ export const portfolioRouter = router({
   /** 株価の手動更新 */
   syncPrices: protectedProcedure.mutation(async ({ ctx }) => {
     const result = await syncPrices(ctx.user.id);
-    return result;
+    /*
+     * 株価が変わったら判定変化を記録する。
+     * 更新と記録を別操作にすると、記録を忘れた期間だけ履歴が飛んで
+     * 「いつ買い増し圏に入ったか」が追えなくなる。
+     * 記録の失敗で株価更新まで失敗扱いにはしない（株価の更新は成功しているため）。
+     */
+    let transitions: Awaited<ReturnType<typeof recordTransitions>> | null = null;
+    try {
+      transitions = await recordTransitions(ctx.user.id);
+    } catch (e) {
+      console.error("[syncPrices] 判定変化の記録に失敗", e);
+    }
+    return { ...result, transitions };
   }),
+
+  /** 買い増しプランの判定が変わった履歴 */
+  bandTransitions: protectedProcedure
+    .input(
+      z
+        .object({
+          symbol: z.string().optional(),
+          onlyUnacknowledged: z.boolean().default(false),
+          limit: z.number().int().min(1).max(300).default(100),
+        })
+        .optional()
+    )
+    .query(async ({ ctx, input }) =>
+      listTransitions(ctx.user.id, {
+        symbol: input?.symbol,
+        onlyUnacknowledged: input?.onlyUnacknowledged ?? false,
+        limit: input?.limit ?? 100,
+      })
+    ),
+
+  /** 判定変化を確認済みにする */
+  acknowledgeBandTransitions: protectedProcedure
+    .input(z.object({ ids: z.array(z.number().int()).optional() }).optional())
+    .mutation(async ({ ctx, input }) =>
+      acknowledgeTransitions(ctx.user.id, { ids: input?.ids })
+    ),
+
+  /** 判定変化を今すぐ記録する（株価更新なしで確認したいとき用） */
+  recordBandTransitions: protectedProcedure.mutation(async ({ ctx }) =>
+    recordTransitions(ctx.user.id)
+  ),
 
   /** セクター情報の補完 */
   enrichProfiles: protectedProcedure

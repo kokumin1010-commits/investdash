@@ -18,6 +18,7 @@ import {
 import { AlertTriangle, ArrowDown, Search, TrendingUp } from "lucide-react";
 import { useMemo, useState } from "react";
 import { Link } from "wouter";
+import { TransitionHistoryCard } from "@/components/investing/TransitionHistoryCard";
 
 /**
  * 買い増しプランの一覧。
@@ -199,6 +200,13 @@ export default function BuyPlans() {
           <PlanRow key={r.symbol} row={r} />
         ))}
       </div>
+
+      {/*
+        判定変化の履歴は一覧の下に置く。
+        今の判定（何をすべきか）が先に来るべきで、履歴は
+        「見逃していないか」を後から確かめるためのものだから。
+      */}
+      <TransitionHistoryCard />
     </div>
   );
 }

@@ -611,6 +611,62 @@ export type BandCheckResult = typeof bandCheckResults.$inferSelect;
 export type InsertBandCheckResult = typeof bandCheckResults.$inferInsert;
 
 /**
+ * 買い増しプランの判定が変わった履歴。
+ *
+ * この画面は月に 1 回程度しか開かない前提のため、その間に株価が
+ * 買い増し圏まで下がって戻っていても気付けない。判定が切り替わった
+ * 時点を残しておけば「8/20 に打診買い圏に入り 8/25 に抜けた」と
+ * 後から分かり、見逃しに気付ける。
+ *
+ * 株価更新のたびに全銘柄を比べ、前回と判定が違うときだけ 1 行足す。
+ * 毎回記録すると 112 銘柄 × 1 日 2 回で年 8 万行になり、
+ * かつ「変化した時点」が埋もれて読めなくなる。
+ */
+export const bandTransitions = mysqlTable(
+  "bandTransitions",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    userId: int("userId").notNull(),
+    /** 対象銘柄。プランと同じく symbol で紐付ける */
+    symbol: varchar("symbol", { length: 24 }).notNull(),
+    /**
+     * 変化前の行動。初回の記録や、帯の外から入った場合は null。
+     * 「null → ADD_SMALL」と「HOLD → ADD_SMALL」は意味が違うため区別する。
+     */
+    fromAction: mysqlEnum("fromAction", ["HOLD", "ADD_SMALL", "ADD_MAIN", "VERIFY", "REDUCE"]),
+    /** 変化前の段の説明。段を編集しても当時の文言が残るよう複製して持つ */
+    fromLabel: varchar("fromLabel", { length: 160 }),
+    /** 変化後の行動。帯の外に出た場合は null */
+    toAction: mysqlEnum("toAction", ["HOLD", "ADD_SMALL", "ADD_MAIN", "VERIFY", "REDUCE"]),
+    toLabel: varchar("toLabel", { length: 160 }),
+    /**
+     * 帯の外にいるか。帯の外は action が null になるので、
+     * 「上に抜けた」「下に抜けた」を別に持たないと区別できない。
+     */
+    outsideDirection: mysqlEnum("outsideDirection", ["ABOVE", "BELOW"]),
+    /** 変化を検知したときの株価（現地通貨） */
+    price: decimal("price", { precision: 20, scale: 4 }),
+    /** 価格帯の通貨。表示のときに単位を間違えないように持つ */
+    currency: varchar("currency", { length: 8 }),
+    /**
+     * 前回の判定からの株価の変化率（%）。
+     * 「どれだけ動いて判定が変わったか」が分かる。
+     */
+    priceChangePct: decimal("priceChangePct", { precision: 10, scale: 4 }),
+    /** ユーザーがこの変化を確認したか。未確認のものだけを出せるようにする */
+    acknowledgedAt: timestamp("acknowledgedAt"),
+    createdAt: timestamp("createdAt").defaultNow().notNull(),
+  },
+  table => ({
+    userSymbolIdx: index("bandTransitions_user_symbol_idx").on(table.userId, table.symbol),
+    createdAtIdx: index("bandTransitions_created_idx").on(table.userId, table.createdAt),
+  })
+);
+
+export type BandTransition = typeof bandTransitions.$inferSelect;
+export type InsertBandTransition = typeof bandTransitions.$inferInsert;
+
+/**
  * AI 実行履歴。
  *
  * 過去にログが残っておらず「いつ何をどう判断したのか」を後から追えなかった。
