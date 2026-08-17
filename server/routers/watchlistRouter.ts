@@ -3,8 +3,22 @@ import { z } from "zod";
 import * as db from "../db";
 import { protectedProcedure, router } from "../_core/trpc";
 import { BROKERS, normalizeSymbol } from "../../shared/investing";
-import { fetchCompanyProfile, fetchQuote } from "../services/marketData";
+import {
+  fetchCompanyProfile,
+  fetchDividendHistory,
+  fetchPriceHistory,
+  fetchQuote,
+} from "../services/marketData";
 import { regenerateWatchSignal } from "../services/portfolio";
+import { summarizeDividends } from "../services/dividend";
+import { computeTargetDistance, targetDistanceNote } from "../../shared/targetDistance";
+import {
+  reviseTarget,
+  TARGET_REVISE_MODEL,
+  type TargetReviseContext,
+} from "../services/targetReviser";
+import { withAiRunLog } from "../services/aiRunLog";
+import { toFriendlyAiError } from "../services/aiErrors";
 
 export const watchlistRouter = router({
   list: protectedProcedure.query(async ({ ctx }) => {
@@ -22,6 +36,12 @@ export const watchlistRouter = router({
       const target = w.targetPrice ? Number(w.targetPrice) : null;
       const prev = w.previousClose ? Number(w.previousClose) : null;
       const sig = signalMap.get(w.symbol);
+      /*
+       * 目標価格が現在値からどれだけ離れているかは shared の判定に任せる。
+       * 画面側で式を書くと、買い増しプラン一覧の判定（同じ閾値を使う）と
+       * ずれたときに「警告は出るのに作り直しても直らない」状態になる。
+       */
+      const distance = computeTargetDistance(price, target);
       return {
         ...w,
         priceNum: price,
@@ -34,7 +54,13 @@ export const watchlistRouter = router({
          * 97.4% という数字になり「あと 49.4% 下がれば届く」という実感と大きく食い違う。
          * 候補提案側（candidateService）も現在値基準なので、画面内で基準を揃える。
          */
-        gapPct: price !== null && target !== null && price !== 0 ? ((target - price) / price) * 100 : null,
+        gapPct: distance.gapPct,
+        /** 目標価格の距離の区分（遠すぎる／やや遠い／現実的など） */
+        targetLevel: distance.level,
+        /** 作り直しを検討すべきか */
+        targetNeedsRework: distance.needsRework,
+        /** なぜ作り直すべきかの説明。問題なければ null */
+        targetNote: targetDistanceNote(distance),
         reachedTarget: price !== null && target !== null ? price <= target : false,
         dayChangePct: price !== null && prev !== null && prev !== 0 ? ((price - prev) / prev) * 100 : null,
         signal: sig && sig.scope === "WATCHLIST"
@@ -151,6 +177,135 @@ export const watchlistRouter = router({
       const removed = await db.deleteWatchItem(ctx.user.id, input.id);
       if (!removed) throw new TRPCError({ code: "NOT_FOUND", message: "銘柄が見つかりません" });
       return { success: true } as const;
+    }),
+
+  /**
+   * 買いたい値段を AI に作り直させる。
+   *
+   * 目標が現在値から離れすぎている（-30% 超）銘柄は、待っていても買えない
+   * まま機会を逃す。実測では INPEX が現在値 3,765 円に対し目標 1,900 円
+   * （-49.5%）で、半値になるのを待つ設定になっていた。現実的に届く水準へ
+   * 引き直す。
+   *
+   * 根拠も一緒に保存する。値段だけ書き換えると「なぜこの値段か」が
+   * 分からず、次に見たときにまた疑うことになる。
+   */
+  reviseTarget: protectedProcedure
+    .input(z.object({ id: z.number().int().positive() }))
+    .mutation(async ({ ctx, input }) => {
+      const item = await db.getWatchItem(ctx.user.id, input.id);
+      if (!item) throw new TRPCError({ code: "NOT_FOUND", message: "銘柄が見つかりません" });
+
+      const currentPrice = item.currentPrice === null ? null : Number(item.currentPrice);
+      if (currentPrice === null || !Number.isFinite(currentPrice) || currentPrice <= 0) {
+        /*
+         * 現在値がないと「現実的に届く水準」を決められない。
+         * 適当な値を置くと根拠のない目標価格が残るため、ここで止める。
+         */
+        throw new TRPCError({
+          code: "PRECONDITION_FAILED",
+          message: `${item.name} の現在値が取得できていません。株価を更新してからお試しください。`,
+        });
+      }
+
+      const previousTarget = item.targetPrice === null ? null : Number(item.targetPrice);
+
+      const [history, dividends, news] = await Promise.all([
+        fetchPriceHistory(item.symbol, "6mo", "1d"),
+        fetchDividendHistory(item.symbol),
+        db.listNews(ctx.user.id, { symbol: item.symbol, limit: 8 }),
+      ]);
+
+      const closes = history.map(h => h.c).filter(c => Number.isFinite(c) && c > 0);
+      const returnOver = (days: number): number | null => {
+        if (history.length < 2) return null;
+        const last = history[history.length - 1];
+        const cutoff = last.t - days * 24 * 60 * 60 * 1000;
+        const base = history.find(b => b.t >= cutoff);
+        if (!base || base.c === 0) return null;
+        return ((last.c - base.c) / base.c) * 100;
+      };
+
+      /*
+       * 配当はウォッチリストのテーブルに持っていないため都度取得する。
+       * 利回りを根拠に使えると、株価の水準ではなく受け取れる金額から
+       * 買いたい値段を決められる（REIT や商社では実際にこれが基準になる）。
+       */
+      const annual = dividends
+        ? summarizeDividends(dividends.dividends, dividends.splits, new Date()).annualDividend
+        : null;
+
+      const reviseCtx: TargetReviseContext = {
+        symbol: item.symbol,
+        name: item.name,
+        currency: item.currency,
+        sector: item.sector,
+        industry: item.industry,
+        currentPrice,
+        previousTarget,
+        rangeHigh: closes.length > 0 ? Math.max(...closes) : null,
+        rangeLow: closes.length > 0 ? Math.min(...closes) : null,
+        return1mPct: returnOver(30),
+        return3mPct: returnOver(90),
+        annualDividend: annual !== null && annual > 0 ? annual : null,
+        watchReason: item.watchReason,
+        news: news.map(n => ({
+          title: n.title,
+          summary: n.summary,
+          impactScore: n.impactScore,
+        })),
+      };
+
+      let revised: Awaited<ReturnType<typeof reviseTarget>>;
+      try {
+        revised = await withAiRunLog(
+          {
+            userId: ctx.user.id,
+            kind: "target_revise",
+            symbol: item.symbol,
+            model: TARGET_REVISE_MODEL,
+            summarize: r =>
+              `${previousTarget ?? "未設定"} → ${r.targetPrice} ${item.currency}: ${r.basis.slice(0, 80)}`,
+          },
+          () => reviseTarget(reviseCtx)
+        );
+      } catch (error) {
+        // 利用枠切れなどは原因と対処が分かる文言に変換する
+        throw toFriendlyAiError(error, "買いたい値段の見直しに失敗しました");
+      }
+
+      /*
+       * 根拠は買付条件に追記する。上書きにすると本人が書いた条件が消える。
+       * 日付を付けて時系列で読めるようにする。
+       */
+      const stamp = new Date().toLocaleDateString("ja-JP");
+      const appended = [
+        item.buyConditions?.trim() || null,
+        `【${stamp} AI が見直し】${revised.basis}`,
+        revised.buyConditions,
+      ]
+        .filter(Boolean)
+        .join("\n");
+
+      await db.updateWatchItem(ctx.user.id, input.id, {
+        targetPrice: String(revised.targetPrice),
+        buyConditions: appended.slice(0, 4000),
+      });
+
+      const distance = computeTargetDistance(currentPrice, revised.targetPrice);
+      return {
+        symbol: item.symbol,
+        name: item.name,
+        currency: item.currency,
+        previousTarget,
+        targetPrice: revised.targetPrice,
+        gapPct: distance.gapPct,
+        level: distance.level,
+        basis: revised.basis,
+        buyConditions: revised.buyConditions,
+        note: revised.note || null,
+        adjustedNote: revised.adjustedNote,
+      } as const;
     }),
 
   /** ウォッチリスト銘柄を保有ポジションへ昇格 */

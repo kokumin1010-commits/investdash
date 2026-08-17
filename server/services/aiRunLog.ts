@@ -22,6 +22,7 @@ export type AiRunKind =
   | "weekly_report"
   | "card_draft"
   | "consult"
+  | "target_revise"
   | "ocr";
 
 export async function logAiRun(params: {

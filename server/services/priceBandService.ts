@@ -25,6 +25,7 @@ import { fetchPriceHistory } from "./marketData";
 import { runBandChecks, BAND_CHECKER_MODEL } from "./bandChecker";
 import { convertToJpy, FX_FALLBACK, type FxRates } from "./fx";
 import { calcPnlPct, isCostRecovered } from "../../shared/pnlLabel";
+import { computeTargetDistance } from "../../shared/targetDistance";
 
 /** 文字列の数値カラム（decimal）を数値にする。空や不正値は null */
 const toNum = (v: string | null | undefined): number | null => {
@@ -1017,15 +1018,14 @@ function buildWatchFacts(
     };
   }
   const target = item.targetPrice === null ? null : Number(item.targetPrice);
-  const gapPct =
-    target !== null && price !== null && price > 0 ? ((target - price) / price) * 100 : null;
+  // 判定は shared に集約する。ウォッチリスト画面と同じ閾値・同じ基準にするため
+  const distance = computeTargetDistance(price, target);
   return {
     held: false,
     watchTargetPrice: target,
-    watchGapPct: gapPct,
+    watchGapPct: distance.gapPct,
     watchPriority: item.priority,
-    // -30% 以上離れていたら「遠すぎる」とみなす
-    targetTooFar: gapPct !== null && gapPct <= -30,
+    targetTooFar: distance.needsRework,
   };
 }
 

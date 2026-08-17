@@ -36,6 +36,10 @@ import {
   type Market,
 } from "@shared/investing";
 import {
+  TARGET_DISTANCE_LABELS,
+  type TargetDistanceLevel,
+} from "@shared/targetDistance";
+import {
   Brain,
   CheckCircle2,
   Eye,
@@ -47,7 +51,7 @@ import {
   Trash2,
   TrendingDown,
 } from "lucide-react";
-import { Lightbulb, ChevronDown, ChevronUp } from "lucide-react";
+import { Lightbulb, ChevronDown, ChevronUp, AlertTriangle, Wand2 } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 
@@ -70,6 +74,12 @@ type WatchRow = {
   reachedTarget: boolean;
   dayChangePct: number | null;
   newsCount: number;
+  /** 目標価格の距離の区分。サーバー側で判定済み */
+  targetLevel: TargetDistanceLevel;
+  /** 作り直しを検討すべきか */
+  targetNeedsRework: boolean;
+  /** なぜ作り直すべきかの説明。問題なければ null */
+  targetNote: string | null;
   signal: { action: "ADD" | "HOLD" | "WATCH" | "REDUCE" | "EXIT"; confidence: number | null; rationale: string; createdAt: Date } | null;
 };
 
@@ -128,6 +138,8 @@ export default function Watchlist() {
   const [promoteTarget, setPromoteTarget] = useState<WatchRow | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<WatchRow | null>(null);
   const [signalBusyId, setSignalBusyId] = useState<number | null>(null);
+  /** 作り直し中の銘柄。押した行だけ進行が分かるようにする */
+  const [reviseBusyId, setReviseBusyId] = useState<number | null>(null);
   /**
    * AI が提案した候補銘柄。
    * 保存はせずこの画面の状態として持つ。取り込むまでは「見ただけ」の状態にしたい
@@ -163,6 +175,27 @@ export default function Watchlist() {
     onError: e => toast.error(e.message),
   });
 
+  /*
+   * 買いたい値段の作り直し。
+   *
+   * 結果は必ず「いくらから何に変わったか」と根拠まで出す。
+   * 「見直しました」だけだと、書き換わった値段を信用する材料がない。
+   */
+  const reviseTarget = trpc.watchlist.reviseTarget.useMutation({
+    onSuccess: async res => {
+      await utils.watchlist.invalidate();
+      await utils.portfolio.invalidate();
+      const before =
+        res.previousTarget === null ? "未設定" : formatMoney(res.previousTarget, res.currency);
+      toast.success(
+        `${res.name} の買いたい値段を ${before} → ${formatMoney(res.targetPrice, res.currency)} に見直しました（あと ${res.gapPct?.toFixed(1) ?? "―"}%）`,
+        { description: res.adjustedNote ? `${res.basis}\n${res.adjustedNote}` : res.basis, duration: 12000 }
+      );
+    },
+    onError: e => toast.error(e.message),
+    onSettled: () => setReviseBusyId(null),
+  });
+
   const suggest = trpc.portfolio.suggestCandidates.useMutation({
     onSuccess: res => {
       setSuggestion(res as unknown as SuggestionResult);
@@ -183,6 +216,12 @@ export default function Watchlist() {
 
   const rows = (list.data ?? []) as unknown as WatchRow[];
   const reached = rows.filter(r => r.reachedTarget);
+  /*
+   * 目標価格が現在値から離れすぎている銘柄。
+   * 「待っている」ように見えて実際は買えない状態なので、
+   * 到達した銘柄と同じ強さで目に入る位置に出す。
+   */
+  const needsRework = rows.filter(r => r.targetNeedsRework);
   const heldSymbols = new Set(rows.map(r => r.symbol));
 
   if (list.isLoading) {
@@ -202,6 +241,7 @@ export default function Watchlist() {
           <p className="text-sm text-muted-foreground">
             購入検討中の銘柄 {rows.length} 件
             {reached.length > 0 ? ` ・ 目標価格到達 ${reached.length} 件` : ""}
+            {needsRework.length > 0 ? ` ・ 見直しが必要 ${needsRework.length} 件` : ""}
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -473,6 +513,75 @@ export default function Watchlist() {
         </Card>
       ) : null}
 
+      {/*
+        目標価格が現在値から離れすぎている銘柄。
+
+        待っているつもりでも実際には買えない状態なので、到達した銘柄と
+        同じ高さに置く。下の一覧の中だけに出すと、カードを 1 枚ずつ
+        見ないと気付けない。
+      */}
+      {needsRework.length > 0 ? (
+        <Card className="border-amber-300 bg-amber-50/60 dark:border-amber-900/60 dark:bg-amber-950/20">
+          <CardHeader className="pb-2">
+            <CardTitle className="flex items-center gap-2 text-base">
+              <AlertTriangle className="h-4 w-4 text-amber-600 dark:text-amber-400" />
+              買いたい値段が現実的でない銘柄
+            </CardTitle>
+            <CardDescription className="text-xs leading-relaxed">
+              現在値から 30% 以上離れた値段を待つ設定になっています。この水準まで待つことは実質「買わない」に近く、買い場を逃す恐れがあります。
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-2">
+            {needsRework.map(r => (
+              <div
+                key={r.id}
+                className="space-y-1.5 rounded-lg bg-card/60 px-3 py-2.5"
+              >
+                <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                  <span className="font-medium">{r.name}</span>
+                  <span className="tabular text-xs text-muted-foreground">{r.tickerCode}</span>
+                  <Badge
+                    variant="outline"
+                    className="border-amber-300 bg-amber-100/60 text-[10px] text-amber-700 dark:bg-amber-950/40 dark:text-amber-300"
+                  >
+                    {TARGET_DISTANCE_LABELS[r.targetLevel]}
+                  </Badge>
+                </div>
+                <p className="tabular text-xs text-muted-foreground">
+                  現在 {formatMoney(r.priceNum, r.currency)} / 目標{" "}
+                  {formatMoney(r.targetNum, r.currency)}
+                  {r.gapPct !== null ? `（あと ${r.gapPct.toFixed(1)}%）` : ""}
+                </p>
+                {r.targetNote ? (
+                  <p className="text-xs leading-relaxed">{r.targetNote}</p>
+                ) : null}
+                <div className="flex flex-wrap gap-2 pt-0.5">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="bg-background"
+                    disabled={reviseBusyId !== null}
+                    onClick={() => {
+                      setReviseBusyId(r.id);
+                      reviseTarget.mutate({ id: r.id });
+                    }}
+                  >
+                    <Wand2
+                      className={`mr-1.5 h-3.5 w-3.5 ${reviseBusyId === r.id ? "animate-pulse" : ""}`}
+                    />
+                    {reviseBusyId === r.id ? "AI が見直し中..." : "AI に作り直させる"}
+                  </Button>
+                  {/* 自分で決めたい場合の逃げ道。AI に任せる以外の選択肢を必ず残す */}
+                  <Button size="sm" variant="ghost" onClick={() => setEditTarget(r)}>
+                    自分で直す
+                  </Button>
+                </div>
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+      ) : null}
+
       {rows.length === 0 ? (
         <Card className="border-dashed">
           <CardContent className="flex flex-col items-center gap-4 py-16 text-center">
@@ -549,6 +658,40 @@ export default function Watchlist() {
                     )}
                   </div>
                 </div>
+
+                {/*
+                  距離の区分は一覧の中でも出す。上の警告カードだけだと
+                  「やや遠い」（作り直しの対象にはしないが時間がかかる）が
+                  どこにも表示されず、判断の材料が落ちる。
+                */}
+                {r.targetNote ? (
+                  <div className="space-y-1.5 rounded-lg border border-amber-300/70 bg-amber-50/60 px-2.5 py-2 dark:border-amber-900/60 dark:bg-amber-950/20">
+                    <div className="flex items-center gap-1.5">
+                      <AlertTriangle className="h-3.5 w-3.5 shrink-0 text-amber-600 dark:text-amber-400" />
+                      <span className="text-[11px] font-medium text-amber-700 dark:text-amber-300">
+                        買いたい値段が{TARGET_DISTANCE_LABELS[r.targetLevel]}
+                      </span>
+                    </div>
+                    <p className="text-[11px] leading-relaxed">{r.targetNote}</p>
+                    {r.targetNeedsRework ? (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="h-7 w-full bg-background text-[11px]"
+                        disabled={reviseBusyId !== null}
+                        onClick={() => {
+                          setReviseBusyId(r.id);
+                          reviseTarget.mutate({ id: r.id });
+                        }}
+                      >
+                        <Wand2
+                          className={`mr-1.5 h-3 w-3 ${reviseBusyId === r.id ? "animate-pulse" : ""}`}
+                        />
+                        {reviseBusyId === r.id ? "AI が見直し中..." : "AI に作り直させる"}
+                      </Button>
+                    ) : null}
+                  </div>
+                ) : null}
 
                 {r.watchReason ? (
                   <div className="space-y-1">
