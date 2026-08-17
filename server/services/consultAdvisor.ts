@@ -252,6 +252,64 @@ export function buildHistoryText(ctx: ConsultContext): string | null {
     }
   }
 
+  /*
+   * 提案の実績を渡す。
+   *
+   * 自分の過去の結論が当たったか外れたかを踏まえさせるため。
+   * 判定済みが 0 件のときは何も渡さない。「0 勝 0 敗」と書くと
+   * AI が実績の少なさを言い訳にして結論を曖昧にする恐れがある。
+   */
+  const rec = ctx.adviceRecord;
+  if (rec && rec.judged > 0) {
+    if (lines.length > 0) lines.push("");
+    lines.push("## これまでの提案の実績（あなた自身の判断の当否）");
+    lines.push(`- 判定済み ${rec.judged} 件のうち 正しかった ${rec.correct} 件 / 外れた ${rec.wrong} 件`);
+    for (const s of rec.byStance) {
+      const label =
+        s.stance === "BUY"
+          ? "買いを勧めた判断"
+          : s.stance === "HOLD"
+            ? "見送りを勧めた判断"
+            : s.stance === "REDUCE"
+              ? "売却を勧めた判断"
+              : "借入返済を勧めた判断";
+      lines.push(`- ${label}: ${s.correct} 勝 ${s.wrong} 敗`);
+    }
+    lines.push(
+      "外れが多い側の判断では、根拠をより厳しく確認してから結論を出すこと。"
+    );
+  }
+
+  /*
+   * この銘柄に対する提案の履歴（実行したかどうかを含む）。
+   *
+   * 「勧めたが実行されなかった」ことが分かると、同じ提案を繰り返す前に
+   * 理由を確認できる。
+   */
+  if (rec && rec.symbolHistory.length > 0) {
+    if (lines.length > 0) lines.push("");
+    lines.push(`## ${ctx.focusSymbol} に対する過去の提案と実行状況`);
+    for (const h of rec.symbolHistory) {
+      const stance =
+        h.stance === "BUY"
+          ? "買い"
+          : h.stance === "HOLD"
+            ? "見送り"
+            : h.stance === "REDUCE"
+              ? "売却"
+              : "返済";
+      const done =
+        h.executed === null ? "実行の判定前" : h.executed ? "実行された" : "実行されなかった";
+      const verdict =
+        h.verdict === "CORRECT"
+          ? "結果は正しかった"
+          : h.verdict === "WRONG"
+            ? "結果は外れた"
+            : "結果は未判定";
+      lines.push(`- ${h.createdAt} ${stance}を提案 → ${done} / ${verdict}: ${h.conclusion}`);
+    }
+  }
+
   return lines.length > 0 ? lines.join("\n") : null;
 }
 

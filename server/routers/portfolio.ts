@@ -32,6 +32,7 @@ import {
 import { createUrgentReports } from "../services/urgentReport";
 import { draftCardForSymbol, draftMissingCards } from "../services/cardService";
 import { listAiRuns } from "../services/aiRunLog";
+import { checkVerdicts } from "../services/outcomeService";
 import { generateCandidateSuggestions, addCandidatesToWatchlist } from "../services/candidateService";
 import {
   buildPortfolio,
@@ -471,7 +472,19 @@ export const portfolioRouter = router({
     } catch (e) {
       console.error("[syncPrices] 判定変化の記録に失敗", e);
     }
-    return { ...result, transitions };
+    /*
+     * 株価が動いたので、相談で出した提案の当否も判定し直す。
+     * 経過日数が足りず未判定だったものが、日が経てば判定できるようになる。
+     * ここで一緒に走らせないと判定のためだけに別操作が必要になり、
+     * 月 1 回しか画面を見ない使い方では実績が溜まらない。
+     */
+    let verdicts: Awaited<ReturnType<typeof checkVerdicts>> | null = null;
+    try {
+      verdicts = await checkVerdicts(ctx.user.id);
+    } catch (e) {
+      console.error("[syncPrices] 提案の当否判定に失敗", e);
+    }
+    return { ...result, transitions, verdicts };
   }),
 
   /** 買い増しプランの判定が変わった履歴 */

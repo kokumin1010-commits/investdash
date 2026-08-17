@@ -851,3 +851,67 @@ export const consultationMessages = mysqlTable(
 );
 export type ConsultationMessage = typeof consultationMessages.$inferSelect;
 export type InsertConsultationMessage = typeof consultationMessages.$inferInsert;
+
+/**
+ * 相談で出た提案と、それを実行したかどうか、その後どうなったか。
+ *
+ * なぜ必要か:
+ * AI に結論を断定させる方針にしたため、その結論が当たったのか外れたのかを
+ * 検証できなければ精度が上がらない。実行の有無は保有株数の変化から分かる
+ * （買えばスクリーンショットの株数が増える）ので、提案時点の株数を記録して
+ * 後から比べる。
+ *
+ * 相談の発言（consultationMessages）と分けているのは、1 回の相談で
+ * 複数の銘柄に言及することがあり、銘柄ごとに実行の有無と結果が変わるため。
+ */
+export const consultOutcomes = mysqlTable(
+  "consultOutcomes",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    userId: int("userId").notNull(),
+    consultationId: int("consultationId").notNull(),
+    /** どの発言に対する提案か。回答を読み返せるようにする */
+    messageId: int("messageId").notNull(),
+    symbol: varchar("symbol", { length: 24 }).notNull(),
+    /**
+     * 提案の向き。BUY = 買い増しを勧めた / HOLD = 静観を勧めた /
+     * REDUCE = 減らすことを勧めた / REPAY = 借入返済を勧めた
+     */
+    stance: mysqlEnum("stance", ["BUY", "HOLD", "REDUCE", "REPAY"]).notNull(),
+    /** AI の結論の 1 文。後から一覧で読めるようにする */
+    conclusion: text("conclusion").notNull(),
+    /**
+     * 提案時点の株数と株価。実行の有無と、その後の値動きを判定する基準。
+     * 株価は現地通貨。円換算すると為替で結果が変わってしまう。
+     */
+    quantityAtAdvice: decimal("quantityAtAdvice", { precision: 20, scale: 4 }),
+    priceAtAdvice: decimal("priceAtAdvice", { precision: 20, scale: 4 }),
+    /**
+     * 実行したか。null = まだ判定していない / true = 株数が増減した /
+     * false = 変わらなかった
+     */
+    executed: boolean("executed"),
+    /** 実行を検知した時刻 */
+    executedAt: timestamp("executedAt"),
+    /** 実行後の株数。何株買ったかを差分で出せる */
+    quantityAfter: decimal("quantityAfter", { precision: 20, scale: 4 }),
+    /**
+     * 提案の当否。CORRECT / WRONG / UNCLEAR のいずれか。
+     * 判定は株価の推移から機械的に出す（AI に判定させると甘くなる）。
+     */
+    verdict: mysqlEnum("verdict", ["CORRECT", "WRONG", "UNCLEAR"]),
+    /** 判定時点の株価。何と比べたかを残す */
+    priceAtVerdict: decimal("priceAtVerdict", { precision: 20, scale: 4 }),
+    /** 判定した時刻 */
+    verdictAt: timestamp("verdictAt"),
+    createdAt: timestamp("createdAt").defaultNow().notNull(),
+    updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+  },
+  table => ({
+    userSymbolIdx: index("consult_outcomes_user_symbol_idx").on(table.userId, table.symbol),
+    consultationIdx: index("consult_outcomes_consultation_idx").on(table.consultationId),
+    pendingIdx: index("consult_outcomes_pending_idx").on(table.userId, table.executed),
+  })
+);
+export type ConsultOutcome = typeof consultOutcomes.$inferSelect;
+export type InsertConsultOutcome = typeof consultOutcomes.$inferInsert;

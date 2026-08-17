@@ -16,6 +16,7 @@ import {
   type ConsultationMessage,
 } from "../../drizzle/schema";
 import { buildConsultContext } from "./consultContext";
+import { recordAdvice } from "./outcomeService";
 import { askAdvisor, buildTitle, type ConsultTurn } from "./consultAdvisor";
 import { logAiRun } from "./aiRunLog";
 
@@ -317,6 +318,40 @@ export async function ask(params: {
     .update(consultations)
     .set({ updatedAt: new Date() })
     .where(eq(consultations.id, consultationId));
+
+  /*
+   * 提案を追跡用に記録する。
+   *
+   * 失敗しても相談自体は成立しているので握りつぶす。追跡の記録に
+   * 失敗したせいで回答が返らないのは本末転倒。
+   * 記録には回答の発言 ID が必要なので、保存後に読み直して取る
+   * （insert の戻りから 2 件目の ID を得る手段がなく、
+   *  1 件目 + 1 と決め打ちすると同時実行でずれる恐れがある）。
+   */
+  try {
+    const [savedAnswer] = await db
+      .select({ id: consultationMessages.id })
+      .from(consultationMessages)
+      .where(
+        and(
+          eq(consultationMessages.consultationId, consultationId),
+          eq(consultationMessages.role, "ASSISTANT")
+        )
+      )
+      .orderBy(desc(consultationMessages.id))
+      .limit(1);
+    if (savedAnswer) {
+      await recordAdvice({
+        userId,
+        consultationId,
+        messageId: savedAnswer.id,
+        symbol,
+        answer,
+      });
+    }
+  } catch (error) {
+    console.error("[consult] 提案の記録に失敗:", error);
+  }
 
   await logAiRun({
     userId,

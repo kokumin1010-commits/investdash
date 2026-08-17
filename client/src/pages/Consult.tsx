@@ -13,6 +13,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
 import { trpc } from "@/lib/trpc";
+import { AdviceRecordCard } from "@/components/investing/AdviceRecordCard";
 import { ArrowLeft, FileText, Loader2, MessageSquare, Send, Trash2 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
@@ -237,6 +238,12 @@ function ConsultStart({
           )}
         </CardContent>
       </Card>
+
+      {/*
+        提案の実績は履歴の下に置く。相談を始める欄より上に出すと、
+        まだ判定できる提案がない段階で場所を取るだけになる。
+      */}
+      <AdviceRecordCard />
     </div>
   );
 }

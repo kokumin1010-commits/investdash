@@ -2,6 +2,7 @@ import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import * as db from "../db";
 import { protectedProcedure, router } from "../_core/trpc";
+import { checkExecutions } from "../services/outcomeService";
 import { storagePut } from "../storage";
 import { extractPositions, type ParsedPosition } from "../services/ocr";
 import {
@@ -296,7 +297,20 @@ export const importRouter = router({
         });
       }
 
-      return { created, updated, skipped } as const;
+      /*
+       * 取り込みで株数が変わったので、相談で出した提案が実行されたかを
+       * ここで判定する。別操作にすると判定を忘れた分だけ「実行したのに
+       * 記録されていない」提案が溜まり、AI の当否を検証できなくなる。
+       * 判定の失敗で取り込みまで失敗扱いにはしない（取り込みは成功している）。
+       */
+      let executionCheck: Awaited<ReturnType<typeof checkExecutions>> | null = null;
+      try {
+        executionCheck = await checkExecutions(userId);
+      } catch (e) {
+        console.error("[applyRows] 提案の実行判定に失敗", e);
+      }
+
+      return { created, updated, skipped, executionCheck } as const;
     }),
 
   history: protectedProcedure.query(async ({ ctx }) => db.listImportJobs(ctx.user.id, 12)),

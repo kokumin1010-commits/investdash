@@ -15,6 +15,7 @@ import {
   listSymbolConsultStats,
 } from "../services/consultService";
 import { applyConsultToCard } from "../services/cardService";
+import { checkExecutions, checkVerdicts, listOutcomes } from "../services/outcomeService";
 
 export const consultRouter = router({
   /** 相談の履歴一覧 */
@@ -95,4 +96,34 @@ export const consultRouter = router({
       await deleteConsultation(ctx.user.id, input.id);
       return { ok: true };
     }),
+
+  /**
+   * 提案の履歴（何を勧めたか・実行したか・当たったか）。
+   *
+   * 銘柄を指定すればその銘柄だけ返す。
+   */
+  outcomes: protectedProcedure
+    .input(z.object({ symbol: z.string().max(24).nullish() }).optional())
+    .query(async ({ ctx, input }) => {
+      return await listOutcomes(ctx.user.id, input?.symbol ?? null);
+    }),
+
+  /**
+   * 提案が実行されたかを今すぐ判定する。
+   *
+   * 通常はスクリーンショットの取り込み時に自動で走る。
+   * 手で株数を直した場合にも反映できるよう手動実行を残す。
+   */
+  checkExecutions: protectedProcedure.mutation(async ({ ctx }) => {
+    return await checkExecutions(ctx.user.id);
+  }),
+
+  /**
+   * 提案の当否を今すぐ判定する。
+   *
+   * 通常は株価更新時に自動で走る。
+   */
+  checkVerdicts: protectedProcedure.mutation(async ({ ctx }) => {
+    return await checkVerdicts(ctx.user.id);
+  }),
 });

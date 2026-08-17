@@ -5,6 +5,7 @@ import { CurrencyToggle } from "@/components/investing/CurrencyToggle";
 import { SignalBadge, SignalPlaceholder } from "@/components/investing/SignalBadge";
 import { PriceBandPlanCard } from "@/components/investing/PriceBandPlanCard";
 import { SymbolConsultList } from "@/components/investing/SymbolConsultList";
+import { AdviceRecordCard } from "@/components/investing/AdviceRecordCard";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -421,11 +422,18 @@ export default function HoldingDetail({ params }: { params: { id: string } }) {
         </TabsContent>
 
         <TabsContent value="consult" className="mt-4">
-          <SymbolConsultList
-            symbol={holding.symbol}
-            rows={consults.data ?? []}
-            isPending={consults.isPending}
-          />
+          <div className="space-y-4">
+            <SymbolConsultList
+              symbol={holding.symbol}
+              rows={consults.data ?? []}
+              isPending={consults.isPending}
+            />
+            {/*
+              この銘柄への提案が実行されたか・当たったかを併せて出す。
+              相談の中身だけ見ても「勧められて実際どうしたか」が分からない。
+            */}
+            <AdviceRecordCard symbol={holding.symbol} />
+          </div>
         </TabsContent>
 
         <TabsContent value="chart" className="mt-4">

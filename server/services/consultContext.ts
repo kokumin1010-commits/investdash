@@ -15,6 +15,7 @@
  */
 import { and, desc, eq } from "drizzle-orm";
 import { getDb } from "../db";
+import { loadAdviceRecord } from "./outcomeService";
 import {
   consultations,
   consultationMessages,
@@ -136,6 +137,26 @@ export type ConsultContext = {
     risks: string | null;
     valuationAssumption: string | null;
   } | null;
+  /**
+   * これまでの提案の実績（何勝何敗か）と、この銘柄への提案の履歴。
+   *
+   * AI に結論を断定させる方針にしたので、その結論が当たっているのか
+   * を本人（AI）にも踏まえさせる。「買いを勧めた判断は 7 勝 2 敗だが
+   * 見送りは 2 勝 5 敗」と分かれば、自分の弱い側の判断で慎重になれる。
+   */
+  adviceRecord: {
+    judged: number;
+    correct: number;
+    wrong: number;
+    byStance: { stance: string; correct: number; wrong: number }[];
+    symbolHistory: {
+      stance: string;
+      conclusion: string;
+      executed: boolean | null;
+      verdict: string | null;
+      createdAt: string;
+    }[];
+  };
   builtAt: string;
 };
 
@@ -211,6 +232,13 @@ export async function buildConsultContext(
     : [];
   const focusCard = focusSymbol ? await loadFocusCard(userId, focusSymbol) : null;
 
+  /*
+   * 提案の実績は銘柄を問わず渡す。全体の勝敗は「自分の判断がどれだけ
+   * 当たっているか」の目安になり、銘柄を決めない相談でも意味がある。
+   * 件数だけの軽い集計なのでトークンを圧迫しない。
+   */
+  const record = await loadAdviceRecord(userId, focusSymbol ?? null);
+
   const div = overview.dividends;
   const borrowRatePct = computeBorrowRate(overview);
   const interestRatePct = overview.summary.interestRatePct ?? null;
@@ -258,6 +286,13 @@ export async function buildConsultContext(
     focusNews,
     pastConsults,
     focusCard,
+    adviceRecord: {
+      judged: record.overall.judged,
+      correct: record.overall.correct,
+      wrong: record.overall.wrong,
+      byStance: record.overall.byStance,
+      symbolHistory: record.symbolRows,
+    },
     builtAt: new Date().toISOString(),
   };
 }
