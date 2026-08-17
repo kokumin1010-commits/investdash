@@ -780,3 +780,74 @@ export const passcodeAuth = mysqlTable("passcodeAuth", {
 
 export type PasscodeAuth = typeof passcodeAuth.$inferSelect;
 export type InsertPasscodeAuth = typeof passcodeAuth.$inferInsert;
+
+/**
+ * AI への相談（会話）。
+ *
+ * 購入判断はもともと外部の AI に相談して決めていた。そのやり取りは
+ * どこにも残らないため「あの時なぜ買ったのか」を後から辿れない。
+ * 相談をシステム内で行い、会話として保存する。
+ *
+ * 会話（consultations）と発言（consultationMessages）を分けているのは、
+ * 1 回の相談が複数回のやり取りになるため。1 行に全文を詰めると
+ * 続きの質問ができず、どこまでが AI の発言かも区別できない。
+ */
+export const consultations = mysqlTable(
+  "consultations",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    userId: int("userId").notNull(),
+    /**
+     * 会話の題名。最初の質問から作る。
+     * 一覧で中身を開かずに探せるようにするため。
+     */
+    title: varchar("title", { length: 200 }).notNull(),
+    /**
+     * 相談対象の銘柄。銘柄を決めずに全体を相談する場合は null。
+     * 銘柄詳細から相談を始めたときにここが入る。
+     */
+    symbol: varchar("symbol", { length: 24 }),
+    createdAt: timestamp("createdAt").defaultNow().notNull(),
+    /** 最後に発言があった時刻。一覧を新しい順に並べるのに使う */
+    updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+  },
+  table => ({
+    userUpdatedIdx: index("consultations_user_updated_idx").on(table.userId, table.updatedAt),
+    symbolIdx: index("consultations_symbol_idx").on(table.userId, table.symbol),
+  })
+);
+export type Consultation = typeof consultations.$inferSelect;
+export type InsertConsultation = typeof consultations.$inferInsert;
+
+/**
+ * 相談の中の 1 発言。
+ *
+ * `contextSnapshot` に、その時 AI へ渡した保有状況（レバレッジ・配当・
+ * 業種の偏りなど）を残す。後から履歴を読み返したときに、当時どの前提で
+ * その回答が出たのかが分からないと判断の妥当性を検証できない。
+ * 株価も配当も変わるので、今の値で読むと結論が食い違って見える。
+ */
+export const consultationMessages = mysqlTable(
+  "consultationMessages",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    consultationId: int("consultationId").notNull(),
+    userId: int("userId").notNull(),
+    /** USER = 自分の質問 / ASSISTANT = AI の回答 */
+    role: mysqlEnum("role", ["USER", "ASSISTANT"]).notNull(),
+    content: text("content").notNull(),
+    /** AI へ渡した前提（JSON 文字列）。USER 発言では null */
+    contextSnapshot: text("contextSnapshot"),
+    /** 使ったモデル。後から品質を比べられるようにする */
+    model: varchar("model", { length: 80 }),
+    createdAt: timestamp("createdAt").defaultNow().notNull(),
+  },
+  table => ({
+    consultationIdx: index("consultationMessages_consultation_idx").on(
+      table.consultationId,
+      table.createdAt
+    ),
+  })
+);
+export type ConsultationMessage = typeof consultationMessages.$inferSelect;
+export type InsertConsultationMessage = typeof consultationMessages.$inferInsert;

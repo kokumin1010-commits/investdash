@@ -5,6 +5,7 @@ import { publicProcedure, router } from "./_core/trpc";
 import { authRouter } from "./routers/authRouter";
 import { importRouter } from "./routers/importRouter";
 import { newsRouter } from "./routers/newsRouter";
+import { consultRouter } from "./routers/consultRouter";
 import { portfolioRouter } from "./routers/portfolio";
 import { watchlistRouter } from "./routers/watchlistRouter";
 
@@ -22,6 +23,7 @@ export const appRouter = router({
   portfolio: portfolioRouter,
   news: newsRouter,
   watchlist: watchlistRouter,
+  consult: consultRouter,
   import: importRouter,
 });
 

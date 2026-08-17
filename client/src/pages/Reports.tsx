@@ -8,6 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
+import { AiBody } from "@/components/investing/AiBody";
 import { trpc } from "@/lib/trpc";
 import { ArrowLeft, FileText, Loader2, RefreshCw } from "lucide-react";
 import { useState } from "react";
@@ -95,42 +96,13 @@ export function parseReportBody(body: string): ReportBlock[] {
 }
 
 function ReportBody({ body }: { body: string }) {
-  const blocks = parseReportBody(body);
-
-  return (
-    <div className="space-y-3">
-      {blocks.map((block, i) => {
-        if (block.kind === "h3") {
-          return (
-            <h3 key={i} className="border-b pt-2 pb-1 text-base font-semibold">
-              {block.text}
-            </h3>
-          );
-        }
-        if (block.kind === "h4") {
-          return (
-            <h4 key={i} className="pt-1 text-sm font-semibold">
-              {block.text}
-            </h4>
-          );
-        }
-        if (block.kind === "list") {
-          return (
-            <ul key={i} className="list-disc space-y-1 pl-5 text-sm leading-relaxed">
-              {block.items.map((item, j) => (
-                <li key={j}>{item}</li>
-              ))}
-            </ul>
-          );
-        }
-        return (
-          <p key={i} className="text-sm leading-relaxed">
-            {block.text}
-          </p>
-        );
-      })}
-    </div>
-  );
+  /*
+   * 表示は相談画面と共通化した（AiBody）。同じ AI の出力なのに
+   * 画面ごとに見た目が違う状態を避けるため。中黒を含む見出しが
+   * 割れる不具合も共通側で直している。
+   * parseReportBody は既存のテストが参照しているため残す。
+   */
+  return <AiBody body={body} />;
 }
 
 function ReportDetail({ id, onBack }: { id: number; onBack: () => void }) {

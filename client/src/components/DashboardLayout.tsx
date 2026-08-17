@@ -33,6 +33,7 @@ import {
   Settings,
   Wallet,
 } from "lucide-react";
+import { MessageSquare } from "lucide-react";
 import { CSSProperties, useEffect, useRef, useState } from "react";
 import { useLocation } from "wouter";
 import { DashboardLayoutSkeleton } from './DashboardLayoutSkeleton';
@@ -44,6 +45,7 @@ const menuItems = [
   { icon: Coins, label: "配当", path: "/dividends" },
   { icon: Target, label: "買い増しプラン", path: "/buy-plans" },
   { icon: FileText, label: "レポート", path: "/reports" },
+  { icon: MessageSquare, label: "AI に相談", path: "/consult" },
   { icon: Eye, label: "ウォッチリスト", path: "/watchlist" },
   { icon: Newspaper, label: "ニュース", path: "/news" },
   { icon: ScanLine, label: "スクショ取込", path: "/import" },

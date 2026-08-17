@@ -39,6 +39,7 @@ import {
   RefreshCw,
   Save,
   Sparkles,
+  MessageSquare,
   TrendingUp,
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
@@ -215,6 +216,17 @@ export default function HoldingDetail({ params }: { params: { id: string } }) {
             >
               <RefreshCw className={`mr-1.5 h-3.5 w-3.5 ${syncNews.isPending ? "animate-spin" : ""}`} />
               ニュース取得
+            </Button>
+            {/*
+              この銘柄を対象にした相談を始める。銘柄を選び直す手間をなくすため
+              symbol を渡して開く。相談側では保有状況とこの銘柄のニュースが
+              自動で前提に入る。
+            */}
+            <Button variant="outline" size="sm" asChild>
+              <Link href={`/consult?symbol=${encodeURIComponent(holding.symbol)}`}>
+                <MessageSquare className="mr-1.5 h-3.5 w-3.5" />
+                AI に相談
+              </Link>
             </Button>
             <Button
               size="sm"
