@@ -12,6 +12,12 @@ import { buildConsultContext } from "./consultContext";
 import { listPlanOverview, type PlanOverviewRow } from "./priceBandService";
 import { proposeForSymbol, type ProposalTarget } from "./addProposer";
 import { withAiRunLog } from "./aiRunLog";
+import { computeAddSizing } from "../../shared/addSizing";
+import { actualAmount, sharesForAmount, lotSizeUncertain } from "../../shared/addShares";
+import { normalizeSymbol } from "../../shared/investing";
+import { convertToJpy, FX_FALLBACK, type FxRates } from "./fx";
+import * as dbq from "../db";
+import { buildPortfolio } from "./portfolio";
 
 async function requireDb() {
   const d = await getDb();
@@ -276,6 +282,23 @@ export type ProposalRow = {
   createdAt: Date;
   /** 提案時から株価がどれだけ動いたか（%）。判断が古びていないかの目安 */
   priceChangePct: number | null;
+  /**
+   * 何株買うか。金額（円）を指値または現在値で割り、売買単位に丸めた数。
+   *
+   * 金額だけでは発注画面で毎回割り算することになり、日本株は 100 株
+   * 単位でしか買えないため端数のままでは発注できない。
+   */
+  shares: number | null;
+  /** 株数の売買単位が銘柄ごとに異なり目安が正確でない市場か（香港株） */
+  lotUncertain: boolean;
+  /**
+   * 待つ場合に、その価格まで下がったときに投じる金額（円）と株数。
+   *
+   * 「$342.65 まで待つ」だけでは、そこに来たときに何をするか決まって
+   * いない。到達した瞬間に迷わず動けるよう金額と株数を先に出す。
+   */
+  waitAmountBase: number | null;
+  waitShares: number | null;
 };
 
 /**
@@ -286,16 +309,38 @@ export type ProposalRow = {
  */
 export async function listProposals(userId: number): Promise<ProposalRow[]> {
   const d = await requireDb();
-  const [proposals, rows] = await Promise.all([
+  const [proposals, rows, settings, overview] = await Promise.all([
     d
       .select()
       .from(addProposals)
       .where(eq(addProposals.userId, userId))
       .orderBy(desc(addProposals.createdAt), desc(addProposals.id)),
     listPlanOverview(userId),
+    dbq.getSettings(userId),
+    buildPortfolio(userId),
   ]);
 
   const infoMap = new Map(rows.map(r => [r.symbol, r]));
+
+  /*
+   * 金額（円）を現地通貨に直すための為替。株数を出すには現地通貨に
+   * 戻す必要がある（$342.65 の株を円建ての金額で割ることはできない）。
+   */
+  const rates: FxRates = {
+    usdJpy: numOr(settings?.usdJpyRate, FX_FALLBACK.usdJpy),
+    sgdJpy: numOr(settings?.sgdJpyRate, FX_FALLBACK.sgdJpy),
+    hkdJpy: numOr(settings?.hkdJpyRate, FX_FALLBACK.hkdJpy),
+  };
+
+  /*
+   * 待つ銘柄の金額は保存していない（提案時は買わない判断なので
+   * amountBase は null）。到達時にいくら投じるかは今の資産から
+   * 計算する。保存した古い金額を出すと、その後に現金が増減しても
+   * 昔の額のまま表示されてしまう。
+   */
+  const totalValueJpy = overview.summary.totalValueBase ?? 0;
+  const interestAssetsJpy = overview.summary.interestAssetsBase ?? 0;
+  const cashJpy = overview.summary.cashBalance ?? 0;
 
   const seen = new Set<string>();
   const out: ProposalRow[] = [];
@@ -305,6 +350,34 @@ export async function listProposals(userId: number): Promise<ProposalRow[]> {
     const info = infoMap.get(p.symbol);
     const priceAt = p.priceAtProposal !== null ? Number(p.priceAtProposal) : null;
     const now = info?.currentPrice ?? null;
+    const currency = info?.currency ?? "USD";
+    const market = normalizeSymbol(p.symbol).market;
+    const limitPrice = p.limitPrice !== null ? Number(p.limitPrice) : null;
+    const amountBase = p.amountBase !== null ? Number(p.amountBase) : null;
+
+    /*
+     * 買う場合の株数。指値があればその値段で計算する。現在値で割ると、
+     * 指値まで下がったときに実際より少ない株数になる。
+     */
+    const buyPrice = limitPrice ?? now;
+    const buy = computeShares(amountBase, buyPrice, currency, market, rates);
+
+    /*
+     * 待つ場合の到達時の金額。上限に達している銘柄では出さない
+     * （待っても買えないため、金額を出すと矛盾する）。
+     */
+    const wait =
+      p.stance === "WAIT"
+        ? computeWaitPlan(
+            { totalValueJpy, interestAssetsJpy, cashJpy },
+            info?.holdingValueJpy ?? 0,
+            limitPrice ?? now,
+            currency,
+            market,
+            rates
+          )
+        : { amountBase: null, shares: null };
+
     out.push({
       id: p.id,
       symbol: p.symbol,
@@ -313,20 +386,88 @@ export async function listProposals(userId: number): Promise<ProposalRow[]> {
       stance: p.stance,
       conclusion: p.conclusion,
       rationale: p.rationale,
-      amountBase: p.amountBase !== null ? Number(p.amountBase) : null,
-      limitPrice: p.limitPrice !== null ? Number(p.limitPrice) : null,
+      amountBase: buy.amountBase ?? amountBase,
+      limitPrice,
       priceAtProposal: priceAt,
       currentPrice: now,
       sharePctAtProposal:
         p.sharePctAtProposal !== null ? Number(p.sharePctAtProposal) : null,
       invalidation: p.invalidation,
-      currency: info?.currency ?? "USD",
+      currency,
       createdAt: p.createdAt,
       priceChangePct:
         priceAt !== null && priceAt > 0 && now !== null ? ((now - priceAt) / priceAt) * 100 : null,
+      shares: buy.shares,
+      lotUncertain: lotSizeUncertain(market),
+      waitAmountBase: wait.amountBase,
+      waitShares: wait.shares,
     });
   }
   return out;
+}
+
+/** decimal 文字列を数値にする。不正値は既定値 */
+function numOr(v: string | null | undefined, fallback: number): number {
+  if (v === null || v === undefined) return fallback;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : fallback;
+}
+
+/**
+ * 円建ての金額から株数を出し、売買単位に丸めた実額を返す。
+ *
+ * 表示する金額は丸めた後の実額にする。「1,191 万円」と出しながら
+ * 100 株単位に丸めた実額が 1,150 万円だと、金額と株数の掛け算が
+ * 合わず数字を信用できなくなる。
+ */
+function computeShares(
+  amountJpy: number | null,
+  price: number | null,
+  currency: string,
+  market: ReturnType<typeof normalizeSymbol>["market"],
+  rates: FxRates
+): { shares: number | null; amountBase: number | null } {
+  if (amountJpy === null || amountJpy <= 0) return { shares: null, amountBase: null };
+  if (price === null || price <= 0) return { shares: null, amountBase: amountJpy };
+  // 1 現地通貨が何円か。円建ての金額を現地通貨に戻すのに使う
+  const rate = convertToJpy(1, currency, rates);
+  if (rate === null || rate <= 0) return { shares: null, amountBase: amountJpy };
+  const amountLocal = amountJpy / rate;
+  const shares = sharesForAmount(amountLocal, price, market);
+  if (shares === null || shares <= 0) return { shares, amountBase: amountJpy };
+  const actualLocal = actualAmount(shares, price);
+  return {
+    shares,
+    amountBase: actualLocal !== null ? actualLocal * rate : amountJpy,
+  };
+}
+
+/**
+ * 待つ銘柄が目標価格に届いたときに投じる金額と株数。
+ *
+ * 金額の算定は買い増しプラン・保有一覧と同じ computeAddSizing を使う。
+ * 別の計算式を持たせると、同じ銘柄で画面ごとに違う金額が出る。
+ */
+function computeWaitPlan(
+  pool: { totalValueJpy: number; interestAssetsJpy: number; cashJpy: number },
+  holdingValueJpy: number,
+  price: number | null,
+  currency: string,
+  market: ReturnType<typeof normalizeSymbol>["market"],
+  rates: FxRates
+): { amountBase: number | null; shares: number | null } {
+  const sizing = computeAddSizing(
+    pool.totalValueJpy,
+    pool.interestAssetsJpy,
+    pool.cashJpy,
+    holdingValueJpy
+  );
+  // 上限に達している銘柄は待っても買えない。金額を出すと矛盾する
+  if (!sizing || sizing.atCap || sizing.suggestedBase <= 0) {
+    return { amountBase: null, shares: null };
+  }
+  const r = computeShares(sizing.suggestedBase, price, currency, market, rates);
+  return { amountBase: r.amountBase, shares: r.shares };
 }
 
 /** 1 銘柄の提案履歴（新しい順） */
@@ -357,5 +498,15 @@ export async function listProposalsForSymbol(
     currency: "USD",
     createdAt: p.createdAt,
     priceChangePct: null,
+    /*
+     * 履歴では株数・到達時の金額を出さない。過去の提案は「当時どう
+     * 判断したか」を読み返すためのもので、今から発注する対象ではない。
+     * 現在の資産で計算した株数を過去の提案に添えると、当時の判断と
+     * 混ざって何を見ているのか分からなくなる。
+     */
+    shares: null,
+    lotUncertain: lotSizeUncertain(normalizeSymbol(p.symbol).market),
+    waitAmountBase: null,
+    waitShares: null,
   }));
 }

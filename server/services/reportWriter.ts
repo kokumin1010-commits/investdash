@@ -72,6 +72,12 @@ function fmtDate(d: Date): string {
 /** 材料を AI に渡す文章に組み立てる */
 export function buildWeeklyPrompt(input: DigestInput): string {
   const lines: string[] = [];
+  /*
+   * 提案・実績は後から追加した項目なので、渡されていない場合も動くようにする。
+   * 未指定でここが落ちると、レポートそのものが生成されなくなる。
+   */
+  const proposals = input.proposals ?? [];
+  const adviceRecord = input.adviceRecord ?? null;
   lines.push(
     `## 対象期間\n${fmtDate(input.periodStart)} 〜 ${fmtDate(input.periodEnd)}`
   );
@@ -91,7 +97,68 @@ export function buildWeeklyPrompt(input: DigestInput): string {
     ].join("\n")
   );
 
-  if (input.topics.length === 0) {
+  /*
+   * 買い増し提案を載せる。
+   *
+   * 画面を開いて押さないと目に入らなかったものを、レポートに含める。
+   * 提案は既に AI が結論と金額を決めているので、ここでは書き換えさせず
+   * そのまま伝える。レポート側で金額を作り直すと、画面と食い違う。
+   */
+  if (proposals.length > 0) {
+    const plines: string[] = ["## すでに出ている買い増し提案（この内容は変更しない）"];
+    for (const p of proposals) {
+      const head = p.stance === "BUY" ? "買う" : "値段を待つ";
+      const detail: string[] = [];
+      if (p.stance === "BUY") {
+        if (p.amountJpy !== null) detail.push(`目安 ${fmtJpy(p.amountJpy)}`);
+        if (p.shares !== null && p.shares > 0) {
+          detail.push(`${p.shares.toLocaleString("ja-JP")} 株`);
+        }
+        if (p.limitPrice !== null) {
+          detail.push(`指値 ${p.currency} ${p.limitPrice.toLocaleString()}`);
+        }
+      } else {
+        if (p.limitPrice !== null) {
+          detail.push(`${p.currency} ${p.limitPrice.toLocaleString()} まで待つ`);
+        }
+        if (p.waitAmountJpy !== null) {
+          detail.push(`届いたら ${fmtJpy(p.waitAmountJpy)}`);
+        }
+        if (p.waitShares !== null && p.waitShares > 0) {
+          detail.push(`${p.waitShares.toLocaleString("ja-JP")} 株`);
+        }
+      }
+      plines.push(
+        `- 【${head}】${p.name}（${p.symbol}）: ${p.conclusion}` +
+          (detail.length > 0 ? `\n  ${detail.join(" / ")}` : "") +
+          `\n  提案から ${p.ageDays} 日経過`
+      );
+    }
+    lines.push(plines.join("\n"));
+  }
+
+  /*
+   * 過去の提案の当否。判定済みが 0 件のときは渡さない（そもそも
+   * adviceRecord が null になる）。実績の少なさを言い訳にして
+   * 結論を曖昧にさせないため。
+   */
+  if (adviceRecord) {
+    const r = adviceRecord;
+    const byStance = r.byStance
+      .map(s => `${stanceLabel(s.stance)} ${s.correct} 勝 ${s.wrong} 敗`)
+      .join(" / ");
+    lines.push(
+      [
+        "## これまでの提案の当否（機械的に株価から判定したもの）",
+        `- 判定済み: ${r.judged} 件（${r.correct} 勝 ${r.wrong} 敗）`,
+        byStance ? `- 内訳: ${byStance}` : "",
+      ]
+        .filter(Boolean)
+        .join("\n")
+    );
+  }
+
+  if (input.topics.length === 0 && proposals.length === 0) {
     /*
      * 材料がない週も生成する。出さないと「レポートが来ないのは
      * 壊れているのか」と区別できなくなる。
@@ -109,7 +176,9 @@ export function buildWeeklyPrompt(input: DigestInput): string {
     return lines.join("\n\n");
   }
 
-  lines.push("## 今期間に取り上げる銘柄");
+  if (input.topics.length > 0) {
+    lines.push("## 今期間に取り上げる銘柄");
+  }
   for (const t of input.topics) {
     const parts: string[] = [];
     parts.push(`### ${t.name}（${t.symbol}）`);
@@ -138,14 +207,34 @@ export function buildWeeklyPrompt(input: DigestInput): string {
   lines.push(
     [
       "## 書き方",
-      "1. 判断や確認が必要な銘柄を先に書く。それぞれ「今の状況」「確認すべき点」を挙げる。",
-      "2. 次に、全体の状況（レバレッジ・配当と借入金利の関係など）を短く触れる。",
-      "3. 最後に「今回は何もしなくてよい」場合はそう明記する。",
-      "actionCount には 1 で挙げた銘柄のうち、実際に判断を要するものの件数を入れる。",
+      /*
+       * 提案を先に書かせる。読み手は「今週何をすべきか」を知りたいので、
+       * 状況の説明から入ると行動が埋もれる。
+       */
+      proposals.length > 0
+        ? "1. 「今週の行動」の節から始める。すでに出ている買い増し提案を、買う→待つの順に並べる。金額・株数・指値は与えたものをそのまま書き、自分で計算し直さない。"
+        : "1. 判断や確認が必要な銘柄を先に書く。それぞれ「今の状況」「確認すべき点」を挙げる。",
+      proposals.length > 0
+        ? "2. 次に、判断や確認が必要な銘柄について「今の状況」「確認すべき点」を書く。提案で触れた銘柄は繰り返さない。"
+        : "2. 次に、全体の状況（レバレッジ・配当と借入金利の関係など）を短く触れる。",
+      "3. 全体の状況（レバレッジ・配当と借入金利の関係など）を短く触れる。",
+      adviceRecord
+        ? "4. 最後に、これまでの提案の当否に触れる。勝敗の数字は与えたものだけを使い、負けが多い向きの判断では慎重に構えるべき点を書く。"
+        : "4. 最後に「今回は何もしなくてよい」場合はそう明記する。",
+      "actionCount には、実際に判断を要する件数（提案の件数を含む）を入れる。",
     ].join("\n")
   );
 
   return lines.join("\n\n");
+}
+
+/** 提案の向きの日本語表記。実績の内訳で使う */
+function stanceLabel(stance: string): string {
+  if (stance === "BUY") return "買い";
+  if (stance === "HOLD") return "静観";
+  if (stance === "REDUCE") return "減らす";
+  if (stance === "REPAY") return "返済";
+  return stance;
 }
 
 export async function generateWeeklyReport(input: DigestInput): Promise<ReportResult> {

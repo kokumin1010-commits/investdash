@@ -95,6 +95,7 @@ export function AddProposalCard() {
 
   const proposals = data ?? [];
   const buyCount = proposals.filter(p => p.stance === "BUY").length;
+  const waitCount = proposals.filter(p => p.stance === "WAIT").length;
 
   return (
     <Card>
@@ -135,10 +136,22 @@ export function AddProposalCard() {
           </p>
         ) : (
           <>
-            {buyCount > 0 ? (
+            {/*
+              件数は結論ごとに分けて出す。以前は「4 銘柄に買いの結論」と
+              書きながら実際は買い 3 件・待ち 1 件で、数と中身が合わず
+              どれを買えばよいのか分からなかった。
+            */}
+            {buyCount > 0 || waitCount > 0 ? (
               <p className="text-sm">
-                <span className="font-medium text-gain">{buyCount} 銘柄</span>
-                <span className="text-muted-foreground"> に買いの結論が出ています</span>
+                {buyCount > 0 ? (
+                  <>
+                    <span className="font-medium text-gain">買う {buyCount} 銘柄</span>
+                    {waitCount > 0 ? <span className="text-muted-foreground"> ・ </span> : null}
+                  </>
+                ) : null}
+                {waitCount > 0 ? (
+                  <span className="text-muted-foreground">値段を待つ {waitCount} 銘柄</span>
+                ) : null}
               </p>
             ) : null}
             {proposals.map(p => {
@@ -170,13 +183,27 @@ export function AddProposalCard() {
 
                   <p className="text-sm leading-relaxed">{p.conclusion}</p>
 
-                  {/* 金額と指値。BUY のときだけ出す（待つ・見送るでは意味がない） */}
+                  {/*
+                    金額・株数・指値。株数まで出すのは、発注画面で入れるのが
+                    株数であり、金額だけでは毎回割り算することになるため。
+                  */}
                   {p.stance === "BUY" && p.amountBase !== null ? (
                     <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs">
                       <span>
                         <span className="text-muted-foreground">目安額 </span>
                         <span className="tabular font-medium">{manYen(p.amountBase)}</span>
                       </span>
+                      {p.shares !== null && p.shares > 0 ? (
+                        <span>
+                          <span className="text-muted-foreground">株数 </span>
+                          <span className="tabular font-medium">
+                            {p.shares.toLocaleString("ja-JP")} 株
+                          </span>
+                          {p.lotUncertain ? (
+                            <span className="text-muted-foreground"> (単元を確認)</span>
+                          ) : null}
+                        </span>
+                      ) : null}
                       {p.limitPrice !== null ? (
                         <span>
                           <span className="text-muted-foreground">指値 </span>
@@ -192,9 +219,31 @@ export function AddProposalCard() {
                       ) : null}
                     </div>
                   ) : p.limitPrice !== null ? (
-                    <p className="tabular text-xs text-muted-foreground">
-                      待つ価格 {fmtPrice(p.limitPrice, p.currency)}
-                    </p>
+                    /*
+                      待つ銘柄も「そこに来たらいくら買うか」を出す。
+                      待ち価格だけでは、到達した瞬間にまた金額を決め直す
+                      ことになり、その場の判断で額がぶれる。
+                    */
+                    <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs">
+                      <span>
+                        <span className="text-muted-foreground">この値段まで待つ </span>
+                        <span className="tabular font-medium">
+                          {fmtPrice(p.limitPrice, p.currency)}
+                        </span>
+                      </span>
+                      {p.waitAmountBase !== null && p.waitShares !== null && p.waitShares > 0 ? (
+                        <span className="text-muted-foreground">
+                          届いたら{" "}
+                          <span className="tabular text-foreground font-medium">
+                            {manYen(p.waitAmountBase)}
+                          </span>
+                          {" ("}
+                          <span className="tabular">{p.waitShares.toLocaleString("ja-JP")} 株</span>
+                          {p.lotUncertain ? " ・単元を確認" : ""}
+                          {")"}
+                        </span>
+                      ) : null}
+                    </div>
                   ) : null}
 
                   <p className="text-muted-foreground text-xs leading-relaxed">{p.rationale}</p>

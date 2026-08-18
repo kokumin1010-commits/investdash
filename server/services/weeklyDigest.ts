@@ -15,6 +15,8 @@ import * as db from "../db";
 import { bandTransitions, newsItems } from "../../drizzle/schema";
 import { classifyTransition, type BandState } from "../../shared/bandTransition";
 import { listPlanOverview } from "./priceBandService";
+import { listProposals } from "./addProposalService";
+import { loadAdviceRecord } from "./outcomeService";
 
 /** 株価の変動をレポートに載せる下限（%）。これ未満は「動いていない」扱い */
 export const PRICE_MOVE_THRESHOLD_PCT = 8;
@@ -25,6 +27,13 @@ export const PRICE_MOVE_THRESHOLD_PCT = 8;
 export const NEWS_IMPACT_THRESHOLD = 70;
 /** AI に渡す銘柄数の上限。多すぎると生成が長くなり読む側も追えない */
 export const MAX_TOPICS = 12;
+/**
+ * レポートに載せる提案の上限。
+ *
+ * 提案は 8 銘柄まで作られるが、全部載せると本文が提案だけで埋まる。
+ * 実測では買う 4 件・待つ 3 件で、6 件あれば主要なものは入る。
+ */
+export const MAX_PROPOSALS = 6;
 
 export type DigestTopic = {
   symbol: string;
@@ -70,6 +79,42 @@ export type DigestInput = {
   topics: DigestTopic[];
   /** 取り上げる材料がなかった場合の理由 */
   quietReason: string | null;
+  /**
+   * AI が出した買い増し提案（結論と金額）。
+   *
+   * これまで提案は画面を開いて自分で押さないと目に入らなかった。
+   * 月 1 回しか開かない使い方では、買い増し圏に入っていても
+   * 気付かないまま過ぎる。レポートに載せれば押さなくても届く。
+   */
+  proposals: {
+    symbol: string;
+    name: string;
+    stance: string;
+    conclusion: string;
+    /** 買う場合の金額（円）と株数 */
+    amountJpy: number | null;
+    shares: number | null;
+    /** 指値または待つ値段（現地通貨） */
+    limitPrice: number | null;
+    currency: string;
+    /** 待つ場合に、その値段に届いたら投じる金額（円）と株数 */
+    waitAmountJpy: number | null;
+    waitShares: number | null;
+    /** 提案からの経過日数。古い提案は参考程度と伝える */
+    ageDays: number;
+  }[];
+  /**
+   * 過去の提案の当否。判定済みが 0 件なら null。
+   *
+   * 0 勝 0 敗と書くと「実績がないから判断できない」という
+   * 逃げ道を AI に与えることになるため、無いときは渡さない。
+   */
+  adviceRecord: {
+    judged: number;
+    correct: number;
+    wrong: number;
+    byStance: { stance: string; correct: number; wrong: number }[];
+  } | null;
 };
 
 async function requireDb() {
@@ -232,6 +277,52 @@ export async function buildDigestInput(userId: number, days = 7): Promise<Digest
     o => o.action === "ADD_SMALL" || o.action === "ADD_MAIN"
   ).length;
 
+  /*
+   * 買い増し提案と実績を集める。
+   *
+   * 提案はレポート生成時に作り直さない。生成には 1 銘柄 15 秒かかり、
+   * cron の制限内に収まらない。既に保存されている提案を載せる。
+   * 提案が無い週は「提案なし」として扱う。
+   */
+  const proposalRows = await listProposals(userId).catch(() => []);
+  const now = Date.now();
+  const proposals = proposalRows
+    /*
+     * 見送りは載せない。読み手が動く必要のない結論で紙面が埋まると
+     * 「買う」「待つ」が埋もれる。
+     */
+    .filter(p => p.stance === "BUY" || p.stance === "WAIT")
+    .map(p => ({
+      symbol: p.symbol,
+      name: p.name,
+      stance: p.stance,
+      conclusion: p.conclusion,
+      amountJpy: p.amountBase,
+      shares: p.shares,
+      limitPrice: p.limitPrice,
+      currency: p.currency,
+      waitAmountJpy: p.waitAmountBase,
+      waitShares: p.waitShares,
+      ageDays: Math.floor((now - p.createdAt.getTime()) / 86400_000),
+    }))
+    /* 買う結論を先に。読み手が今動くべきものから読める */
+    .sort((a, b) => {
+      if (a.stance !== b.stance) return a.stance === "BUY" ? -1 : 1;
+      return a.ageDays - b.ageDays;
+    })
+    .slice(0, MAX_PROPOSALS);
+
+  const record = await loadAdviceRecord(userId).catch(() => null);
+  const adviceRecord =
+    record && record.overall.judged > 0
+      ? {
+          judged: record.overall.judged,
+          correct: record.overall.correct,
+          wrong: record.overall.wrong,
+          byStance: record.overall.byStance,
+        }
+      : null;
+
   return {
     periodStart,
     periodEnd,
@@ -246,8 +337,10 @@ export async function buildDigestInput(userId: number, days = 7): Promise<Digest
     },
     buyZoneCount,
     topics,
+    proposals,
+    adviceRecord,
     quietReason:
-      topics.length === 0
+      topics.length === 0 && proposals.length === 0
         ? "判定の変化・買い増し圏の銘柄・影響度の高いニュースのいずれもありませんでした"
         : null,
   };
