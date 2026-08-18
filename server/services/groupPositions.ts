@@ -1,5 +1,7 @@
 import type { PositionView } from "./portfolio";
 import { calcPnlPct } from "../../shared/pnlLabel";
+import { computeAddSizing } from "../../shared/addSizing";
+import { actualAmount, sharesForAmount } from "../../shared/addShares";
 
 /**
  * 同一銘柄を複数の証券口座で保有している場合の合算ビュー。
@@ -65,6 +67,28 @@ export type GroupedPosition = {
    * 未取得なら null。
    */
   dividend: GroupedDividend | null;
+  /**
+   * ADD（買い増し）と判定された銘柄に対する「いくら買い増すか」の目安。
+   *
+   * ADD 以外では null。シグナルが HOLD や REDUCE の銘柄に金額を出すと
+   * 「買ってよい」と誤解される。判定と金額は必ず同じ向きに揃える。
+   */
+  addPlan: GroupedAddPlan | null;
+};
+
+export type GroupedAddPlan = {
+  /** 1 回に充てる金額（円）。上限に達している場合は 0 */
+  amountBase: number;
+  /** 現地通貨での金額。現在値が未取得なら null */
+  amountLocal: number | null;
+  /** 買い増す株数。単元・現在値が未取得なら null */
+  shares: number | null;
+  /** 買い増し後の構成比（%）。金額が 0 なら現状のまま */
+  afterSharePct: number | null;
+  /** 1 銘柄の上限に達しているか。true なら買い増しを勧めない */
+  atCap: boolean;
+  /** 上限までに追加できる金額（円） */
+  roomToCapBase: number;
 };
 
 export type GroupedDividend = {
@@ -123,7 +147,8 @@ function sumMonthly(lists: (number[] | null)[]): number[] | null {
  */
 export function groupPositionsBySymbol(
   positions: PositionView[],
-  totalValueBase: number
+  totalValueBase: number,
+  addSizingInput?: { interestAssetsBase: number; cashBase: number }
 ): GroupedPosition[] {
   const bySymbol = new Map<string, PositionView[]>();
   for (const p of positions) {
@@ -232,8 +257,101 @@ export function groupPositionsBySymbol(
       negativeNewsCount: Math.max(...entries.map(e => e.negativeNewsCount)),
       priceUpdatedAt,
       dividend,
+      addPlan: null as GroupedAddPlan | null,
     } satisfies GroupedPosition;
   });
 
-  return groups.sort((a, b) => (b.marketValueBase ?? 0) - (a.marketValueBase ?? 0));
+  const sorted = groups.sort((a, b) => (b.marketValueBase ?? 0) - (a.marketValueBase ?? 0));
+
+  /*
+   * ADD と判定された銘柄に「いくら買い増すか」を付ける。
+   *
+   * 原資（現金性資産と預り金）が渡されていない呼び出しでは付けない。
+   * 原資が分からないまま金額を出すと根拠のない数字になる。
+   */
+  if (!addSizingInput) return sorted;
+
+  for (const g of sorted) {
+    if (g.signal?.action !== "ADD") continue;
+    g.addPlan = buildAddPlan(g, totalValueBase, addSizingInput);
+  }
+
+  return sorted;
+}
+
+/**
+ * 1 銘柄あたりの買い増し金額と株数を組み立てる。
+ *
+ * 金額の算定そのものは買い増し提案（AI）と同じ computeAddSizing を使う。
+ * 別の計算式を持たせると、同じ銘柄で保有一覧と提案の金額が食い違い
+ * どちらを信じればよいか分からなくなる。
+ */
+function buildAddPlan(
+  g: GroupedPosition,
+  totalValueBase: number,
+  input: { interestAssetsBase: number; cashBase: number }
+): GroupedAddPlan | null {
+  const sizing = computeAddSizing(
+    totalValueBase,
+    input.interestAssetsBase,
+    input.cashBase,
+    g.marketValueBase ?? 0
+  );
+  if (!sizing) return null;
+
+  /*
+   * 円建ての金額を現地通貨に直す。円 → 現地の換算率は
+   * 「その銘柄の円換算評価額 ÷ 現地通貨評価額」から逆算する。
+   * 為替レートを引数で受け取らずに済み、評価額と必ず整合する。
+   */
+  const rate =
+    g.marketValue !== null && g.marketValue > 0 && g.marketValueBase !== null
+      ? g.marketValueBase / g.marketValue
+      : null;
+  const amountLocalRaw = rate !== null && rate > 0 ? sizing.suggestedBase / rate : null;
+
+  const shares =
+    amountLocalRaw !== null && g.currentPrice !== null
+      ? sharesForAmount(amountLocalRaw, g.currentPrice, g.market)
+      : null;
+
+  /*
+   * 表示する金額は単元に丸めた後の実額にする。
+   * 「1,191 万円」と出しながら 100 株単位に丸めた実額が 1,150 万円だと、
+   * 金額と株数の掛け算が合わず数字を信用できなくなる。
+   */
+  const amountLocal =
+    shares !== null && shares > 0 && g.currentPrice !== null
+      ? actualAmount(shares, g.currentPrice)
+      : amountLocalRaw;
+  const amountBase =
+    amountLocal !== null && rate !== null ? amountLocal * rate : sizing.suggestedBase;
+
+  /*
+   * 上限に達している銘柄は金額 0・株数 0 で返す。
+   * 金額を 0 にしながら株数を「不明（null）」にすると、
+   * 画面側で「株数が取得できていない」のか「買えない」のか区別できない。
+   */
+  if (sizing.atCap || amountBase <= 0) {
+    return {
+      amountBase: 0,
+      amountLocal: 0,
+      shares: 0,
+      afterSharePct: g.weightPct,
+      atCap: true,
+      roomToCapBase: sizing.roomToCapBase,
+    };
+  }
+
+  return {
+    amountBase,
+    amountLocal,
+    shares,
+    afterSharePct:
+      totalValueBase > 0
+        ? (((g.marketValueBase ?? 0) + amountBase) / (totalValueBase + amountBase)) * 100
+        : null,
+    atCap: sizing.atCap,
+    roomToCapBase: sizing.roomToCapBase,
+  };
 }

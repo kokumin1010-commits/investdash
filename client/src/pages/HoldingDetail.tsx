@@ -3,6 +3,7 @@ import { BrokerBadge } from "@/components/investing/BrokerBadge";
 import { MoneyText, PctText, PnlText } from "@/components/investing/Figures";
 import { CurrencyToggle } from "@/components/investing/CurrencyToggle";
 import { SignalBadge, SignalPlaceholder } from "@/components/investing/SignalBadge";
+import { AddAmountLine } from "@/components/investing/AddAmountLine";
 import { PriceBandPlanCard } from "@/components/investing/PriceBandPlanCard";
 import { SymbolConsultList } from "@/components/investing/SymbolConsultList";
 import { AdviceRecordCard } from "@/components/investing/AdviceRecordCard";
@@ -163,7 +164,8 @@ export default function HoldingDetail({ params }: { params: { id: string } }) {
     );
   }
 
-  const { holding, view, card, news, signalHistory, chart } = detail.data;
+  const { holding, view, card, news, signalHistory, chart, addPlan, groupWeightPct } =
+    detail.data;
   const currency = holding.currency;
 
   const chartData = chart.map(p => ({
@@ -346,6 +348,19 @@ export default function HoldingDetail({ params }: { params: { id: string } }) {
               <SignalBadge action={view.signal.action} showLabel className="mt-0.5 shrink-0" />
               <p className="text-sm leading-relaxed">{view.signal.rationale}</p>
             </div>
+
+            {/*
+              ADD なら「いくら買い増すか」を続けて出す。
+              判定だけでは何をすればよいか決まらないため。
+            */}
+            {addPlan && view.currency ? (
+              <AddAmountLine
+                plan={addPlan}
+                currency={view.currency}
+                market={view.market}
+                currentSharePct={groupWeightPct}
+              />
+            ) : null}
 
             {signalHistory[0]?.factors ? (
               <>

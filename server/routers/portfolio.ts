@@ -417,6 +417,12 @@ export const portfolioRouter = router({
       ]);
 
       const view = portfolio.positions.find(p => p.id === holding.id) ?? null;
+      /*
+       * 買い増し金額は銘柄単位（複数口座の合計）で決める。
+       * 口座ごとに 1 回分を出すと、同じ銘柄を 3 口座で持っている場合に
+       * 3 倍の金額を買ってよいように見えてしまう。
+       */
+      const group = portfolio.groups.find(g => g.symbol === holding.symbol) ?? null;
 
       return {
         holding,
@@ -425,6 +431,9 @@ export const portfolioRouter = router({
         news,
         signalHistory: history,
         chart,
+        addPlan: group?.addPlan ?? null,
+        /** 銘柄合計の構成比。買い増し後との比較に使う */
+        groupWeightPct: group?.weightPct ?? null,
       };
     }),
 

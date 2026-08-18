@@ -589,7 +589,10 @@ export async function buildPortfolio(userId: number): Promise<{
    * 同一銘柄を複数の証券口座で保有している場合の合計ビュー。
    * 銘柄数の表示やシグナル判定はこちらを基準にする。
    */
-  const groups = groupPositionsBySymbol(positions, totalValueBase);
+  const groups = groupPositionsBySymbol(positions, totalValueBase, {
+    interestAssetsBase: interestSummary.totalBase,
+    cashBase: cashBalance,
+  });
 
   /* ---------------- 信用取引（借入）の反映 ---------------- */
 

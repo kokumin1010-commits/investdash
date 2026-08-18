@@ -3,6 +3,7 @@ import { BrokerBadge } from "@/components/investing/BrokerBadge";
 import { BrokerBreakdown } from "@/components/investing/BrokerBreakdown";
 import { CurrencyToggle } from "@/components/investing/CurrencyToggle";
 import { MoneyText, PctText, PnlText } from "@/components/investing/Figures";
+import { AddAmountLine } from "@/components/investing/AddAmountLine";
 import { SignalBadge, SignalPlaceholder } from "@/components/investing/SignalBadge";
 import { SignalGuide } from "@/components/investing/SignalGuide";
 import { Badge } from "@/components/ui/badge";
@@ -716,6 +717,20 @@ export default function Holdings() {
                   ) : null}
 
                   {/* 複数口座で保有している場合の内訳 */}
+                  {/*
+                    ADD と判定された銘柄には「いくら買い増すか」を出す。
+                    ADD だけでは何をすればよいか決まらないため、金額と株数を
+                    そのまま発注に使える形で添える。
+                  */}
+                  {p.addPlan ? (
+                    <AddAmountLine
+                      plan={p.addPlan}
+                      currency={p.currency}
+                      market={p.market}
+                      currentSharePct={p.weightPct}
+                    />
+                  ) : null}
+
                   <BrokerBreakdown
                     /*
                       内訳も表示通貨に追随させる。円換算の損益は
@@ -1012,6 +1027,15 @@ export default function Holdings() {
                       ) : (
                         <SignalPlaceholder />
                       )}
+                      {/*
+                        表では縦幅を増やせないので金額と株数だけを 1 行で添える。
+                        構成比の変化はカード表示側で出す。
+                      */}
+                      {p.addPlan && !p.addPlan.atCap && p.addPlan.shares ? (
+                        <p className="tabular mt-0.5 text-[10px] leading-tight text-emerald-700 dark:text-emerald-400">
+                          {p.addPlan.shares.toLocaleString("ja-JP")} 株
+                        </p>
+                      ) : null}
                     </TableCell>
                     <TableCell>
                       <div className="flex items-center justify-end gap-0.5">
