@@ -12,6 +12,7 @@ import {
   watchlist,
   brokerBalances,
   interestAssets,
+  candidateSuggestions,
   type Holding,
   type InsertHolding,
   type InsertImportJob,
@@ -22,6 +23,7 @@ import {
   type InsertWatchlistItem,
   type InsertBrokerBalance,
   type InsertInterestAsset,
+  type InsertCandidateSuggestion,
 } from "../drizzle/schema";
 import { ENV } from "./_core/env";
 
@@ -668,4 +670,90 @@ export async function listAllUserIds() {
   const db = await requireDb();
   const rows = await db.select({ id: users.id }).from(users);
   return rows.map(r => r.id);
+}
+
+/**
+ * 候補提案を保存する。同じ銘柄は上書きする。
+ *
+ * 履歴として複数行残さないのは、「過去に挙げた銘柄」の一覧を次回の提案に
+ * 渡す用途で使うため。同じ銘柄が 5 行あっても情報は増えず、
+ * 一覧が重複で膨らむだけになる。
+ */
+export async function upsertCandidateSuggestion(values: InsertCandidateSuggestion) {
+  const db = await requireDb();
+  await db
+    .insert(candidateSuggestions)
+    .values(values)
+    .onDuplicateKeyUpdate({
+      set: {
+        name: values.name,
+        market: values.market,
+        track: values.track,
+        basedOn: values.basedOn ?? null,
+        gapKind: values.gapKind,
+        reason: values.reason,
+        concern: values.concern,
+        priority: values.priority,
+        priceAtSuggestion: values.priceAtSuggestion ?? null,
+        targetPrice: values.targetPrice ?? null,
+        targetBasis: values.targetBasis ?? null,
+        currency: values.currency ?? null,
+        sector: values.sector ?? null,
+        industry: values.industry ?? null,
+        model: values.model ?? null,
+        createdAt: new Date(),
+      },
+    });
+}
+
+/** 保存済みの候補提案を新しい順に取得 */
+export async function listCandidateSuggestions(userId: number, limit = 40) {
+  const db = await requireDb();
+  return db
+    .select()
+    .from(candidateSuggestions)
+    .where(eq(candidateSuggestions.userId, userId))
+    .orderBy(desc(candidateSuggestions.createdAt))
+    .limit(limit);
+}
+
+/**
+ * 過去に提案した銘柄コードの一覧。
+ *
+ * 次回の提案時に「できるだけ避ける」対象として渡す。
+ * 見送った銘柄も含める（見送ったものが再度出るのは望ましくない）。
+ */
+export async function listSuggestedSymbols(userId: number): Promise<string[]> {
+  const db = await requireDb();
+  const rows = await db
+    .select({ symbol: candidateSuggestions.symbol })
+    .from(candidateSuggestions)
+    .where(eq(candidateSuggestions.userId, userId));
+  return rows.map(r => r.symbol);
+}
+
+/** 提案をウォッチリストに取り込んだ印を付ける */
+export async function markCandidateAdded(userId: number, symbols: string[]) {
+  if (symbols.length === 0) return;
+  const db = await requireDb();
+  await db
+    .update(candidateSuggestions)
+    .set({ addedToWatchlist: true })
+    .where(
+      and(
+        eq(candidateSuggestions.userId, userId),
+        inArray(candidateSuggestions.symbol, symbols)
+      )
+    );
+}
+
+/** 提案を見送った印を付ける */
+export async function dismissCandidate(userId: number, symbol: string) {
+  const db = await requireDb();
+  await db
+    .update(candidateSuggestions)
+    .set({ dismissed: true })
+    .where(
+      and(eq(candidateSuggestions.userId, userId), eq(candidateSuggestions.symbol, symbol))
+    );
 }

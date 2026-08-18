@@ -1039,10 +1039,6 @@ export const portfolioRouter = router({
 
   /**
    * 提案された候補のうち選んだものをウォッチリストに取り込む。
-   *
-   * 提案は保存せず画面の状態として持つため、取り込みたい銘柄の情報を
-   * クライアントから送り返す形にしている。
-   * 銘柄名と通貨は取り込み時に再取得するので、送られた name は保険。
    */
   addSuggestedToWatchlist: protectedProcedure
     .input(
@@ -1063,9 +1059,67 @@ export const portfolioRouter = router({
           .max(10),
       })
     )
-    .mutation(async ({ ctx, input }) =>
-      addCandidatesToWatchlist(ctx.user.id, input.candidates)
-    ),
+    .mutation(async ({ ctx, input }) => {
+      const result = await addCandidatesToWatchlist(ctx.user.id, input.candidates);
+      /*
+       * 取り込んだ印を付ける。印がないと、次に提案一覧を開いたときに
+       * 既にウォッチリストへ入れた銘柄が「未検討」として並んでしまう。
+       * 印付けが失敗しても取り込み自体は成功しているので通す。
+       */
+      try {
+        const added = input.candidates
+          .map(c => c.symbol.trim().toUpperCase())
+          .filter(s => !result.skipped.includes(s));
+        await db.markCandidateAdded(ctx.user.id, added);
+      } catch (e) {
+        console.warn("[candidate] 取り込み印の記録に失敗:", e);
+      }
+      return result;
+    }),
+
+  /**
+   * 保存済みの提案を返す。
+   *
+   * 生成には 40 秒前後かかるため、画面を開くたびに作り直すのではなく
+   * 前回の結果を読めるようにする。月 1 回しか開かない使い方では、
+   * 開いた瞬間に前回の提案が見えることの方が重要。
+   */
+  savedCandidates: protectedProcedure.query(async ({ ctx }) => {
+    const rows = await db.listCandidateSuggestions(ctx.user.id);
+    return rows.map(r => ({
+      symbol: r.symbol,
+      name: r.name,
+      market: r.market,
+      track: r.track,
+      basedOn: r.basedOn,
+      gapKind: r.gapKind,
+      reason: r.reason,
+      concern: r.concern,
+      priority: r.priority,
+      priceAtSuggestion: r.priceAtSuggestion != null ? Number(r.priceAtSuggestion) : null,
+      targetPrice: r.targetPrice != null ? Number(r.targetPrice) : null,
+      targetBasis: r.targetBasis,
+      currency: r.currency,
+      sector: r.sector,
+      industry: r.industry,
+      addedToWatchlist: r.addedToWatchlist,
+      dismissed: r.dismissed,
+      createdAt: r.createdAt,
+    }));
+  }),
+
+  /**
+   * 提案を見送る。
+   *
+   * 削除ではなく印にするのは、次回の提案で同じ銘柄を避けるために
+   * 記録が必要なため。消すと同じ銘柄が何度も出てくる。
+   */
+  dismissCandidate: protectedProcedure
+    .input(z.object({ symbol: z.string().min(1).max(24) }))
+    .mutation(async ({ ctx, input }) => {
+      await db.dismissCandidate(ctx.user.id, input.symbol.trim().toUpperCase());
+      return { ok: true };
+    }),
 });
 
 export type PortfolioRouter = typeof portfolioRouter;

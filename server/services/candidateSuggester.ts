@@ -26,6 +26,30 @@ export type PortfolioGap = {
   evidence: string;
 };
 
+/**
+ * 提案の系統。
+ *
+ * EXPAND（関心を広げる）は保有とウォッチリストに現れている産業を起点に、
+ * 同じ性質でまだ持っていない銘柄を挙げる。
+ * FILL（穴を埋める）は持っていない・薄い業種や地域を起点に挙げる。
+ *
+ * 系統を分けるのは、片方だけでは必ず偏るため。EXPAND だけだと半導体を
+ * さらに増やす方向にしか進まず、レバレッジ 1.18 倍の状態で同じ材料で
+ * 動く銘柄が増えて下落耐性が落ちる。FILL だけだと関心のない業種の
+ * 銘柄ばかり並び、結局検討されない。
+ */
+export type SuggestionTrack = "EXPAND" | "FILL";
+
+/** 関心が集まっている産業（AI に渡す形） */
+export type InterestLine = {
+  industry: string;
+  sector: string | null;
+  heldCount: number;
+  watchCount: number;
+  weightPct: number;
+  symbols: string[];
+};
+
 export type SuggesterContext = {
   /** 総資産（円） */
   totalValueBase: number;
@@ -47,6 +71,25 @@ export type SuggesterContext = {
   heldSymbols: string[];
   /** 既にウォッチリストにある銘柄コード。重複提案を防ぐ */
   watchedSymbols: string[];
+  /**
+   * 関心が集まっている産業（関心の強い順）。
+   * 「同じ性質でまだ持っていない銘柄」を挙げさせる起点になる。
+   */
+  interests: InterestLine[];
+  /**
+   * 検討中の銘柄の中身。産業だけでは「なぜ見ているか」が分からないため、
+   * 注目理由も渡して関心の方向を掴ませる。
+   */
+  watchDetails: Array<{
+    symbol: string;
+    name: string;
+    industry: string | null;
+    reason: string | null;
+  }>;
+  /** 持っていない・薄い業種 */
+  sectorGaps: Array<{ sector: string; heldCount: number; weightPct: number }>;
+  /** 前回までに提案したことがある銘柄。同じものを繰り返さないため */
+  previouslySuggested: string[];
 };
 
 export type SuggestedCandidate = {
@@ -56,6 +99,16 @@ export type SuggestedCandidate = {
   symbol: string;
   /** 市場 */
   market: "JP" | "US" | "SG" | "HK" | "OTHER";
+  /**
+   * どの系統の提案か。
+   * 画面で「関心を広げる」「穴を埋める」に分けて出すために必要。
+   */
+  track: SuggestionTrack;
+  /**
+   * EXPAND の場合、どの産業を起点にした提案か。
+   * 「半導体に関心があるので」という繋がりを画面に出すために使う。
+   */
+  basedOn: string | null;
   /** どの穴を埋める提案か */
   gapKind: "SECTOR" | "REGION" | "YIELD" | "RISK";
   /** なぜこの銘柄か。保有データとの関係を必ず書かせる */
@@ -84,7 +137,7 @@ export type SuggesterResult = {
 };
 
 const SUGGESTER_SYSTEM = `あなたは長期保有を前提とする個人投資家のポートフォリオを分析し、
-不足している部分を埋める新規候補銘柄を挙げるアナリストです。
+新規候補銘柄を挙げるアナリストです。
 
 この投資家の特徴:
 - 株を買ったら長期で持ち続ける。短期の売買はしない
@@ -92,22 +145,55 @@ const SUGGESTER_SYSTEM = `あなたは長期保有を前提とする個人投資
 - 既に 100 銘柄以上を保有しており、幅広く分散している
 - 配当を重視する。借入をしているため、配当が金利負担を上回るかを見ている
 
-## あなたの仕事
+## あなたの仕事：2 つの系統で候補を挙げる
 
-1. まず提示されたポートフォリオの数字から「偏り（gap）」を特定する
-2. その偏りを埋める候補銘柄を挙げる
+### 系統 1: EXPAND（関心を広げる）
+
+保有と検討中の銘柄に現れている「関心のある産業」を起点に、
+同じ性質でまだ持っていない銘柄を挙げる。
+
+この投資家が既に半導体を 7 銘柄持ち、さらに 4 銘柄を検討中なら、
+それは半導体に強い関心があるということ。同じ産業・隣接する産業で
+まだ見ていない銘柄を挙げる。
+
+- **必ず basedOn にどの産業を起点にしたかを書く**（例: "Semiconductors"）
+- 起点にする産業は提示された「関心のある産業」の一覧から選ぶこと。
+  一覧にない産業を勝手に起点にしてはならない
+- 隣接産業も可（半導体 → 半導体製造装置、EDA ツール、電力インフラなど）。
+  ただし reason に「なぜ隣接と言えるか」を書くこと
+
+### 系統 2: FILL（穴を埋める）
+
+持っていない業種・薄い業種・地域の偏りを起点に挙げる。
+こちらは basedOn を null にし、gapKind でどの穴かを示す。
+
+### なぜ 2 系統に分けるか
+
+EXPAND だけでは同じ材料で動く銘柄が増え、借入をしている状態で
+下落耐性が落ちる。FILL だけでは関心のない業種の銘柄が並び、
+結局検討されない。両方を挙げること。
+
+**EXPAND を 3〜5 銘柄、FILL を 2〜4 銘柄**とし、合計 5〜8 銘柄にする。
 
 ## 絶対に守る原則
 
 1. **有名だから挙げる、話題だから挙げるは禁止。**
-   必ず「保有データのこの偏りを埋めるため」という理由から出発すること。
+   必ず「保有データのこの産業に関心があるため」または
+   「この業種が薄いため」という理由から出発すること。
    NVIDIA や Palantir のような人気銘柄を理由なく挙げてはならない。
 
 2. **既に保有している銘柄、既にウォッチリストにある銘柄は挙げない。**
    提示された保有銘柄コードの一覧を必ず確認すること。
+   過去に提案した銘柄も避ける（一覧が提示されている場合）。
 
 3. **偏りの指摘には必ず数字の裏付けを書く。**
    「テクノロジーが多い」ではなく「テクノロジーが 23 銘柄・全体の X% を占める」と書く。
+
+4. **買いたい値段は現在値から 5〜25% 下の範囲で出す。**
+   この投資家は「安くなったら買う」やり方だが、現在値から 30% 以上下の値段は
+   実質「買わない」と同じで、待っているうちに買い場を逃す。
+   52 週安値や過去の調整局面の水準を参考に、実際に届きうる値段にすること。
+   30% 以上下の値段を出した場合はシステムが自動で引き上げる。
 
 4. **各候補に必ず懸念（concern）を書く。**
    良い面だけを挙げてはならない。買わない理由になりうる点を必ず添える。
@@ -180,6 +266,8 @@ const SUGGESTER_SCHEMA = {
               "name",
               "symbol",
               "market",
+              "track",
+              "basedOn",
               "gapKind",
               "reason",
               "concern",
@@ -191,6 +279,8 @@ const SUGGESTER_SCHEMA = {
               name: { type: "string" },
               symbol: { type: "string" },
               market: { type: "string", enum: ["JP", "US", "SG", "HK", "OTHER"] },
+              track: { type: "string", enum: ["EXPAND", "FILL"] },
+              basedOn: { type: ["string", "null"] },
               gapKind: { type: "string", enum: ["SECTOR", "REGION", "YIELD", "RISK"] },
               reason: { type: "string" },
               concern: { type: "string" },
@@ -221,6 +311,44 @@ export function buildSuggesterPrompt(ctx: SuggesterContext): string {
     .join("\n");
 
   /*
+   * 関心のある産業。ここが EXPAND 系統の起点になる。
+   * 検討中の件数を明示するのは、まだ買っていない銘柄を登録してあることが
+   * 「これから買いたい」意思の表れであり、現在の関心を最もよく表すため。
+   */
+  const interestLines = ctx.interests
+    .map(
+      i =>
+        `- ${i.industry}（${i.sector ?? "業種未取得"}）: 保有 ${i.heldCount} 銘柄` +
+        `${i.watchCount > 0 ? `・検討中 ${i.watchCount} 銘柄` : ""}` +
+        `／構成比 ${i.weightPct.toFixed(1)}%／${i.symbols.slice(0, 6).join(", ")}`
+    )
+    .join("\n");
+
+  /*
+   * 検討中の銘柄は理由まで渡す。産業名だけでは「なぜ見ているか」が
+   * 分からず、AI が同じ産業の別銘柄を機械的に挙げるだけになる。
+   * 理由は 120 字で切る（全文だと 13 銘柄でプロンプトが膨らむ）。
+   */
+  const watchLines = ctx.watchDetails
+    .map(
+      w =>
+        `- ${w.name}（${w.symbol}／${w.industry ?? "産業未取得"}）: ` +
+        `${w.reason ? w.reason.replace(/\s+/g, " ").slice(0, 120) : "理由未記入"}`
+    )
+    .join("\n");
+
+  const gapLines = ctx.sectorGaps
+    .map(
+      g =>
+        `- ${g.sector}: ${
+          g.heldCount === 0
+            ? "保有なし"
+            : `${g.heldCount} 銘柄・${g.weightPct.toFixed(1)}% のみ`
+        }`
+    )
+    .join("\n");
+
+  /*
    * 保有銘柄コードは全件渡す。件数が多いが、ここを省略すると
    * 既に持っている銘柄を提案されて使えない結果になる。
    */
@@ -230,6 +358,15 @@ export function buildSuggesterPrompt(ctx: SuggesterContext): string {
 - 全体レバレッジ: ${ctx.leverage === null ? "なし" : `${ctx.leverage.toFixed(2)} 倍`}
 - 配当利回り: ${pct(ctx.dividendYieldPct)}
 - 借入金利: ${pct(ctx.borrowRatePct)}
+
+## 関心のある産業（EXPAND 系統の起点。この一覧から選ぶこと）
+${interestLines || "データなし"}
+
+## 検討中の銘柄（まだ買っていないが登録してある＝これから買う意思がある）
+${watchLines || "なし"}
+
+## 持っていない・薄い業種（FILL 系統の起点）
+${gapLines || "薄い業種はありません"}
 
 ## セクター別の構成比
 ${sectorLines || "データなし"}
@@ -246,8 +383,14 @@ ${ctx.heldSymbols.join(", ")}
 ## 既にウォッチリストにある銘柄（提案してはならない）
 ${ctx.watchedSymbols.length > 0 ? ctx.watchedSymbols.join(", ") : "なし"}
 
-以上の数字から偏りを特定し、それを埋める新規候補銘柄を 5〜8 銘柄挙げてください。
-各候補には必ず「どの偏りを埋めるか」と「懸念点」を書いてください。`;
+## 過去に提案した銘柄（できるだけ避ける）
+${ctx.previouslySuggested.length > 0 ? ctx.previouslySuggested.join(", ") : "なし"}
+
+以上から、EXPAND（関心のある産業を起点に、同じ性質でまだ持っていない銘柄）を
+3〜5 銘柄、FILL（薄い業種・地域の穴を埋める銘柄）を 2〜4 銘柄挙げてください。
+EXPAND では basedOn に起点にした産業名を必ず書き、
+FILL では basedOn を null にしてください。
+各候補には必ず「なぜこの銘柄か」と「懸念点」を書いてください。`;
 }
 
 export async function suggestCandidates(ctx: SuggesterContext): Promise<SuggesterResult> {
@@ -284,9 +427,49 @@ export async function suggestCandidates(ctx: SuggesterContext): Promise<Suggeste
   const excluded = new Set(
     [...ctx.heldSymbols, ...ctx.watchedSymbols].map(s => s.trim().toUpperCase())
   );
-  const candidates = parsed.candidates.filter(
-    c => !excluded.has(c.symbol.trim().toUpperCase())
-  );
+  const candidates = parsed.candidates
+    .filter(c => !excluded.has(c.symbol.trim().toUpperCase()))
+    .map(c => normalizeTrack(c, ctx.interests));
 
   return { ...parsed, candidates };
+}
+
+/**
+ * 系統と起点の整合を取る。
+ *
+ * AI は track を EXPAND にしながら basedOn を空にしたり、
+ * 関心の一覧にない産業名を書いたりすることがある。そのままだと
+ * 画面で「関心を広げる提案」の下に根拠のない銘柄が並ぶ。
+ *
+ * 起点が確認できないものは FILL に落とす。EXPAND として出すには
+ * 「どの関心から来たか」が言えることが条件であり、それが言えないなら
+ * 穴を埋める提案として扱う方が正確。
+ */
+export function normalizeTrack(
+  c: SuggestedCandidate,
+  interests: InterestLine[]
+): SuggestedCandidate {
+  if (c.track !== "EXPAND") {
+    // FILL に起点が入っていても意味がないので落とす
+    return { ...c, track: "FILL", basedOn: null };
+  }
+
+  const basedOn = c.basedOn?.trim();
+  if (!basedOn) {
+    return { ...c, track: "FILL", basedOn: null };
+  }
+
+  /*
+   * 産業名の一致は大文字小文字を無視して比べる。
+   * AI が "semiconductors" と小文字で返すことがあり、
+   * 厳密一致だと正しい起点まで落としてしまう。
+   */
+  const known = interests.find(
+    i => i.industry.toLowerCase() === basedOn.toLowerCase()
+  );
+  if (!known) {
+    return { ...c, track: "FILL", basedOn: null };
+  }
+
+  return { ...c, track: "EXPAND", basedOn: known.industry };
 }

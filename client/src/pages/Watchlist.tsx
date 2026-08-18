@@ -1,4 +1,5 @@
 import { DisclaimerNote } from "@/components/investing/DisclaimerNote";
+import { ExpandableText } from "@/components/investing/ExpandableText";
 import { MoneyText, PctText } from "@/components/investing/Figures";
 import { SignalBadge, SignalPlaceholder } from "@/components/investing/SignalBadge";
 import { Badge } from "@/components/ui/badge";
@@ -104,6 +105,13 @@ type SuggestedRow = {
   marketLabel: string;
   priority: "HIGH" | "MEDIUM" | "LOW";
   gapKind: string;
+  /**
+   * 提案の系統。
+   * EXPAND = 今の関心を広げる、FILL = 持っていない業種の穴を埋める。
+   */
+  track: "EXPAND" | "FILL";
+  /** EXPAND の起点になった産業名。FILL では null */
+  basedOn: string | null;
   reason: string;
   concern: string;
   targetPrice: number | null;
@@ -142,6 +150,44 @@ const GAP_KIND_LABELS: Record<string, string> = {
   RISK: "下落耐性",
   SIZE: "規模の偏り",
 };
+
+/**
+ * 産業名を日本語にする。
+ *
+ * 「Semiconductors に関心があるので」と英語で出すと、何の話か分かりにくい。
+ * 対応がないものは英語のまま出す（勝手に「その他」に丸めると新しい産業が
+ * 来たときに気付けない）。
+ */
+const INDUSTRY_JA: Record<string, string> = {
+  Semiconductors: "半導体",
+  "Semiconductor Equipment & Materials": "半導体製造装置・材料",
+  "Software - Application": "業務ソフト",
+  "Software - Infrastructure": "基盤ソフト",
+  Conglomerates: "総合商社・複合企業",
+  "Auto Manufacturers": "自動車",
+  "Banks - Regional": "地域銀行",
+  "Household & Personal Products": "日用品・化粧品",
+  "Internet Retail": "ネット通販",
+  "Telecom Services": "通信",
+  "Credit Services": "決済・カード",
+  "Building Products & Equipment": "建材・設備",
+  "Computer Hardware": "コンピュータ機器",
+  "REIT - Industrial": "物流・工業 REIT",
+  "Electrical Equipment & Parts": "電機・電力設備",
+  "Oil & Gas Integrated": "石油・ガス（総合）",
+  "Oil & Gas E&P": "石油・ガス（開発）",
+  "Utilities - Renewable": "再生可能エネルギー",
+  "Drug Manufacturers - General": "医薬品",
+  "Medical Devices": "医療機器",
+  "Aerospace & Defense": "航空宇宙・防衛",
+  "Specialty Chemicals": "化学",
+  Insurance: "保険",
+};
+
+function industryJa(v: string | null): string {
+  if (!v) return "";
+  return INDUSTRY_JA[v] ?? v;
+}
 export default function Watchlist() {
   const utils = trpc.useUtils();
   const list = trpc.watchlist.list.useQuery();
@@ -216,6 +262,19 @@ export default function Watchlist() {
     },
     onError: e => toast.error(e.message),
   });
+  /*
+   * 前回の提案。生成には 40〜60 秒かかるため、画面を開くたびに作り直すのは
+   * 現実的でない。月 1 回しか開かない使い方では、開いた瞬間に前回の提案が
+   * 見えることの方が重要。
+   */
+  const saved = trpc.portfolio.savedCandidates.useQuery();
+  const dismiss = trpc.portfolio.dismissCandidate.useMutation({
+    onSuccess: async () => {
+      await utils.portfolio.savedCandidates.invalidate();
+      toast.success("この提案は今後出さないようにしました");
+    },
+    onError: e => toast.error(e.message),
+  });
 
   const addSuggested = trpc.portfolio.addSuggestedToWatchlist.useMutation({
     onSuccess: async res => {
@@ -285,11 +344,82 @@ export default function Watchlist() {
       {suggest.isPending ? (
         <Card className="border-primary/30 bg-accent/40">
           <CardContent className="space-y-2 py-5 text-center">
-            <p className="text-sm font-medium">保有 {rows.length > 0 ? "" : ""}銘柄の構成を分析しています</p>
+            <p className="text-sm font-medium">保有と検討中の銘柄から関心を読み取っています</p>
             <p className="text-xs leading-relaxed text-muted-foreground">
-              業種・地域・配当利回り・借入金利から偏りを探し、それを埋める銘柄を挙げます。
-              挙がった銘柄は株価が実際に取得できるか検証してから表示します（30 秒前後）。
+              どの分野に関心が集まっているかを集計し、同じ分野でまだ持っていない銘柄と、
+              逆に持っていない分野の銘柄を挙げます。挙がった銘柄は株価が実際に取得できるか
+              検証してから表示します（40〜60 秒）。
             </p>
+          </CardContent>
+        </Card>
+      ) : null}
+
+      {/*
+       * 前回の提案。今回の提案を出している間は隠す（同じ銘柄が
+       * 上下に二重で並ぶと、どちらが新しいのか分からなくなる）。
+       */}
+      {!suggestion && !suggest.isPending && (saved.data ?? []).filter(s => !s.dismissed && !s.addedToWatchlist).length > 0 ? (
+        <Card className="border-dashed">
+          <CardHeader className="pb-2">
+            <CardTitle className="flex items-center gap-2 text-base">
+              <Lightbulb className="h-4 w-4 text-muted-foreground" />
+              前回 AI が挙げた候補{" "}
+              {(saved.data ?? []).filter(s => !s.dismissed && !s.addedToWatchlist).length} 件
+            </CardTitle>
+            <CardDescription className="text-xs">
+              まだウォッチリストに入れていない提案です。もう不要なものは「今後出さない」を
+              押すと、次回の提案から除外されます。
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-2">
+            {(saved.data ?? [])
+              .filter(s => !s.dismissed && !s.addedToWatchlist)
+              .map(s => (
+                <div key={s.symbol} className="rounded-lg border px-3 py-2">
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <span className="text-sm font-medium">{s.name}</span>
+                    <span className="tabular text-xs text-muted-foreground">{s.symbol}</span>
+                    <Badge variant="outline" className="text-[10px]">
+                      {s.track === "EXPAND" ? "関心を広げる" : "分野を埋める"}
+                    </Badge>
+                    <Badge
+                      variant="outline"
+                      className={`text-[10px] ${PRIORITY_STYLES[s.priority]}`}
+                    >
+                      優先度 {PRIORITY_LABELS[s.priority]}
+                    </Badge>
+                  </div>
+                  <div className="mt-1 flex flex-wrap items-baseline gap-x-4 gap-y-1 text-xs">
+                    <span className="tabular">
+                      提案時 {formatMoney(s.priceAtSuggestion, s.currency ?? "USD")}
+                    </span>
+                    {s.targetPrice != null ? (
+                      <span className="tabular text-gain">
+                        買いたい値段 {formatMoney(s.targetPrice, s.currency ?? "USD")}
+                      </span>
+                    ) : null}
+                    <span className="text-muted-foreground">
+                      {new Date(s.createdAt).toLocaleDateString("ja-JP")}
+                    </span>
+                  </div>
+                  <ExpandableText
+                    label="この銘柄を挙げた理由"
+                    text={s.reason}
+                    className="mt-1 text-xs"
+                  />
+                  <div className="mt-1.5 flex justify-end">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-7 text-[11px]"
+                      disabled={dismiss.isPending}
+                      onClick={() => dismiss.mutate({ symbol: s.symbol })}
+                    >
+                      今後出さない
+                    </Button>
+                  </div>
+                </div>
+              ))}
           </CardContent>
         </Card>
       ) : null}
@@ -304,7 +434,8 @@ export default function Watchlist() {
                   AI が挙げた候補 {suggestion.candidates.length} 件
                 </CardTitle>
                 <CardDescription className="text-xs">
-                  今の保有の偏りを埋める銘柄です。買う判断はご自身で行ってください。
+                  保有と検討中の銘柄から関心を読み取り、同じ分野でまだ持っていない銘柄と、
+                  逆に持っていない分野の銘柄を挙げています。
                 </CardDescription>
               </div>
               <Button variant="ghost" size="sm" onClick={() => setSuggestion(null)}>
@@ -352,93 +483,132 @@ export default function Watchlist() {
             </div>
 
             <div className="space-y-2">
-              {suggestion.candidates.map(c => {
-                const already = heldSymbols.has(c.symbol);
-                const checked = picked.has(c.symbol);
+              {/*
+               * 系統ごとに分けて出す。混ぜて並べると「今の関心の延長」と
+               * 「持っていない業種の穴埋め」が交互に来て、どの観点で
+               * 見ればよいのか分からなくなる。
+               */}
+              {(["EXPAND", "FILL"] as const).map(track => {
+                const items = suggestion.candidates.filter(c => c.track === track);
+                if (items.length === 0) return null;
                 return (
-                  <div
-                    key={c.symbol}
-                    className={`rounded-lg border px-3 py-2.5 ${checked ? "border-primary bg-accent/40" : ""}`}
-                  >
-                    <div className="flex items-start gap-2.5">
-                      <input
-                        type="checkbox"
-                        className="mt-1 h-4 w-4 shrink-0 accent-[var(--primary)]"
-                        checked={checked}
-                        disabled={already}
-                        onChange={e => {
-                          const next = new Set(picked);
-                          if (e.target.checked) next.add(c.symbol);
-                          else next.delete(c.symbol);
-                          setPicked(next);
-                        }}
-                      />
-                      <div className="min-w-0 flex-1 space-y-1.5">
-                        <div className="flex flex-wrap items-center gap-1.5">
-                          <span className="text-sm font-medium">{c.verifiedName}</span>
-                          <span className="tabular text-xs text-muted-foreground">{c.symbol}</span>
-                          <Badge variant="outline" className="text-[10px]">
-                            {c.marketLabel}
-                          </Badge>
-                          <Badge
-                            variant="outline"
-                            className={`text-[10px] ${PRIORITY_STYLES[c.priority]}`}
-                          >
-                            優先度 {PRIORITY_LABELS[c.priority]}
-                          </Badge>
-                          <Badge variant="outline" className="text-[10px]">
-                            {GAP_KIND_LABELS[c.gapKind] ?? c.gapKind}
-                          </Badge>
-                          {already ? (
-                            <Badge variant="outline" className="text-[10px]">
-                              すでに登録済み
-                            </Badge>
-                          ) : null}
-                        </div>
-
-                        <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1 text-xs">
-                          <span className="tabular">
-                            現在値 {formatMoney(c.currentPrice, c.currency)}
-                          </span>
-                          {c.targetPrice != null ? (
-                            <span className="tabular text-gain">
-                              買いたい値段 {formatMoney(c.targetPrice, c.currency)}
-                              {c.gapToTargetPct != null ? (
-                                <span className="ml-1 text-muted-foreground">
-                                  （あと {c.gapToTargetPct.toFixed(1)}%）
-                                </span>
-                              ) : null}
-                            </span>
-                          ) : null}
-                          {c.fiftyTwoWeekLow != null && c.fiftyTwoWeekHigh != null ? (
-                            <span className="tabular text-muted-foreground">
-                              52週 {formatMoney(c.fiftyTwoWeekLow, c.currency)} 〜{" "}
-                              {formatMoney(c.fiftyTwoWeekHigh, c.currency)}
-                            </span>
-                          ) : null}
-                          {c.sector ? (
-                            <span className="text-muted-foreground">{sectorJa(c.sector)}</span>
-                          ) : null}
-                        </div>
-
-                        <p className="text-xs leading-relaxed">{c.reason}</p>
-                        {c.targetBasis ? (
-                          <p className="text-[11px] leading-relaxed text-muted-foreground">
-                            <span className="font-medium">この値段の根拠: </span>
-                            {c.targetBasis}
-                          </p>
-                        ) : null}
-                        {c.targetAdjustedNote ? (
-                          <p className="rounded bg-amber-500/10 px-2 py-1 text-[11px] leading-relaxed text-amber-600 dark:text-amber-400">
-                            {c.targetAdjustedNote}
-                          </p>
-                        ) : null}
-                        <p className="text-[11px] leading-relaxed text-loss">
-                          <span className="font-medium">懸念: </span>
-                          {c.concern}
-                        </p>
-                      </div>
+                  <div key={track} className="space-y-2">
+                    <div className="flex items-baseline gap-2 pt-1">
+                      <h3 className="text-xs font-semibold">
+                        {track === "EXPAND"
+                          ? `今の関心を広げる ${items.length} 件`
+                          : `持っていない分野を埋める ${items.length} 件`}
+                      </h3>
+                      <span className="text-[11px] text-muted-foreground">
+                        {track === "EXPAND"
+                          ? "保有・検討中の銘柄と同じ分野"
+                          : "偏りを減らす目的"}
+                      </span>
                     </div>
+                    {items.map(c => {
+                      const already = heldSymbols.has(c.symbol);
+                      const checked = picked.has(c.symbol);
+                      return (
+                        <div
+                          key={c.symbol}
+                          className={`rounded-lg border px-3 py-2.5 ${checked ? "border-primary bg-accent/40" : ""}`}
+                        >
+                          <div className="flex items-start gap-2.5">
+                            <input
+                              type="checkbox"
+                              className="mt-1 h-4 w-4 shrink-0 accent-[var(--primary)]"
+                              checked={checked}
+                              disabled={already}
+                              onChange={e => {
+                                const next = new Set(picked);
+                                if (e.target.checked) next.add(c.symbol);
+                                else next.delete(c.symbol);
+                                setPicked(next);
+                              }}
+                            />
+                            <div className="min-w-0 flex-1 space-y-1.5">
+                              <div className="flex flex-wrap items-center gap-1.5">
+                                <span className="text-sm font-medium">{c.verifiedName}</span>
+                                <span className="tabular text-xs text-muted-foreground">
+                                  {c.symbol}
+                                </span>
+                                <Badge variant="outline" className="text-[10px]">
+                                  {c.marketLabel}
+                                </Badge>
+                                <Badge
+                                  variant="outline"
+                                  className={`text-[10px] ${PRIORITY_STYLES[c.priority]}`}
+                                >
+                                  優先度 {PRIORITY_LABELS[c.priority]}
+                                </Badge>
+                                {already ? (
+                                  <Badge variant="outline" className="text-[10px]">
+                                    すでに登録済み
+                                  </Badge>
+                                ) : null}
+                              </div>
+
+                              {/*
+                               * EXPAND はどの関心から来たかを出す。これがないと
+                               * 「なぜこの銘柄が挙がったのか」が読み取れない。
+                               * FILL はどの穴を埋めるかを出す。
+                               */}
+                              <p className="text-[11px] text-muted-foreground">
+                                {c.track === "EXPAND" && c.basedOn
+                                  ? `${industryJa(c.basedOn)}に関心があるため`
+                                  : GAP_KIND_LABELS[c.gapKind] ?? c.gapKind}
+                                {c.industry && c.industry !== c.basedOn
+                                  ? ` ／ この銘柄は ${industryJa(c.industry)}`
+                                  : ""}
+                              </p>
+
+                              <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1 text-xs">
+                                <span className="tabular">
+                                  現在値 {formatMoney(c.currentPrice, c.currency)}
+                                </span>
+                                {c.targetPrice != null ? (
+                                  <span className="tabular text-gain">
+                                    買いたい値段 {formatMoney(c.targetPrice, c.currency)}
+                                    {c.gapToTargetPct != null ? (
+                                      <span className="ml-1 text-muted-foreground">
+                                        （あと {c.gapToTargetPct.toFixed(1)}%）
+                                      </span>
+                                    ) : null}
+                                  </span>
+                                ) : null}
+                                {c.fiftyTwoWeekLow != null && c.fiftyTwoWeekHigh != null ? (
+                                  <span className="tabular text-muted-foreground">
+                                    52週 {formatMoney(c.fiftyTwoWeekLow, c.currency)} 〜{" "}
+                                    {formatMoney(c.fiftyTwoWeekHigh, c.currency)}
+                                  </span>
+                                ) : null}
+                              </div>
+
+                              <ExpandableText
+                                label="この銘柄を挙げた理由"
+                                text={c.reason}
+                                className="text-xs"
+                              />
+                              {c.targetBasis ? (
+                                <p className="text-[11px] leading-relaxed text-muted-foreground">
+                                  <span className="font-medium">この値段の根拠: </span>
+                                  {c.targetBasis}
+                                </p>
+                              ) : null}
+                              {c.targetAdjustedNote ? (
+                                <p className="rounded bg-amber-500/10 px-2 py-1 text-[11px] leading-relaxed text-amber-600 dark:text-amber-400">
+                                  {c.targetAdjustedNote}
+                                </p>
+                              ) : null}
+                              <p className="text-[11px] leading-relaxed text-loss">
+                                <span className="font-medium">懸念: </span>
+                                {c.concern}
+                              </p>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
                   </div>
                 );
               })}
@@ -767,17 +937,11 @@ export default function Watchlist() {
                 ) : null}
 
                 {r.watchReason ? (
-                  <div className="space-y-1">
-                    <p className="text-[11px] font-medium text-muted-foreground">注目理由</p>
-                    <p className="line-clamp-2 text-xs leading-relaxed">{r.watchReason}</p>
-                  </div>
+                  <ExpandableText label="注目理由" text={r.watchReason} />
                 ) : null}
 
                 {r.buyConditions ? (
-                  <div className="space-y-1">
-                    <p className="text-[11px] font-medium text-muted-foreground">買付条件</p>
-                    <p className="line-clamp-2 text-xs leading-relaxed">{r.buyConditions}</p>
-                  </div>
+                  <ExpandableText label="買付条件" text={r.buyConditions} />
                 ) : null}
 
                 <WatchPlanSummary symbol={r.symbol} currency={r.currency} />

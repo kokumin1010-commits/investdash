@@ -18,6 +18,32 @@ import {
   type PortfolioGap,
 } from "./candidateSuggester";
 import { withAiRunLog } from "./aiRunLog";
+import {
+  buildInterestClusters,
+  findSectorGaps,
+  type InterestInput,
+} from "@shared/interestProfile";
+import { computeTargetDistance, TOO_FAR_THRESHOLD_PCT } from "@shared/targetDistance";
+
+/**
+ * 世界の業種の一覧（Yahoo Finance の sector 分類）。
+ *
+ * 「持っていない業種」を出すには、そもそもどの業種があるかを知る必要がある。
+ * 保有データから作ると持っている業種しか出てこないため、定数として持つ。
+ */
+const ALL_SECTORS = [
+  "Technology",
+  "Financial Services",
+  "Industrials",
+  "Consumer Cyclical",
+  "Consumer Defensive",
+  "Healthcare",
+  "Communication Services",
+  "Energy",
+  "Utilities",
+  "Real Estate",
+  "Basic Materials",
+];
 
 /** 実在検証を通った候補 */
 export type VerifiedCandidate = SuggestedCandidate & {
@@ -78,6 +104,34 @@ export function resolveTargetPrice(
       note: `AI の提示額（${aiTarget}）が現在値以上で待つ意味がないため、現在値の 8% 下に補正しました。ご自身で見直してください。`,
     };
   }
+
+  /*
+   * 遠すぎる値段は補正する。
+   *
+   * 実測で AMAT に現在値 $505.99 に対し $165（-67.4%）、OCBC に SGD 30.95 に
+   * 対し SGD 13.5（-56.4%）が返った。この投資家の買い方（安くなったら買う）を
+   * AI が過度に解釈し、リーマン級の暴落水準を出している。
+   *
+   * そのまま登録すると「待っている」つもりで実質「買わない」状態になり、
+   * ウォッチリストに死んだ行が積み上がる。ウォッチリスト側には既に
+   * -30% 超で警告する仕組みがあるが、入り口で防いだ方が確実。
+   *
+   * 補正先は -25% にする。-30% の境目ぎりぎりに置くと、株価が少し上がった
+   * だけで再び「遠すぎる」に落ちて警告が出続ける。境目から余裕を取る。
+   */
+  const distance = computeTargetDistance(currentPrice, aiTarget);
+  if (distance.level === "TOO_FAR") {
+    const capped = round2(currentPrice * 0.75);
+    return {
+      targetPrice: capped,
+      gapPct: -25,
+      note:
+        `AI の提示額（${aiTarget}）は現在値から ${Math.abs(distance.gapPct ?? 0).toFixed(1)}% 下で、` +
+        `待つことが実質「買わない」に近い水準でした。現在値の 25% 下に引き上げています` +
+        `（${TOO_FAR_THRESHOLD_PCT}% を超える設定は作り直しの対象になるため）。ご自身で見直してください。`,
+    };
+  }
+
   return {
     targetPrice: aiTarget,
     gapPct: round2(((aiTarget - currentPrice) / currentPrice) * 100),
@@ -96,6 +150,43 @@ export type CandidateSuggestionResult = {
   /** 実在検証で捨てられた銘柄。何が捨てられたか分かるようにする */
   rejected: Array<{ name: string; symbol: string; reason: string }>;
 };
+
+/**
+ * 提案を保存する。
+ *
+ * 失敗しても提案自体は返す。保存は「次回同じ銘柄を避ける」ための補助で、
+ * ここで例外を投げると生成に 40 秒かけた結果が画面に出なくなる。
+ */
+async function saveSuggestions(
+  userId: number,
+  candidates: VerifiedCandidate[]
+): Promise<void> {
+  for (const c of candidates) {
+    try {
+      await db.upsertCandidateSuggestion({
+        userId,
+        symbol: c.symbol,
+        name: c.verifiedName,
+        market: c.market,
+        track: c.track,
+        basedOn: c.basedOn ?? null,
+        gapKind: c.gapKind,
+        reason: c.reason,
+        concern: c.concern,
+        priority: c.priority,
+        priceAtSuggestion: c.currentPrice != null ? String(c.currentPrice) : null,
+        targetPrice: c.targetPrice != null ? String(c.targetPrice) : null,
+        targetBasis: c.targetBasis ?? null,
+        currency: c.currency,
+        sector: c.sector,
+        industry: c.industry,
+        model: CANDIDATE_MODEL,
+      });
+    } catch (e) {
+      console.warn("[candidate] 提案の保存に失敗:", c.symbol, e);
+    }
+  }
+}
 
 /**
  * ポートフォリオから偏り分析用のコンテキストを組み立てる。
@@ -166,9 +257,56 @@ async function buildSuggesterContext(userId: number): Promise<SuggesterContext> 
             Math.abs(b.leverage?.borrowedBase ?? 0),
         0
       );
-      borrowRatePct = weighted / totalBorrowed;
+    borrowRatePct = weighted / totalBorrowed;
     }
   }
+
+  /*
+   * 関心のある産業を集計する。保有とウォッチリストを同じ土台に載せ、
+   * ウォッチリスト側を強めに数える（買う意思の表明であるため）。
+   *
+   * セクター（11 種類）ではなく産業（数十種類）で見るのは、
+   * Technology 一括りでは半導体・製造装置・業務ソフトのどれに
+   * 関心があるのか分からず、提案の起点にならないため。
+   */
+  const interestInputs: InterestInput[] = [
+    ...portfolio.positions.map(p => ({
+      symbol: p.symbol,
+      name: p.name,
+      sector: p.sector ?? null,
+      industry: p.industry ?? null,
+      valueBase: p.marketValueBase ?? 0,
+      fromWatchlist: false,
+    })),
+    ...watchItems.map(w => ({
+      symbol: w.symbol,
+      name: w.name,
+      sector: w.sector ?? null,
+      industry: w.industry ?? null,
+      valueBase: null,
+      fromWatchlist: true,
+    })),
+  ];
+
+  /*
+   * 上位 12 件に絞る。全産業（40 件以上）を渡すと 1 銘柄の産業まで並び、
+   * どこに関心が集まっているのか AI が読み取れなくなる。
+   */
+  const interests = buildInterestClusters(interestInputs, total).slice(0, 12);
+
+  const sectorGaps = findSectorGaps(
+    ALL_SECTORS,
+    portfolio.sectors.map(s => ({ sector: s.key, count: s.count, pct: s.pct }))
+  );
+
+  /*
+   * 過去に提案した銘柄。同じ銘柄が毎回出ると提案の意味がない。
+   * ただし「絶対に出すな」ではなく「できるだけ避ける」とする。
+   * 状況が変わって再度挙げる価値が出ることもあるため。
+   */
+  const previouslySuggested = await db
+    .listSuggestedSymbols(userId)
+    .catch(() => [] as string[]);
 
   return {
     totalValueBase: total,
@@ -181,6 +319,22 @@ async function buildSuggesterContext(userId: number): Promise<SuggesterContext> 
     topHoldings,
     heldSymbols: Array.from(new Set(portfolio.positions.map(p => p.symbol))),
     watchedSymbols: watchItems.map(w => w.symbol),
+    interests: interests.map(i => ({
+      industry: i.industry,
+      sector: i.sector,
+      heldCount: i.heldCount,
+      watchCount: i.watchCount,
+      weightPct: i.weightPct,
+      symbols: i.symbols,
+    })),
+    watchDetails: watchItems.map(w => ({
+      symbol: w.symbol,
+      name: w.name,
+      industry: w.industry ?? null,
+      reason: w.watchReason ?? null,
+    })),
+    sectorGaps,
+    previouslySuggested,
   };
 }
 
@@ -259,7 +413,19 @@ export async function generateCandidateSuggestions(
 
   // 優先度順に並べる（HIGH が先）
   const order = { HIGH: 0, MEDIUM: 1, LOW: 2 };
-  verified.sort((a, b) => order[a.priority] - order[b.priority]);
+  /*
+   * 系統ごとにまとめてから優先度順に並べる。
+   * 混ぜて優先度だけで並べると「関心を広げる提案」と「穴を埋める提案」が
+   * 交互に出て、どちらの観点で見ればよいのか分からなくなる。
+   * EXPAND を先にするのは、関心のある産業の方が実際に検討される確率が高いため。
+   */
+  const trackOrder = { EXPAND: 0, FILL: 1 };
+  verified.sort(
+    (a, b) =>
+      trackOrder[a.track] - trackOrder[b.track] || order[a.priority] - order[b.priority]
+  );
+
+  await saveSuggestions(userId, verified);
 
   return { gaps: result.gaps, candidates: verified, overview: result.overview, rejected };
 }

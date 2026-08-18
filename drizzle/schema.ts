@@ -1036,3 +1036,76 @@ export const addProposals = mysqlTable(
 );
 export type AddProposal = typeof addProposals.$inferSelect;
 export type InsertAddProposal = typeof addProposals.$inferInsert;
+
+/**
+ * AI が挙げた新規候補銘柄の記録。
+ *
+ * これまで候補提案は生成するたびに画面に出るだけで残らなかった。
+ * そのため「前回も同じ銘柄が出ていた」「一度見送った銘柄がまた出た」
+ * ことに気付けず、毎回ゼロから検討し直す状態だった。
+ *
+ * 保存することで、次回の提案時に「過去に挙げた銘柄」として渡し、
+ * 同じものが繰り返し出るのを避けられる。
+ */
+export const candidateSuggestions = mysqlTable(
+  "candidateSuggestions",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    userId: int("userId").notNull(),
+    symbol: varchar("symbol", { length: 24 }).notNull(),
+    name: varchar("name", { length: 255 }).notNull(),
+    market: varchar("market", { length: 12 }).notNull(),
+    /**
+     * 提案の系統。
+     * EXPAND = 関心のある産業を起点に広げる提案、
+     * FILL = 持っていない・薄い業種の穴を埋める提案。
+     */
+    track: mysqlEnum("track", ["EXPAND", "FILL"]).notNull(),
+    /** EXPAND の場合の起点になった産業名。FILL では null */
+    basedOn: varchar("basedOn", { length: 120 }),
+    /** どの穴を埋めるか（SECTOR / REGION / YIELD / RISK） */
+    gapKind: varchar("gapKind", { length: 12 }).notNull(),
+    /** なぜこの銘柄か */
+    reason: text("reason").notNull(),
+    /** 懸念点。良い面だけ残すと後から判断を誤る */
+    concern: text("concern").notNull(),
+    priority: mysqlEnum("priority", ["HIGH", "MEDIUM", "LOW"]).notNull(),
+    /** 提案時点の株価（現地通貨） */
+    priceAtSuggestion: decimal("priceAtSuggestion", { precision: 20, scale: 4 }),
+    /** 買いたい値段（現地通貨） */
+    targetPrice: decimal("targetPrice", { precision: 20, scale: 4 }),
+    /** その値段の根拠 */
+    targetBasis: text("targetBasis"),
+    currency: varchar("currency", { length: 8 }),
+    sector: varchar("sector", { length: 120 }),
+    industry: varchar("industry", { length: 160 }),
+    /**
+     * この提案をウォッチリストに取り込んだか。
+     * 取り込んだものは既にウォッチリスト側で管理されるため、
+     * 「まだ検討していない提案」と区別する。
+     */
+    addedToWatchlist: boolean("addedToWatchlist").notNull().default(false),
+    /**
+     * 見送った提案。もう出さなくてよいという意思表示。
+     * 削除ではなく印にするのは、次回の提案で同じ銘柄を避けるために
+     * 記録が必要なため。
+     */
+    dismissed: boolean("dismissed").notNull().default(false),
+    model: varchar("model", { length: 64 }),
+    createdAt: timestamp("createdAt").defaultNow().notNull(),
+  },
+  table => ({
+    userIdx: index("candidate_suggestions_user_idx").on(table.userId, table.createdAt),
+    /**
+     * 同じ銘柄を何度も行として増やさない。
+     * 提案が繰り返されても 1 銘柄 1 行に保ち、内容を更新する。
+     * 履歴として複数行残すと「過去に挙げた銘柄」の一覧が重複で膨らむ。
+     */
+    userSymbolUnique: uniqueIndex("candidate_suggestions_user_symbol_unique").on(
+      table.userId,
+      table.symbol
+    ),
+  })
+);
+export type CandidateSuggestionRow = typeof candidateSuggestions.$inferSelect;
+export type InsertCandidateSuggestion = typeof candidateSuggestions.$inferInsert;
