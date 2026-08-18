@@ -3,6 +3,13 @@ import { z } from "zod";
 import * as db from "../db";
 import { protectedProcedure, router } from "../_core/trpc";
 import { checkExecutions } from "../services/outcomeService";
+import {
+  compareLatestMonths,
+  compareMonths,
+  deleteMonthlySnapshot,
+  listMonthlySnapshots,
+  saveMonthlySnapshot,
+} from "../services/monthlySnapshotService";
 import { storagePut } from "../storage";
 import { extractPositions, type ParsedPosition } from "../services/ocr";
 import {
@@ -310,10 +317,82 @@ export const importRouter = router({
         console.error("[applyRows] 提案の実行判定に失敗", e);
       }
 
-      return { created, updated, skipped, executionCheck } as const;
+      /*
+       * 取り込みが終わった時点の保有状態を「その月の記録」として残す。
+       *
+       * 保有テーブルは今の状態しか持たないため、翌月に取り込むと前月が
+       * 上書きされて消える。売った銘柄は行ごと消え、買い増した銘柄は株数が
+       * 置き換わるので、後から「資産が増えたのは値上がりか買い増しか」を
+       * 判断できない。取り込みと同時に記録するのは、別操作にすると
+       * 記録し忘れた月だけ推移が飛んで比較が成立しなくなるため。
+       *
+       * 記録の失敗で取り込みまで失敗扱いにはしない（取り込み自体は成功済み）。
+       */
+      let snapshot: Awaited<ReturnType<typeof saveMonthlySnapshot>> | null = null;
+      try {
+        snapshot = await saveMonthlySnapshot(userId, { source: "import" });
+      } catch (e) {
+        console.error("[applyRows] 月次記録の保存に失敗", e);
+      }
+
+      return { created, updated, skipped, executionCheck, snapshot } as const;
     }),
 
   history: protectedProcedure.query(async ({ ctx }) => db.listImportJobs(ctx.user.id, 12)),
+
+  /** 記録された月の一覧（新しい順） */
+  monthlyList: protectedProcedure.query(async ({ ctx }) =>
+    listMonthlySnapshots(ctx.user.id, 24)
+  ),
+
+  /**
+   * 2 つの月を比べる。月を指定しない場合は直近の 2 件を比べる。
+   * 比較相手は「1 つ前に記録がある月」を使う（記録を飛ばした月があっても成立させる）。
+   */
+  monthlyCompare: protectedProcedure
+    .input(
+      z
+        .object({
+          toPeriod: z.string().regex(/^\d{4}-\d{2}$/).optional(),
+          fromPeriod: z.string().regex(/^\d{4}-\d{2}$/).optional(),
+        })
+        .optional()
+    )
+    .query(async ({ ctx, input }) => {
+      if (input?.toPeriod) {
+        return compareMonths(ctx.user.id, input.toPeriod, input.fromPeriod);
+      }
+      return compareLatestMonths(ctx.user.id);
+    }),
+
+  /**
+   * 今の保有状態を指定月の記録として保存する。
+   *
+   * 取り込み時に自動で記録されるが、過去分をさかのぼって作る場合や
+   * 取り込みを伴わずに月末の状態を残したい場合に使う。
+   */
+  monthlySave: protectedProcedure
+    .input(
+      z.object({
+        periodYm: z.string().regex(/^\d{4}-\d{2}$/).optional(),
+        note: z.string().max(500).optional(),
+      })
+    )
+    .mutation(async ({ ctx, input }) =>
+      saveMonthlySnapshot(ctx.user.id, {
+        periodYm: input.periodYm,
+        source: "manual",
+        note: input.note,
+      })
+    ),
+
+  /** 誤って作った月の記録を削除する */
+  monthlyDelete: protectedProcedure
+    .input(z.object({ periodYm: z.string().regex(/^\d{4}-\d{2}$/) }))
+    .mutation(async ({ ctx, input }) => {
+      const removed = await deleteMonthlySnapshot(ctx.user.id, input.periodYm);
+      return { removed };
+    }),
 });
 
 export type ImportedRow = ParsedPosition & {

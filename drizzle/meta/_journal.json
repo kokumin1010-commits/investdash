@@ -169,6 +169,13 @@
       "when": 1787084316295,
       "tag": "0023_same_gamora",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "5",
+      "when": 1787095593896,
+      "tag": "0024_burly_owl",
+      "breakpoints": true
     }
   ]
 }

@@ -70,6 +70,13 @@ function extractInsertId(result: unknown, table: string): number {
 /** テスト用エクスポート */
 export const extractInsertIdForTest = extractInsertId;
 
+/**
+ * 他のサービスからも使えるように公開する。
+ * ドライバが配列を返すかヘッダを直接返すかは環境で変わるため、
+ * 各サービスで独自に取り出すと片方の形でしか動かない実装が混ざる。
+ */
+export const readInsertId = extractInsertId;
+
 /* ---------------------------------- users --------------------------------- */
 
 export async function upsertUser(user: InsertUser): Promise<void> {

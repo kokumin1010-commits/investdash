@@ -430,6 +430,108 @@ export const portfolioSnapshots = mysqlTable(
 export type PortfolioSnapshot = typeof portfolioSnapshots.$inferSelect;
 
 /**
+ * 月ごとの保有記録（明細付き）。
+ *
+ * portfolioSnapshots は株価更新のたびに総額だけを記録するため、
+ * 「どの銘柄を何株持っていたか」が残らない。月に 1 回スクショを取り込む
+ * 使い方では、その間に売却した銘柄が完全に消えてしまい、資産の推移も
+ * 「同じ銘柄を持ち続けて値上がりした」のか「新しく買い足した」のかを
+ * 区別できなくなる。月単位で明細を残してこれを解決する。
+ *
+ * 日次の総額（portfolioSnapshots）とは役割が違うので分けている。
+ * 日次を明細付きにすると 112 銘柄 × 日数で数万行になり、しかも
+ * 変わるのは株価だけなので保存する意味が薄い。
+ */
+export const monthlySnapshots = mysqlTable(
+  "monthlySnapshots",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    userId: int("userId").notNull(),
+    /**
+     * 対象月（例: "2026-07"）。日時ではなく月で持つのは、
+     * 「7 月分」を後から一意に特定して差分を取るため。
+     * 同じ月に 2 回記録した場合は上書きする。
+     */
+    periodYm: varchar("periodYm", { length: 7 }).notNull(),
+    /** 総評価額（JPY 換算） */
+    totalValueJpy: decimal("totalValueJpy", { precision: 20, scale: 2 }).notNull(),
+    /** 取得原価（JPY 換算） */
+    totalCostJpy: decimal("totalCostJpy", { precision: 20, scale: 2 }).notNull(),
+    /** 借入残高（JPY 換算・信用取引） */
+    borrowedJpy: decimal("borrowedJpy", { precision: 20, scale: 2 }),
+    /** 現金性資産（JPY 換算・貨幣市場基金など） */
+    cashJpy: decimal("cashJpy", { precision: 20, scale: 2 }),
+    /** 借入を差し引いた純資産（JPY 換算） */
+    netAssetsJpy: decimal("netAssetsJpy", { precision: 20, scale: 2 }),
+    /** 銘柄数（同一銘柄を複数口座で持つ場合は 1 として数える） */
+    symbolCount: int("symbolCount").notNull(),
+    /** レコード数（口座別の明細の数） */
+    recordCount: int("recordCount").notNull(),
+    /** 年間配当見込み（JPY 換算） */
+    annualDividendJpy: decimal("annualDividendJpy", { precision: 20, scale: 2 }),
+    /**
+     * 記録時点の為替レート。後から推移を見るとき、
+     * 円換算額の変化が株価によるものか為替によるものかを切り分けるために必要。
+     */
+    usdJpy: decimal("usdJpy", { precision: 12, scale: 4 }),
+    sgdJpy: decimal("sgdJpy", { precision: 12, scale: 4 }),
+    hkdJpy: decimal("hkdJpy", { precision: 12, scale: 4 }),
+    /** 記録の作られ方（取込時の自動記録か手動か） */
+    source: varchar("source", { length: 24 }).default("import").notNull(),
+    note: text("note"),
+    capturedAt: timestamp("capturedAt").defaultNow().notNull(),
+    updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+  },
+  table => ({
+    userPeriodIdx: uniqueIndex("monthly_snap_user_period_idx").on(
+      table.userId,
+      table.periodYm
+    ),
+  })
+);
+
+export type MonthlySnapshot = typeof monthlySnapshots.$inferSelect;
+
+/**
+ * 月ごとの保有明細。monthlySnapshots 1 件に対して保有レコード分。
+ *
+ * 口座別に持つのは、同じ銘柄を複数口座で持っている場合に
+ * 「どの口座で売ったか」まで追えるようにするため。
+ */
+export const monthlyHoldings = mysqlTable(
+  "monthlyHoldings",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    snapshotId: int("snapshotId").notNull(),
+    userId: int("userId").notNull(),
+    periodYm: varchar("periodYm", { length: 7 }).notNull(),
+    symbol: varchar("symbol", { length: 24 }).notNull(),
+    name: varchar("name", { length: 160 }).notNull(),
+    market: mysqlEnum("market", MARKET_ENUM).default("JP").notNull(),
+    currency: varchar("currency", { length: 8 }).default("JPY").notNull(),
+    broker: mysqlEnum("broker", BROKER_ENUM).default("other").notNull(),
+    quantity: decimal("quantity", { precision: 20, scale: 4 }).notNull(),
+    avgCost: decimal("avgCost", { precision: 20, scale: 4 }).notNull(),
+    /** 記録時点の現在値（現地通貨） */
+    price: decimal("price", { precision: 20, scale: 4 }),
+    /** 記録時点の評価額（JPY 換算） */
+    valueJpy: decimal("valueJpy", { precision: 20, scale: 2 }),
+    sector: varchar("sector", { length: 80 }),
+    createdAt: timestamp("createdAt").defaultNow().notNull(),
+  },
+  table => ({
+    snapIdx: index("monthly_hold_snap_idx").on(table.snapshotId),
+    userPeriodIdx: index("monthly_hold_user_period_idx").on(
+      table.userId,
+      table.periodYm
+    ),
+    symbolIdx: index("monthly_hold_symbol_idx").on(table.userId, table.symbol),
+  })
+);
+
+export type MonthlyHolding = typeof monthlyHoldings.$inferSelect;
+
+/**
  * ユーザー設定（為替レート・集中度しきい値など）。
  */
 export const userSettings = mysqlTable("userSettings", {
