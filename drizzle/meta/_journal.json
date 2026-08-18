@@ -162,6 +162,13 @@
       "when": 1787076579926,
       "tag": "0022_daily_sasquatch",
       "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "5",
+      "when": 1787084316295,
+      "tag": "0023_same_gamora",
+      "breakpoints": true
     }
   ]
 }

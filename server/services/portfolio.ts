@@ -15,6 +15,7 @@ import {
   fetchSgdJpyRate,
   fetchHkdJpyRate,
 } from "./marketData";
+import { computeLongTermReturns } from "../../shared/longTermReturn";
 import {
   annualIncome,
   dividendConcentration,
@@ -105,6 +106,18 @@ export type PositionView = {
     confidence: number | null;
     rationale: string;
     createdAt: Date;
+    /**
+     * 今この株を 1 株も持っていなかったら、この値段で買うか。
+     *
+     * シグナルとは別に出す。「今からは買わないが売る理由もない」という
+     * 判断は実際にあるため、ADD/HOLD に押し込むとその区別が消える。
+     * 過去に生成したシグナルには入っていないので null になりうる。
+     */
+    wouldBuyNow: "YES" | "NO" | "UNCLEAR" | null;
+    wouldBuyNowReason: string | null;
+    /** 株価の伸びと企業価値の伸びのどちらが速かったか */
+    priceVsValue: "PRICE_AHEAD" | "VALUE_AHEAD" | "IN_LINE" | "UNKNOWN" | null;
+    priceVsValueReason: string | null;
   } | null;
   newsCount: number;
   negativeNewsCount: number;
@@ -545,6 +558,10 @@ export async function buildPortfolio(userId: number): Promise<{
             confidence: sig.confidence,
             rationale: sig.rationale,
             createdAt: sig.createdAt,
+            wouldBuyNow: sig.wouldBuyNow,
+            wouldBuyNowReason: sig.wouldBuyNowReason,
+            priceVsValue: sig.priceVsValue,
+            priceVsValueReason: sig.priceVsValueReason,
           }
         : null,
       newsCount: newsStat.total,
@@ -1423,11 +1440,19 @@ export async function syncNewsForUser(
  * 1 銘柄のシグナルを生成して保存する。
  */
 export async function regenerateSignal(userId: number, holding: Holding) {
-  const [card, news, portfolio, history] = await Promise.all([
+  const [card, news, portfolio, history, monthly] = await Promise.all([
     db.getCard(userId, holding.symbol),
     db.listNews(userId, { symbol: holding.symbol, limit: 12 }),
     buildPortfolio(userId),
     fetchPriceHistory(holding.symbol, "6mo", "1d"),
+    /**
+     * 長期の伸びを見るための月足 5 年。
+     *
+     * 日足 6 か月とは別に取る。日足では 5 年分が約 1,250 本になり
+     * トークンを浪費するうえ、長期の伸びを見るのに日々の上下は不要。
+     * 取得に失敗しても空配列が返るだけでシグナル生成は続く。
+     */
+    fetchPriceHistory(holding.symbol, "5y", "1mo"),
   ]);
   /**
    * シグナルは銘柄単位。同一銘柄を複数の証券口座で保有している場合は
@@ -1470,6 +1495,16 @@ export async function regenerateSignal(userId: number, holding: Holding) {
     fiftyTwoWeekLow: view?.fiftyTwoWeekLow ?? null,
     return1m: returnOver(30),
     return3m: returnOver(90),
+    /**
+     * 長期の株価の伸び。取得単価に引きずられずに
+     * 「価格の伸びが企業価値の伸びを追い越したか」を判断させるための材料。
+     */
+    longTerm: monthly.length >= 2 ? computeLongTermReturns(monthly) : null,
+    /**
+     * 事業内容。財務諸表の数値は 4 市場すべてで取得できないため、
+     * 企業の型（設備集約型か、追加資本の少ない型か）はここから判定させる。
+     */
+    businessSummary: holding.businessSummary,
     accountBreakdown,
     card: card
       ? {
@@ -1500,6 +1535,16 @@ export async function regenerateSignal(userId: number, holding: Holding) {
     confidence: result.confidence,
     rationale: result.rationale,
     factors: result.factors,
+    /**
+     * 「今から買うか」と「価格と価値のどちらが速いか」を保存する。
+     * 判定のたびに上書きせず履歴として残るため、後から
+     * 「以前は今からでも買うと言っていたが今は買わないと言っている」
+     * という変化を追える。
+     */
+    wouldBuyNow: result.wouldBuyNow,
+    wouldBuyNowReason: result.wouldBuyNowReason,
+    priceVsValue: result.priceVsValue,
+    priceVsValueReason: result.priceVsValueReason,
     priceAtSignal: view?.currentPrice !== null && view?.currentPrice !== undefined ? String(view.currentPrice) : undefined,
     pnlPctAtSignal: view?.pnlPct !== null && view?.pnlPct !== undefined ? view.pnlPct.toFixed(4) : undefined,
     scope: "HOLDING",

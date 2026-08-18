@@ -2,6 +2,10 @@ import { invokeLLM } from "../_core/llm";
 import type { RawNews } from "./news";
 import { parseLlmJson } from "./jsonExtract";
 import { BROKER_LABELS, type Broker } from "../../shared/investing";
+import {
+  formatLongTermReturns,
+  type LongTermReturns,
+} from "../../shared/longTermReturn";
 
 /**
  * ニュースのセンチメント判定と意思決定シグナル生成。
@@ -145,6 +149,24 @@ export type SignalContext = {
   return1m: number | null;
   return3m: number | null;
   /**
+   * 長期の株価騰落率（1 年・3 年・5 年・年率換算）。
+   *
+   * 【なぜ必要か】
+   * 1 か月・3 か月だけでは「一時的に下がった」ことしか分からず、
+   * 「価格の伸びが企業の中身の伸びを追い越していないか」を判断できない。
+   * 取得単価がいくらかは判断に使わない。$20 で買ったか $80 で買ったかは、
+   * 今この値段で買うかどうかとは無関係である。
+   */
+  longTerm?: LongTermReturns | null;
+  /**
+   * 企業の事業内容（Yahoo Finance の longBusinessSummary）。
+   *
+   * 財務諸表の数値は 4 市場すべてで取得できないことが実測で判明したため、
+   * 「設備に大きな資本を必要とするか」「ブランドや規約収入で稼ぐか」という
+   * 企業の型は事業内容から判定させる。全市場で取得できている。
+   */
+  businessSummary?: string | null;
+  /**
    * 同一銘柄を複数の証券口座で保有している場合の内訳。
    * 判定自体は合計ポジションに対して 1 つ出すが、
    * 「片方の口座は含み損」という状況は判断材料になるため渡す。
@@ -180,6 +202,24 @@ export type SignalResult = {
   action: "ADD" | "HOLD" | "WATCH" | "REDUCE" | "EXIT";
   confidence: number;
   rationale: string;
+  /**
+   * 今この株を 1 株も持っていなかったとして、この値段で買うか。
+   *
+   * ADD と別に持つ理由: 「今からは買わないが売る理由もない」という
+   * 判断は実際に存在する（大きく育った株を持ち続ける場合）。
+   * ADD/HOLD に押し込むとその区別が消える。
+   */
+  wouldBuyNow?: "YES" | "NO" | "UNCLEAR";
+  /** 上の判断の理由を 1 文で */
+  wouldBuyNowReason?: string;
+  /**
+   * 株価の伸びと企業価値の伸びのどちらが速かったか。
+   * PRICE_AHEAD = 価格が先に行った / VALUE_AHEAD = 中身の方が伸びた /
+   * IN_LINE = ほぼ同じ / UNKNOWN = 判断できない
+   */
+  priceVsValue?: "PRICE_AHEAD" | "VALUE_AHEAD" | "IN_LINE" | "UNKNOWN";
+  /** 上の判断の理由を 1〜2 文で */
+  priceVsValueReason?: string;
   factors: {
     newsSentiment: string;
     priceAction: string;
@@ -200,10 +240,36 @@ const SIGNAL_SYSTEM = `あなたは長期投資を前提とする個人投資家
 - EXIT: 当初の投資ロジックが実質的に崩れた、またはエグジット条件に該当した
 
 判定の原則:
-1. **含み損の大きさそれ自体を売却理由にしてはならない。** 逆に含み益の大きさを
-   買い増し理由にしてもならない。判断の基準は常に「当初の投資ロジックが今も有効か」。
-2. 投資カードにエグジット条件が記録されている場合、それに該当するかを最優先で確認する。
-3. **投資カードが未記入でも、WATCH に固定してはならない。** その場合は入手可能な
+1. **取得単価は判断に使わない。** 含み損の大きさそれ自体を売却理由にしてはならず、
+   含み益の大きさを買い増し理由にしてもならない。「5 倍になったから売る」
+   「原価を回収したから売る」はいずれも誤りである。$20 で買ったか $80 で
+   買ったかは、今この値段で買うかどうかとは無関係である。
+2. **必ず次を自問する: 「今この株を 1 株も持っておらず現金を持っていたら、
+   この値段で買うか」。** これに YES と答えられないなら、その保有は
+   取得単価に引きずられている可能性がある。答えを wouldBuyNow に入れる。
+   - YES: 今からでも買う水準
+   - NO: 今から買う水準ではない（ただし売るべきとは限らない）
+   - UNCLEAR: 判断材料が足りない
+3. **株価の伸びと企業の中身の伸びを比べる。** 売却を検討すべきなのは
+   「値上がりしたから」ではなく「価格の上昇速度が企業価値の上昇速度を
+   超えたから」である。1 年・3 年・5 年の株価騰落率と、事業内容から
+   推測できる企業価値の伸びを比較し、priceVsValue に入れる。
+   - PRICE_AHEAD: 価格が中身より速く伸びた（REDUCE を検討する材料）
+   - VALUE_AHEAD: 中身の方が伸びた（ADD を検討する材料）
+   - IN_LINE: ほぼ同じ速さ（HOLD の材料）
+   - UNKNOWN: 判断できない
+   **重要: 財務諸表の数値は与えられていない。営業利益率や ROE を具体的な
+   数字で断定してはならない。** 事業内容と一般に知られた企業の性質から
+   定性的に述べ、確信が持てない場合は UNKNOWN とする。
+4. **企業の型を見る。** 事業内容から次を判断する。
+   - 設備や工場に絶えず大きな資本を投じ続けないと競争力を保てない型か
+   - ブランド・規約収入・切り替えの手間などで、追加資本をあまり必要とせず
+     利益を伸ばせる型か
+   前者は株価が伸びても中身が追いつかないことが起きやすい。
+   後者は長く持つほど有利になりやすい。
+5. 判断の基準は常に「当初の投資ロジックが今も有効か」。
+6. 投資カードにエグジット条件が記録されている場合、それに該当するかを最優先で確認する。
+7. **投資カードが未記入でも、WATCH に固定してはならない。** その場合は入手可能な
    客観データ（ニュースの内容と影響度、52週レンジ内の位置、直近騰落率、構成比）から
    最も妥当なシグナルを判定する。判断の指針:
    - 影響度 70 以上の好材料が複数あり、ロジックを損なう悪材料がない → ADD または HOLD
@@ -214,17 +280,21 @@ const SIGNAL_SYSTEM = `あなたは長期投資を前提とする個人投資家
    投資カードが未記入であることは confidence を下げる要因として扱い、rationale の
    最後に「投資カードを記入すると判定の精度が上がる」と 1 文で添える。
    ただしこれを判定そのものの理由にしてはならない。
-4. ニュースは impactScore が高いものを重視する。低スコアのニュースを過度に重視しない。
-5. 構成比が 25% を超える銘柄は、ロジックが健全でも集中リスクに言及する。
-6. データが欠損している項目については推測せず、「データ未取得」と明記する。
-7. confidence は判断材料の充足度を表す。目安:
+8. ニュースは impactScore が高いものを重視する。低スコアのニュースを過度に重視しない。
+9. 構成比が 25% を超える銘柄は、ロジックが健全でも集中リスクに言及する。
+10. データが欠損している項目については推測せず、「データ未取得」と明記する。
+11. confidence は判断材料の充足度を表す。目安:
    - 投資カード記入済み + 影響度の高いニュースあり → 70〜90
    - 投資カード未記入だが影響度の高いニュースあり → 45〜65
    - 投資カード未記入・ニュースも乏しい → 40 未満
 
-rationale は日本語 3〜5 文。結論の理由と、次に確認すべき点を含める。
+rationale は日本語 3〜5 文。**冒頭で「今この株を持っていなかったらこの値段で
+買うか」への答えを述べ**、その後に理由と次に確認すべき点を書く。
 断定的な売買推奨表現（「買うべき」「売却すべき」）は避け、「〜を検討する材料がある」
 「〜の確認を推奨する」という表現を用いる。
+
+wouldBuyNowReason は 1 文。priceVsValueReason は 1〜2 文。
+いずれも取得単価に言及せず、今の値段と企業の中身だけで述べる。
 
 factors の各項目は 1 文の日本語で簡潔に記述する。`;
 
@@ -239,6 +309,13 @@ const SIGNAL_SCHEMA = {
         action: { type: "string", enum: ["ADD", "HOLD", "WATCH", "REDUCE", "EXIT"] },
         confidence: { type: "number" },
         rationale: { type: "string" },
+        wouldBuyNow: { type: "string", enum: ["YES", "NO", "UNCLEAR"] },
+        wouldBuyNowReason: { type: "string" },
+        priceVsValue: {
+          type: "string",
+          enum: ["PRICE_AHEAD", "VALUE_AHEAD", "IN_LINE", "UNKNOWN"],
+        },
+        priceVsValueReason: { type: "string" },
         factors: {
           type: "object",
           properties: {
@@ -258,7 +335,16 @@ const SIGNAL_SCHEMA = {
           additionalProperties: false,
         },
       },
-      required: ["action", "confidence", "rationale", "factors"],
+      required: [
+        "action",
+        "confidence",
+        "rationale",
+        "wouldBuyNow",
+        "wouldBuyNowReason",
+        "priceVsValue",
+        "priceVsValueReason",
+        "factors",
+      ],
       additionalProperties: false,
     },
   },
@@ -322,6 +408,23 @@ export function buildSignalPrompt(ctx: SignalContext): string {
           .join("\n")}\n`
       : "";
 
+  /**
+   * 長期の株価騰落。取得できなかった期間は「データ未取得」と明記される。
+   * 省くと AI が「5 年の実績は良好」のように推測で埋める。
+   */
+  const longTermBlock = ctx.longTerm
+    ? formatLongTermReturns(ctx.longTerm)
+    : "長期の株価データは取得できていません。長期の伸びを判断材料にしないこと。";
+
+  /**
+   * 事業内容は英語の長文で来る。全文を渡すとトークンを食うため 1,200 字で切る。
+   * 企業の型（設備集約型か、追加資本の少ない型か）を判断するには
+   * 冒頭の事業説明で足りる。
+   */
+  const businessBlock = ctx.businessSummary
+    ? ctx.businessSummary.slice(0, 1200)
+    : "事業内容は取得できていません。企業の型は判断材料にしないこと。";
+
   return `## 銘柄
 ${ctx.name}（${ctx.symbol}）／セクター: ${ctx.sector ?? "未取得"}／業種: ${ctx.industry ?? "未取得"}
 
@@ -338,6 +441,12 @@ ${breakdownBlock}
 - 直近1か月騰落率: ${ctx.return1m === null ? "データ未取得" : `${ctx.return1m.toFixed(2)}%`}
 - 直近3か月騰落率: ${ctx.return3m === null ? "データ未取得" : `${ctx.return3m.toFixed(2)}%`}
 - フェアバリュー乖離: ${fvGap}
+
+## 長期の株価の伸び（価格と企業価値の速さを比べるための材料）
+${longTermBlock}
+
+## 事業内容（企業の型を判断する材料。財務諸表の数値は与えられていない）
+${businessBlock}
 
 ## 投資カードの記録
 ${cardLines}

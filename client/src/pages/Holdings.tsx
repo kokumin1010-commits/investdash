@@ -5,6 +5,11 @@ import { CurrencyToggle } from "@/components/investing/CurrencyToggle";
 import { MoneyText, PctText, PnlText } from "@/components/investing/Figures";
 import { AddAmountLine } from "@/components/investing/AddAmountLine";
 import { SignalBadge, SignalPlaceholder } from "@/components/investing/SignalBadge";
+import {
+  BuffettLensBlock,
+  WouldBuyNowBadge,
+  WouldBuyNowMark,
+} from "@/components/investing/WouldBuyNowBadge";
 import { SignalGuide } from "@/components/investing/SignalGuide";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -590,6 +595,12 @@ export default function Holdings() {
                     </Link>
                     <div className="flex shrink-0 flex-col items-end gap-1">
                       {p.signal ? <SignalBadge action={p.signal.action} /> : <SignalPlaceholder />}
+                      {/*
+                        「今から買うか」はシグナルとは別の問い。
+                        大きく育った株は「今からは買わないが売る理由もない」ことがあり、
+                        ADD/HOLD だけでは区別できないため併記する。
+                      */}
+                      <WouldBuyNowBadge value={p.signal?.wouldBuyNow ?? null} />
                       {/* 複数口座にまたがる場合はすべてのバッジを並べる */}
                       <div className="flex flex-wrap justify-end gap-1">
                         {p.brokers.map(b => (
@@ -1018,6 +1029,12 @@ export default function Holdings() {
                           </TooltipTrigger>
                           <TooltipContent className="max-w-sm">
                             <p className="text-xs leading-relaxed">{p.signal.rationale}</p>
+                            <BuffettLensBlock
+                              wouldBuyNow={p.signal.wouldBuyNow}
+                              wouldBuyNowReason={p.signal.wouldBuyNowReason}
+                              priceVsValue={p.signal.priceVsValue}
+                              priceVsValueReason={p.signal.priceVsValueReason}
+                            />
                             <p className="mt-1.5 text-[10px] text-muted-foreground">
                               確信度 {p.signal.confidence ?? "—"} ・{" "}
                               {new Date(p.signal.createdAt).toLocaleString("ja-JP")}
@@ -1027,6 +1044,13 @@ export default function Holdings() {
                       ) : (
                         <SignalPlaceholder />
                       )}
+                      {/*
+                        「今からは買わない」は 8 文字あり、そのまま並べると
+                        列が広がって横スクロールが出る（横スクロールは使えない）。
+                        表では 2 文字の短い印にし、理由はツールチップと
+                        カード表示・銘柄詳細で読む形にする。
+                      */}
+                      <WouldBuyNowMark value={p.signal?.wouldBuyNow ?? null} />
                       {/*
                         表では縦幅を増やせないので金額と株数だけを 1 行で添える。
                         構成比の変化はカード表示側で出す。

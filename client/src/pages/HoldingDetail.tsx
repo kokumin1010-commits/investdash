@@ -3,6 +3,10 @@ import { BrokerBadge } from "@/components/investing/BrokerBadge";
 import { MoneyText, PctText, PnlText } from "@/components/investing/Figures";
 import { CurrencyToggle } from "@/components/investing/CurrencyToggle";
 import { SignalBadge, SignalPlaceholder } from "@/components/investing/SignalBadge";
+import {
+  BuffettLensBlock,
+  WouldBuyNowBadge,
+} from "@/components/investing/WouldBuyNowBadge";
 import { AddAmountLine } from "@/components/investing/AddAmountLine";
 import { PriceBandPlanCard } from "@/components/investing/PriceBandPlanCard";
 import { SymbolConsultList } from "@/components/investing/SymbolConsultList";
@@ -197,6 +201,7 @@ export default function HoldingDetail({ params }: { params: { id: string } }) {
               <Badge variant="outline">{marketLabel(holding.market)}</Badge>
               <BrokerBadge broker={holding.broker} />
               {view?.signal ? <SignalBadge action={view.signal.action} showLabel /> : <SignalPlaceholder />}
+              <WouldBuyNowBadge value={view?.signal?.wouldBuyNow ?? null} />
             </div>
             <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
               {holding.sector ? <span>{sectorJa(holding.sector)}</span> : null}
@@ -348,6 +353,18 @@ export default function HoldingDetail({ params }: { params: { id: string } }) {
               <SignalBadge action={view.signal.action} showLabel className="mt-0.5 shrink-0" />
               <p className="text-sm leading-relaxed">{view.signal.rationale}</p>
             </div>
+
+            {/*
+              「今この株を持っていなかったら買うか」と
+              「株価と中身のどちらが速く伸びたか」を出す。
+              取得単価に引きずられた保有かどうかを見分けるための材料。
+            */}
+            <BuffettLensBlock
+              wouldBuyNow={view.signal.wouldBuyNow}
+              wouldBuyNowReason={view.signal.wouldBuyNowReason}
+              priceVsValue={view.signal.priceVsValue}
+              priceVsValueReason={view.signal.priceVsValueReason}
+            />
 
             {/*
               ADD なら「いくら買い増すか」を続けて出す。

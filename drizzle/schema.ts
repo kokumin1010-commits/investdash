@@ -294,6 +294,29 @@ export const signals = mysqlTable(
     rationale: text("rationale").notNull(),
     /** 判定に使った各要素のスコアと内訳 */
     factors: json("factors"),
+    /**
+     * 今この株を 1 株も持っていなかったとして、この値段で買うか。
+     *
+     * action と別に持つ理由: 「今からは買わないが売る理由もない」という
+     * 判断は実際に存在する（大きく育った株を持ち続ける場合）。
+     * ADD/HOLD に押し込むとその区別が消える。
+     */
+    wouldBuyNow: mysqlEnum("wouldBuyNow", ["YES", "NO", "UNCLEAR"]),
+    /** 上の判断の理由 */
+    wouldBuyNowReason: text("wouldBuyNowReason"),
+    /**
+     * 株価の伸びと企業価値の伸びのどちらが速かったか。
+     * 売却を検討すべきは「値上がりしたから」ではなく
+     * 「価格の上昇速度が企業価値の上昇速度を超えたから」という判断のため。
+     */
+    priceVsValue: mysqlEnum("priceVsValue", [
+      "PRICE_AHEAD",
+      "VALUE_AHEAD",
+      "IN_LINE",
+      "UNKNOWN",
+    ]),
+    /** 上の判断の理由 */
+    priceVsValueReason: text("priceVsValueReason"),
     /** 生成時点の価格・損益率スナップショット */
     priceAtSignal: decimal("priceAtSignal", { precision: 20, scale: 4 }),
     pnlPctAtSignal: decimal("pnlPctAtSignal", { precision: 10, scale: 4 }),
