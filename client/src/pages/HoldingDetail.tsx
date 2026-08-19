@@ -3,6 +3,7 @@ import { BrokerBadge } from "@/components/investing/BrokerBadge";
 import { MoneyText, PctText, PnlText } from "@/components/investing/Figures";
 import { CurrencyToggle } from "@/components/investing/CurrencyToggle";
 import { SignalBadge, SignalPlaceholder } from "@/components/investing/SignalBadge";
+import { elapsedLabel } from "@/components/investing/SignalBody";
 import {
   BuffettLensBlock,
   WouldBuyNowBadge,
@@ -35,9 +36,12 @@ import {
   marketLabel,
   sectorJa,
   sentimentLabel,
+  type SignalAction,
 } from "@shared/investing";
+import { buildSignalHistory } from "@shared/signalHistory";
 import {
   ArrowLeft,
+  ArrowRight,
   Brain,
   ExternalLink,
   Globe,
@@ -171,6 +175,16 @@ export default function HoldingDetail({ params }: { params: { id: string } }) {
   const { holding, view, card, news, signalHistory, chart, addPlan, groupWeightPct } =
     detail.data;
   const currency = holding.currency;
+
+  /*
+   * 履歴に「前回からの変化」と「当時株価から今までの値動き」を付ける。
+   *
+   * 同じ判定が同じ分に 2 件入っているデータが実際にある（株価更新と
+   * ニュース取得が近い時刻に走ると両方が分析を呼ぶため）。重複を畳んでから
+   * 前後関係を付けないと「ADD の前は ADD」となり、判定が変わった瞬間を
+   * 取り違える。
+   */
+  const historyRows = buildSignalHistory(signalHistory, view?.currentPrice ?? null);
 
   const chartData = chart.map(p => ({
     date: new Date(p.t).toLocaleDateString("ja-JP", { year: "2-digit", month: "numeric", day: "numeric" }),
@@ -439,7 +453,11 @@ export default function HoldingDetail({ params }: { params: { id: string } }) {
           <TabsTrigger value="card">投資カード</TabsTrigger>
           <TabsTrigger value="chart">価格チャート</TabsTrigger>
           <TabsTrigger value="news">ニュース ({news.length})</TabsTrigger>
-          <TabsTrigger value="history">シグナル履歴 ({signalHistory.length})</TabsTrigger>
+          {/*
+            件数は重複を畳んだ後の数にする。タブに 13 と出して中身が 9 行だと
+            「4 件抜けている」と受け取られる。
+          */}
+          <TabsTrigger value="history">分析の履歴 ({historyRows.length})</TabsTrigger>
           <TabsTrigger value="consult">相談 ({consults.data?.length ?? 0})</TabsTrigger>
         </TabsList>
 
@@ -568,33 +586,87 @@ export default function HoldingDetail({ params }: { params: { id: string } }) {
         <TabsContent value="history" className="mt-4">
           <Card>
             <CardHeader className="pb-3">
-              <CardTitle className="text-base">シグナル履歴</CardTitle>
+              <CardTitle className="text-base">分析の履歴</CardTitle>
               <CardDescription className="text-xs">
-                判断の変遷を記録しています。過去の自分の判断を振り返れます。
+                分析するたびに日付つきで残ります。判定が変わった記録は枠を強調しており、
+                その時の株価から今までどう動いたかを併記しています。
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-3">
               {signalHistory.length === 0 ? (
                 <p className="py-8 text-center text-sm text-muted-foreground">履歴はまだありません</p>
               ) : (
-                signalHistory.map(s => (
-                  <div key={s.id} className="rounded-lg border border-border/70 p-3">
+                historyRows.map(s => (
+                  <div
+                    key={s.id}
+                    /*
+                      判定が変わった記録だけ枠を強調する。
+                      13 件が同じ見た目で並ぶと「いつ考えが変わったか」が埋もれる。
+                    */
+                    className={`rounded-lg border p-3 ${
+                      s.changed ? "border-primary/40 bg-primary/[0.03]" : "border-border/70"
+                    }`}
+                  >
                     <div className="flex flex-wrap items-center justify-between gap-2">
-                      <div className="flex items-center gap-2">
-                        <SignalBadge action={s.action} />
+                      <div className="flex flex-wrap items-center gap-2">
+                        {/*
+                          変化した記録では「前の判定 → 今の判定」を並べる。
+                          結果だけでは何から何に変わったかが分からない。
+                        */}
+                        {s.changed && s.prevAction ? (
+                          <>
+                            <SignalBadge action={s.prevAction as SignalAction} />
+                            <ArrowRight className="h-3 w-3 text-muted-foreground" />
+                          </>
+                        ) : null}
+                        <SignalBadge action={s.action as SignalAction} />
                         <span className="text-xs text-muted-foreground">
                           確信度 {s.confidence ?? "—"}
                         </span>
                       </div>
-                      <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                        {s.priceAtSignal ? (
-                          <span className="tabular">
-                            当時株価 {formatMoney(Number(s.priceAtSignal), currency)}
-                          </span>
-                        ) : null}
-                        <span>{new Date(s.createdAt).toLocaleString("ja-JP")}</span>
+                      <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                        <span>
+                          {new Date(s.createdAt).toLocaleString("ja-JP", {
+                            month: "numeric",
+                            day: "numeric",
+                            hour: "2-digit",
+                            minute: "2-digit",
+                          })}
+                        </span>
+                        <span>·</span>
+                        <span>{elapsedLabel(s.createdAt)}</span>
                       </div>
                     </div>
+                    {/*
+                      当時の株価と、そこから今までの値動きを並べる。
+                      「HOLD と判断した後に 4% 下がった」という事実が分かると、
+                      その判断が結果としてどうだったかを自分で評価できる。
+                    */}
+                    {s.priceAtSignal ? (
+                      <p className="mt-1.5 flex flex-wrap items-center gap-1.5 text-[11px] text-muted-foreground">
+                        <span className="tabular">
+                          当時 {formatMoney(Number(s.priceAtSignal), currency)}
+                        </span>
+                        {s.priceChangePct !== null ? (
+                          <>
+                            <span>→</span>
+                            <span className="tabular">
+                              今 {view?.currentPrice !== null && view?.currentPrice !== undefined
+                                ? formatMoney(view.currentPrice, currency)
+                                : "—"}
+                            </span>
+                            <span
+                              className={`tabular font-medium ${
+                                s.priceChangePct >= 0 ? "text-gain" : "text-loss"
+                              }`}
+                            >
+                              {s.priceChangePct >= 0 ? "+" : ""}
+                              {s.priceChangePct.toFixed(1)}%
+                            </span>
+                          </>
+                        ) : null}
+                      </p>
+                    ) : null}
                     <p className="mt-2 text-xs leading-relaxed text-muted-foreground">{s.rationale}</p>
                   </div>
                 ))

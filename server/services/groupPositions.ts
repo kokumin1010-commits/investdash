@@ -2,6 +2,7 @@ import type { PositionView } from "./portfolio";
 import { calcPnlPct } from "../../shared/pnlLabel";
 import { computeAddSizing } from "../../shared/addSizing";
 import { actualAmount, sharesForAmount } from "../../shared/addShares";
+import { buildAddReason, type AddReason } from "../../shared/addReason";
 
 /**
  * 同一銘柄を複数の証券口座で保有している場合の合算ビュー。
@@ -89,6 +90,14 @@ export type GroupedAddPlan = {
   atCap: boolean;
   /** 上限までに追加できる金額（円） */
   roomToCapBase: number;
+  /**
+   * 「なぜこの銘柄を買い増すのか」の根拠。
+   *
+   * 金額だけでは、なぜその銘柄に今その額を入れてよいのかが分からない。
+   * 判定の本文（AI の見解）とは別に、構成比・配当利回りと金利の比較・
+   * 値位置といった手元の数字から言えることを並べる。
+   */
+  reason: AddReason;
 };
 
 export type GroupedDividend = {
@@ -148,7 +157,17 @@ function sumMonthly(lists: (number[] | null)[]): number[] | null {
 export function groupPositionsBySymbol(
   positions: PositionView[],
   totalValueBase: number,
-  addSizingInput?: { interestAssetsBase: number; cashBase: number }
+  addSizingInput?: {
+    interestAssetsBase: number;
+    cashBase: number;
+    /**
+     * 借入の実効金利と現金性資産の利回り（%）。
+     * 「配当で金利を賄えるか」を理由に書くために使う。
+     * 未算出の場合は利回りの比較に触れない。
+     */
+    borrowRatePct?: number | null;
+    cashYieldPct?: number | null;
+  }
 ): GroupedPosition[] {
   const bySymbol = new Map<string, PositionView[]>();
   for (const p of positions) {
@@ -289,7 +308,12 @@ export function groupPositionsBySymbol(
 function buildAddPlan(
   g: GroupedPosition,
   totalValueBase: number,
-  input: { interestAssetsBase: number; cashBase: number }
+  input: {
+    interestAssetsBase: number;
+    cashBase: number;
+    borrowRatePct?: number | null;
+    cashYieldPct?: number | null;
+  }
 ): GroupedAddPlan | null {
   const sizing = computeAddSizing(
     totalValueBase,
@@ -328,6 +352,18 @@ function buildAddPlan(
     amountLocal !== null && rate !== null ? amountLocal * rate : sizing.suggestedBase;
 
   /*
+   * 52 週レンジ内の位置。取得単価との比較ではなく市場価格の中での位置を使う。
+   * 取得単価は過去の自分の判断であって、今の価値とは関係がない。
+   */
+  const rangePositionPct =
+    g.currentPrice !== null &&
+    g.fiftyTwoWeekHigh !== null &&
+    g.fiftyTwoWeekLow !== null &&
+    g.fiftyTwoWeekHigh > g.fiftyTwoWeekLow
+      ? ((g.currentPrice - g.fiftyTwoWeekLow) / (g.fiftyTwoWeekHigh - g.fiftyTwoWeekLow)) * 100
+      : null;
+
+  /*
    * 上限に達している銘柄は金額 0・株数 0 で返す。
    * 金額を 0 にしながら株数を「不明（null）」にすると、
    * 画面側で「株数が取得できていない」のか「買えない」のか区別できない。
@@ -340,18 +376,39 @@ function buildAddPlan(
       afterSharePct: g.weightPct,
       atCap: true,
       roomToCapBase: sizing.roomToCapBase,
+      /*
+       * 上限に達している場合は理由を作らない。
+       * 「買わない」と言いながら買う根拠を並べると矛盾する。
+       */
+      reason: { points: [], cautions: [] },
     };
   }
+
+  const afterSharePct =
+    totalValueBase > 0
+      ? (((g.marketValueBase ?? 0) + amountBase) / (totalValueBase + amountBase)) * 100
+      : null;
 
   return {
     amountBase,
     amountLocal,
     shares,
-    afterSharePct:
-      totalValueBase > 0
-        ? (((g.marketValueBase ?? 0) + amountBase) / (totalValueBase + amountBase)) * 100
-        : null,
+    afterSharePct,
     atCap: sizing.atCap,
     roomToCapBase: sizing.roomToCapBase,
+    reason: buildAddReason({
+      action: g.signal?.action ?? null,
+      wouldBuyNow: g.signal?.wouldBuyNow ?? null,
+      currentSharePct: g.weightPct,
+      afterSharePct,
+      dividendYieldPct: g.dividend?.yieldPct ?? null,
+      borrowRatePct: input.borrowRatePct ?? null,
+      cashYieldPct: input.cashYieldPct ?? null,
+      rangePositionPct,
+      vsAvgCostPct:
+        g.currentPrice !== null && g.avgCost > 0
+          ? ((g.currentPrice - g.avgCost) / g.avgCost) * 100
+          : null,
+    }),
   };
 }

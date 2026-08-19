@@ -36,6 +36,7 @@ import {
   type InterestAssetView,
 } from "./interestAssets";
 import { groupPositionsBySymbol, type GroupedPosition } from "./groupPositions";
+import { buildAddReason } from "../../shared/addReason";
 import { fillMissingSectors } from "./sectorFill";
 import { buildMarketSlices, type MarketSlice } from "./marketSlices";
 import { computePeriodChange, type PeriodChange } from "./periodChange";
@@ -609,6 +610,13 @@ export async function buildPortfolio(userId: number): Promise<{
   const groups = groupPositionsBySymbol(positions, totalValueBase, {
     interestAssetsBase: interestSummary.totalBase,
     cashBase: cashBalance,
+    /*
+     * 現金性資産の利回り（実測 3.46%）。
+     * 「配当利回りがこれを上回るなら現金を株に替えて収支が改善する」という
+     * 判断に使う。借入金利はこの時点で未算出（口座別の集計が後段にあるため）
+     * なので、後で補う。
+     */
+    cashYieldPct: interestSummary.weightedRatePct,
   });
 
   /* ---------------- 信用取引（借入）の反映 ---------------- */
@@ -708,6 +716,53 @@ export async function buildPortfolio(userId: number): Promise<{
       interest: interestView,
       carry: carryView,
     });
+  }
+
+  /*
+   * 借入の実効金利（借入額で加重平均）を出して買い増し理由に反映する。
+   *
+   * groupPositionsBySymbol を呼ぶ時点では口座別の借入集計が済んでいないため、
+   * ここで算出して addPlan の理由だけを作り直す。金額そのものは
+   * 借入金利に依存しないので再計算しない（同じ値になる計算を 2 回走らせない）。
+   */
+  {
+    let weighted = 0;
+    let borrowedTotal = 0;
+    for (const lev of Array.from(leverageByBroker.values())) {
+      const rate = lev.interest?.effectiveRatePct;
+      if (rate === undefined || rate === null || lev.borrowedBase <= 0) continue;
+      weighted += rate * lev.borrowedBase;
+      borrowedTotal += lev.borrowedBase;
+    }
+    const borrowRatePct = borrowedTotal > 0 ? weighted / borrowedTotal : null;
+    if (borrowRatePct !== null) {
+      for (const g of groups) {
+        if (!g.addPlan || g.addPlan.atCap) continue;
+        const rangePositionPct =
+          g.currentPrice !== null &&
+          g.fiftyTwoWeekHigh !== null &&
+          g.fiftyTwoWeekLow !== null &&
+          g.fiftyTwoWeekHigh > g.fiftyTwoWeekLow
+            ? ((g.currentPrice - g.fiftyTwoWeekLow) /
+                (g.fiftyTwoWeekHigh - g.fiftyTwoWeekLow)) *
+              100
+            : null;
+        g.addPlan.reason = buildAddReason({
+          action: g.signal?.action ?? null,
+          wouldBuyNow: g.signal?.wouldBuyNow ?? null,
+          currentSharePct: g.weightPct,
+          afterSharePct: g.addPlan.afterSharePct,
+          dividendYieldPct: g.dividend?.yieldPct ?? null,
+          borrowRatePct,
+          cashYieldPct: interestSummary.weightedRatePct,
+          rangePositionPct,
+          vsAvgCostPct:
+            g.currentPrice !== null && g.avgCost > 0
+              ? ((g.currentPrice - g.avgCost) / g.avgCost) * 100
+              : null,
+        });
+      }
+    }
   }
 
   const summary: PortfolioSummary = {

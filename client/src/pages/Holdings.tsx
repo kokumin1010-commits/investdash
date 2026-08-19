@@ -5,6 +5,7 @@ import { CurrencyToggle } from "@/components/investing/CurrencyToggle";
 import { MoneyText, PctText, PnlText } from "@/components/investing/Figures";
 import { AddAmountLine } from "@/components/investing/AddAmountLine";
 import { SignalBadge, SignalPlaceholder } from "@/components/investing/SignalBadge";
+import { SignalBody } from "@/components/investing/SignalBody";
 import {
   BuffettLensBlock,
   WouldBuyNowBadge,
@@ -741,6 +742,19 @@ export default function Holdings() {
                       currentSharePct={p.weightPct}
                     />
                   ) : null}
+
+                  {/*
+                    判定の本文をカードに常設する。
+
+                    これまで本文はトースト（120 字で切られ数秒で消える）と
+                    表のツールチップ（スマホでは長押しが要る）にしか出ておらず、
+                    後から読み返せなかった。ADD というバッジだけでは
+                    「なぜ今買うのか」が分からず判断材料にならない。
+
+                    いつの判定かを併記するのは、月 1 回しか開かない使い方では
+                    古い判定を今の判断に使ってしまう恐れがあるため。
+                  */}
+                  {p.signal ? <SignalBody signal={p.signal} /> : null}
 
                   <BrokerBreakdown
                     /*

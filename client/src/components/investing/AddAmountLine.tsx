@@ -1,7 +1,8 @@
-import { ShoppingCart, AlertCircle } from "lucide-react";
+import { ShoppingCart, AlertCircle, Check, Info } from "lucide-react";
 import { MoneyText } from "@/components/investing/Figures";
 import { lotSizeFor, lotSizeUncertain } from "@shared/addShares";
 import { MAX_POSITION_SHARE_PCT } from "@shared/addSizing";
+import type { AddReason } from "@shared/addReason";
 import type { Market } from "@shared/investing";
 
 /**
@@ -22,6 +23,14 @@ export type AddPlanView = {
   afterSharePct: number | null;
   atCap: boolean;
   roomToCapBase: number;
+  /**
+   * 「なぜ買い増すのか」の根拠と留意点。
+   *
+   * 金額だけでは「なぜ他の銘柄ではなくこれなのか」が分からない。
+   * 判定の本文（AI の見解）とは別に、構成比・配当利回りと金利の比較・
+   * 値位置といった手元の数字から言えることを並べる。
+   */
+  reason?: AddReason;
 };
 
 export function AddAmountLine({
@@ -93,6 +102,35 @@ export function AddAmountLine({
             ? "。香港株は銘柄ごとに売買単位が違うため、株数は発注前に確認してください"
             : ""}
         </p>
+      ) : null}
+      {/*
+        買う根拠と留意点を同じ場所に並べる。
+        根拠だけを見せて不利な条件を隠すと、後から「聞いていない」ことになる。
+        表の中（compact）では縦幅を増やせないため出さない。
+      */}
+      {!compact &&
+      plan.reason &&
+      (plan.reason.points.length > 0 || plan.reason.cautions.length > 0) ? (
+        <div className="mt-1.5 space-y-1 border-t border-emerald-200/60 pt-1.5 dark:border-emerald-900/60">
+          {plan.reason.points.map((p, i) => (
+            <p
+              key={`p-${i}`}
+              className="flex items-start gap-1 text-[11px] leading-relaxed text-emerald-800 dark:text-emerald-300"
+            >
+              <Check className="mt-0.5 h-3 w-3 shrink-0" />
+              <span>{p}</span>
+            </p>
+          ))}
+          {plan.reason.cautions.map((c, i) => (
+            <p
+              key={`c-${i}`}
+              className="flex items-start gap-1 text-[11px] leading-relaxed text-amber-700 dark:text-amber-400"
+            >
+              <Info className="mt-0.5 h-3 w-3 shrink-0" />
+              <span>{c}</span>
+            </p>
+          ))}
+        </div>
       ) : null}
     </div>
   );
