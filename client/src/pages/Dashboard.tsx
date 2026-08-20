@@ -27,6 +27,13 @@ import {
 import { pnlLabel } from "@shared/pnlLabel";
 import { computeCarrySpread } from "@shared/carrySpread";
 import { groupBySignal, pickDefaultSignal } from "@shared/signalGroups";
+import {
+  BUFFETT_FILTER_LABELS,
+  countBuffettBreakdown,
+  countUnjudged,
+  matchesBuffettFilter,
+  type BuffettFilter,
+} from "@shared/buffettFilter";
 import { useDisplayCurrency } from "@/contexts/DisplayCurrencyContext";
 import {
   AlertTriangle,
@@ -264,6 +271,53 @@ export default function Dashboard() {
   const [openSignal, setOpenSignal] = useState<SignalAction | null>(null);
   const defaultSignal = useMemo(() => pickDefaultSignal(signalGroups), [signalGroups]);
   const activeSignal = openSignal ?? defaultSignal;
+
+  /**
+   * バフェット式の判定の内訳。
+   *
+   * 判定は 112 銘柄すべてに入っているが、一覧を上から見るしかないため
+   * 「今からは買わない」「株価が中身より速い」銘柄を探し出せなかった。
+   * ここで件数と評価額を出し、押すと一覧の絞り込みへ飛ばす。
+   *
+   * 件数だけでなく評価額も出す。12 銘柄と言われても、それが 100 万円なのか
+   * 1 億円なのかで対応の重さが変わる。
+   */
+  const buffettBreakdown = useMemo(() => {
+    const groups = data?.groups ?? [];
+    const items = groups.map(g => ({
+      wouldBuyNow: g.signal?.wouldBuyNow ?? null,
+      priceVsValue: g.signal?.priceVsValue ?? null,
+      marketValueBase: g.marketValueBase ?? 0,
+    }));
+    const rows = countBuffettBreakdown(items).map(r => ({
+      ...r,
+      valueBase: items
+        .filter(i => matchesBuffettFilter(i, r.filter))
+        .reduce((s, i) => s + i.marketValueBase, 0),
+    }));
+    return {
+      rows,
+      unjudged: countUnjudged(items),
+      total: groups.length,
+      totalValue: items.reduce((s, i) => s + i.marketValueBase, 0),
+    };
+  }, [data]);
+
+  /*
+   * 内訳に出す順番。
+   *
+   * 「注意して見るべきもの」から並べる。件数の多い順にすると
+   * 「今からでも買う 65 件」が先頭に来て、確認が必要な区分が下に沈む。
+   * 借入がある状態では、株価が中身より先に走っている銘柄を先に見るべき。
+   */
+  const BUFFETT_ORDER: BuffettFilter[] = [
+    "OVERHEATED",
+    "PRICE_AHEAD",
+    "NOT_BUY_NOW",
+    "UNCLEAR",
+    "VALUE_AHEAD",
+    "BUY_NOW",
+  ];
 
   /**
    * 月別の配当グラフ用データ。
@@ -892,6 +946,90 @@ export default function Dashboard() {
               </CardContent>
             </Card>
           </div>
+
+          {/*
+            「今から買うか」「株価と中身の伸び」の内訳。
+
+            シグナル（ADD/HOLD）とは別の軸なので独立したカードにする。
+            ADD は今の保有をどうするかの判断で、判定は今から新規に買うかを見ている。
+            混ぜると、大きく育った株の「今からは買わないが売る理由もない」状態が消える。
+          */}
+          {buffettBreakdown.total > 0 ? (
+            <Card>
+              <CardHeader className="pb-3">
+                <CardTitle className="flex items-center gap-1.5 text-base">
+                  <Brain className="h-4 w-4" />
+                  今から買うかの判定
+                </CardTitle>
+                <CardDescription className="text-xs">
+                  取得単価ではなく「今この値段で買うか」で見た内訳。
+                  押すとその銘柄だけを一覧で開く
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-2">
+                <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                  {BUFFETT_ORDER.map(f => {
+                    const row = buffettBreakdown.rows.find(r => r.filter === f);
+                    if (!row || row.count === 0) return null;
+                    /*
+                     * 注意して見る区分だけ色を付ける。
+                     * すべてに色を付けると強弱が消え、どこから見るべきか分からない。
+                     * 赤は使わない（売るべきという意味ではないため）。
+                     */
+                    const accent =
+                      f === "OVERHEATED"
+                        ? "border-orange-300 bg-orange-50 dark:border-orange-900 dark:bg-orange-950/30"
+                        : f === "PRICE_AHEAD"
+                          ? "border-amber-200 bg-amber-50/60 dark:border-amber-900 dark:bg-amber-950/20"
+                          : "bg-muted/30";
+                    return (
+                      <Link
+                        key={f}
+                        href={`/holdings?lens=${f}`}
+                        className={`rounded-lg border p-3 transition-all duration-150 hover:bg-accent/50 active:scale-[0.98] ${accent}`}
+                      >
+                        <p className="text-[11px] text-muted-foreground">
+                          {BUFFETT_FILTER_LABELS[f]}
+                        </p>
+                        <p className="tabular mt-0.5 text-lg font-semibold">
+                          {row.count}
+                          <span className="ml-1 text-xs font-normal text-muted-foreground">
+                            銘柄
+                          </span>
+                        </p>
+                        <p className="tabular text-[11px] text-muted-foreground">
+                          {money(row.valueBase)}
+                          {buffettBreakdown.totalValue > 0 ? (
+                            <span className="ml-1">
+                              （
+                              {(
+                                (row.valueBase / buffettBreakdown.totalValue) *
+                                100
+                              ).toFixed(1)}
+                              %）
+                            </span>
+                          ) : null}
+                        </p>
+                      </Link>
+                    );
+                  })}
+                </div>
+                {/*
+                  「買わない＋株価先行」は 2 つの判定が同時に成り立つ銘柄で、
+                  他の区分と重複する。合計が銘柄数と合わない理由を書かないと
+                  数字が間違っていると受け取られる。
+                */}
+                <p className="text-[11px] leading-relaxed text-muted-foreground">
+                  区分は重なります（「買わない＋株価先行」は「今からは買わない」と
+                  「株価が中身より速い」の両方に含まれます）。
+                  合計は {buffettBreakdown.total} 銘柄になりません
+                  {buffettBreakdown.unjudged > 0
+                    ? `。うち ${buffettBreakdown.unjudged} 銘柄はまだ判定が入っていません`
+                    : ""}
+                </p>
+              </CardContent>
+            </Card>
+          ) : null}
 
           {/*
             利息で増える現金性資産（富途香港の現金宝など）。

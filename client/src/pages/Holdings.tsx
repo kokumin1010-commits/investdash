@@ -46,6 +46,13 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { trpc } from "@/lib/trpc";
 import { parseBrokerFilter } from "@shared/brokerFilter";
 import {
+  BUFFETT_FILTERS,
+  BUFFETT_FILTER_LABELS,
+  matchesBuffettFilter,
+  parseBuffettFilter,
+  type BuffettFilter,
+} from "@shared/buffettFilter";
+import {
   BROKERS,
   BROKER_LABELS,
   MARKETS,
@@ -104,6 +111,14 @@ export default function Holdings() {
    */
   const search = useSearch();
   const [, navigate] = useLocation();
+  /*
+   * バフェット式の判定での絞り込み。
+   * ダッシュボードの内訳から /holdings?lens=PRICE_AHEAD で来られるようにする。
+   * 112 行を上から見て「株価が中身より速い」銘柄を探すのは現実的でない。
+   */
+  const lensFromUrl = useMemo(() => parseBuffettFilter(search), [search]);
+  const [lensFilterState, setLensFilter] = useState<BuffettFilter>("ALL");
+  const lensFilter: BuffettFilter = lensFromUrl ?? lensFilterState;
   const brokerFromUrl = useMemo(() => parseBrokerFilter(search), [search]);
   const [brokerFilterState, setBrokerFilter] = useState<"ALL" | Broker>("ALL");
   // URL 指定があればそれを優先する（リンクで直接開いた場合に効かせるため）
@@ -229,6 +244,17 @@ export default function Holdings() {
     if (marketFilter !== "ALL") {
       list = list.filter(p => p.market === marketFilter);
     }
+    if (lensFilter !== "ALL") {
+      list = list.filter(p =>
+        matchesBuffettFilter(
+          {
+            wouldBuyNow: p.signal?.wouldBuyNow ?? null,
+            priceVsValue: p.signal?.priceVsValue ?? null,
+          },
+          lensFilter
+        )
+      );
+    }
     const sorted = [...list];
     sorted.sort((a, b) => {
       switch (sortKey) {
@@ -251,7 +277,7 @@ export default function Holdings() {
       }
     });
     return sorted;
-  }, [groups, effectiveQuery, signalFilter, brokerFilter, marketFilter, sortKey]);
+  }, [groups, effectiveQuery, signalFilter, brokerFilter, marketFilter, lensFilter, sortKey]);
 
   /** 実際に保有がある口座だけを絞り込みの選択肢にする */
   const usedBrokers = useMemo(() => {
@@ -276,10 +302,20 @@ export default function Holdings() {
    * 混乱するため、該当レコードだけを足し合わせる。
    */
   const filterSummary = useMemo(() => {
-    if (brokerFilter === "ALL" && marketFilter === "ALL") return null;
+    if (brokerFilter === "ALL" && marketFilter === "ALL" && lensFilter === "ALL") return null;
     let mine = positions;
     if (brokerFilter !== "ALL") mine = mine.filter(p => p.broker === brokerFilter);
     if (marketFilter !== "ALL") mine = mine.filter(p => p.market === marketFilter);
+    /*
+     * 判定での絞り込みは銘柄単位で入っているため、
+     * 残った銘柄に属するレコードだけを残す。
+     * レコード単位で判定を見ると、同じ銘柄でも口座によって
+     * signal が入っていない側が落ちてしまう。
+     */
+    if (lensFilter !== "ALL") {
+      const symbols = new Set(rows.map(r => r.symbol));
+      mine = mine.filter(p => symbols.has(p.symbol));
+    }
     const value = mine.reduce((s, p) => s + (p.marketValueBase ?? 0), 0);
     const cost = mine.reduce((s, p) => s + p.costValueBase, 0);
     const pnl = value - cost;
@@ -293,7 +329,7 @@ export default function Holdings() {
       pnl,
       pnlPct: cost > 0 ? (pnl / cost) * 100 : null,
     };
-  }, [positions, brokerFilter, marketFilter]);
+  }, [positions, brokerFilter, marketFilter, lensFilter, rows]);
 
   const editing = positions.find(p => p.id === editTarget) ?? null;
 
@@ -389,6 +425,12 @@ export default function Holdings() {
                   {marketLabel(marketFilter)}
                 </span>
               ) : null}
+              {/* どの判定で絞り込んでいるかを明示する */}
+              {lensFilter !== "ALL" ? (
+                <span className="rounded-md border border-amber-300 bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-700 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-400">
+                  {BUFFETT_FILTER_LABELS[lensFilter]}
+                </span>
+              ) : null}
               <span className="text-sm text-muted-foreground">
                 {filterSummary.count} 銘柄
                 {filterSummary.recordCount !== filterSummary.count
@@ -426,7 +468,8 @@ export default function Holdings() {
                   // URL 指定で来た場合はクエリを外す必要がある
                   setBrokerFilter("ALL");
                   setMarketFilter("ALL");
-                  if (brokerFromUrl || marketFromUrl) navigate("/holdings");
+                  setLensFilter("ALL");
+                  if (brokerFromUrl || marketFromUrl || lensFromUrl) navigate("/holdings");
                 }}
               >
                 絞り込みを解除
@@ -459,6 +502,30 @@ export default function Holdings() {
               </SelectItem>
             ))}
             <SelectItem value="NONE">未生成</SelectItem>
+          </SelectContent>
+        </Select>
+        {/*
+          判定での絞り込み。シグナル（ADD/HOLD）とは別の軸なので独立させる。
+          ADD は「今の保有をどうするか」、判定は「今から買うか」を見ている。
+        */}
+        <Select
+          value={lensFilter}
+          onValueChange={v => {
+            const next = v as BuffettFilter;
+            setLensFilter(next);
+            // URL クエリで来ている場合は URL 側も合わせて書き換える
+            if (lensFromUrl) navigate(next === "ALL" ? "/holdings" : `/holdings?lens=${next}`);
+          }}
+        >
+          <SelectTrigger className="h-9 w-[180px]">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {BUFFETT_FILTERS.map(f => (
+              <SelectItem key={f} value={f}>
+                {BUFFETT_FILTER_LABELS[f]}
+              </SelectItem>
+            ))}
           </SelectContent>
         </Select>
         {usedBrokers.length > 1 ? (
