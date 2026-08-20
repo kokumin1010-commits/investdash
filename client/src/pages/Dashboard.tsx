@@ -611,7 +611,7 @@ export default function Dashboard() {
               銘柄の追加があった期間は株価変動分を分離できないので明示する。
             */}
             <StatCard
-              label="前回記録からの変化"
+              label="この 1 週間の変化"
               valueNode={
                 periodChange && periodChange.gainDelta !== null ? (
                   <PnlText
@@ -662,6 +662,18 @@ export default function Dashboard() {
                       {periodChange.days > 0 ? `（${periodChange.days}日間）` : "（同日中）"}
                     </span>
                     {/*
+                      記録がまだ 1 週間分たまっていない場合は、その旨を書く。
+                      「1 週間の変化」と表示しながら 2 日分しか見ていない状態を
+                      黙って出すと、数字を過小・過大に受け取ることになる。
+                    */}
+                    {periodChange.fellShort ? (
+                      <span className="block text-[11px] text-muted-foreground">
+                        {periodChange.usedSameCompositionFallback
+                          ? `${periodChange.targetDays} 日前は銘柄の登録作業中だったため、銘柄数が揃った ${periodChange.days} 日前と比べています`
+                          : `記録がまだ ${periodChange.targetDays} 日分たまっていないため、最も古い記録と比べています`}
+                      </span>
+                    ) : null}
+                    {/*
                       銘柄を追加した期間は、追加した銘柄が元々持っていた含み損益が
                       混ざるため「株価がいくら動いたか」を分離できない。
                       誤解を防ぐため、その旨をはっきり書く。
@@ -669,9 +681,8 @@ export default function Dashboard() {
                     {periodChange.compositionChanged ? (
                       <span className="block space-y-0.5">
                         <span className="block text-[11px] text-amber-600 dark:text-amber-400">
-                          {periodChange.countDelta !== 0
-                            ? `この期間に ${periodChange.countDelta > 0 ? "+" : ""}${periodChange.countDelta} 銘柄を登録したため、`
-                            : "この期間に買い増し・売却があったため、"}
+                          この期間に {periodChange.countDelta > 0 ? "+" : ""}
+                          {periodChange.countDelta} 銘柄を登録したため、
                           値動きと登録分を分けられません
                         </span>
                         <span className="block text-[11px] text-muted-foreground">
