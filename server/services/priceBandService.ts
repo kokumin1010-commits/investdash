@@ -19,13 +19,14 @@ import {
   type PlannerContext,
   type PlanResult,
 } from "./priceBandPlanner";
-import { withAiRunLog } from "./aiRunLog";
+import { listAiRuns, withAiRunLog } from "./aiRunLog";
 import { buildPortfolio } from "./portfolio";
 import { fetchPriceHistory } from "./marketData";
 import { runBandChecks, BAND_CHECKER_MODEL } from "./bandChecker";
 import { convertToJpy, FX_FALLBACK, type FxRates } from "./fx";
 import { calcPnlPct, isCostRecovered } from "../../shared/pnlLabel";
 import { computeTargetDistance } from "../../shared/targetDistance";
+import { selectBackfillQueue } from "../../shared/backfillQueue";
 
 /** 文字列の数値カラム（decimal）を数値にする。空や不正値は null */
 const toNum = (v: string | null | undefined): number | null => {
@@ -765,6 +766,100 @@ export async function listPlanStatus(
     });
   }
   return out;
+}
+
+export type MissingPlanBatchResult = {
+  total: number;
+  eligible: number;
+  processed: number;
+  generated: number;
+  skipped: Array<{ symbol: string; reason: string }>;
+  failed: Array<{ symbol: string; reason: string }>;
+  remaining: number;
+  nextOffset: number | null;
+  quotaExhausted: boolean;
+};
+
+/**
+ * 既存プランを一切上書きせず、保有中でプランが無い銘柄だけを小さなバッチで生成する。
+ * 最近失敗した銘柄は自動実行時だけ冷却し、恒久的な失敗が全体を塞がないようにする。
+ */
+export async function generateMissingHoldingPlans(
+  userId: number,
+  opts: { batchSize?: number; retryFailed?: boolean; failureCooldownMs?: number } = {},
+  deps: {
+    listPlanStatus: typeof listPlanStatus;
+    buildPortfolio: typeof buildPortfolio;
+    listAiRuns: typeof listAiRuns;
+    generatePlan: typeof generateAndSavePlanForHolding;
+  } = {
+    listPlanStatus,
+    buildPortfolio,
+    listAiRuns,
+    generatePlan: generateAndSavePlanForHolding,
+  }
+): Promise<MissingPlanBatchResult> {
+  const batchSize = Math.min(4, Math.max(1, opts.batchSize ?? 2));
+  const retryFailed = opts.retryFailed ?? false;
+  const failureCooldownMs = opts.failureCooldownMs ?? 6 * 60 * 60 * 1000;
+  const [status, portfolio, recentRuns] = await Promise.all([
+    deps.listPlanStatus(userId),
+    deps.buildPortfolio(userId),
+    deps.listAiRuns(userId, { kind: "price_band_plan", limit: 300 }),
+  ]);
+
+  const valueBySymbol = new Map(
+    portfolio.groups.map(group => [group.symbol, group.marketValueBase ?? 0])
+  );
+  const priceBySymbol = new Map(
+    portfolio.groups.map(group => [group.symbol, group.currentPrice])
+  );
+  const missing = status
+    .filter(item => !item.hasPlan)
+    .map(item => ({ ...item, value: valueBySymbol.get(item.symbol) ?? 0 }));
+  const { eligible } = selectBackfillQueue(missing, recentRuns, {
+    retryFailed,
+    failureCooldownMs,
+  });
+  const batch = eligible.slice(0, batchSize);
+  const failed: MissingPlanBatchResult["failed"] = [];
+  const skipped: MissingPlanBatchResult["skipped"] = [];
+  let generated = 0;
+  let quotaExhausted = false;
+
+  for (const item of batch) {
+    if (priceBySymbol.get(item.symbol) === null) {
+      skipped.push({ symbol: item.symbol, reason: "現在値が未取得です" });
+      continue;
+    }
+    try {
+      await deps.generatePlan(userId, item.symbol);
+      generated += 1;
+    } catch (error) {
+      failed.push({
+        symbol: item.symbol,
+        reason: error instanceof Error ? error.message : String(error),
+      });
+      const message = error instanceof Error ? error.message : String(error);
+      if (/quota|rate limit|too many requests|利用枠/i.test(message)) {
+        quotaExhausted = true;
+        break;
+      }
+    }
+  }
+
+  const remaining = Math.max(0, missing.length - generated);
+  return {
+    total: missing.length,
+    eligible: eligible.length,
+    processed: batch.length,
+    generated,
+    skipped,
+    failed,
+    remaining,
+    nextOffset: quotaExhausted || remaining === 0 ? null : 0,
+    quotaExhausted,
+  };
 }
 
 /** 買い増しプランの一覧（今どの段にいるかを横断で見るため） */

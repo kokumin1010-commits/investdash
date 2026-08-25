@@ -74,6 +74,14 @@ const overviewData = {
     },
     {
       ...commonRow,
+      symbol: "MSFT",
+      name: "Microsoft",
+      action: "HOLD",
+      actionLabel: "様子見",
+      outsideDirection: null,
+    },
+    {
+      ...commonRow,
       symbol: "9984.T",
       name: "ソフトバンクグループ",
       action: null,
@@ -81,6 +89,14 @@ const overviewData = {
     },
   ],
   stats: { avgWeightPct: 1.5, topAvgWeightPct: 4.2 },
+  coverage: {
+    total: 5,
+    ready: 4,
+    pending: [
+      { symbol: "9432.T", name: "NTT", hasPlan: false, generatedAt: null },
+      { symbol: "V", name: "Visa", hasPlan: false, generatedAt: null },
+    ],
+  },
 };
 
 const proposal = {
@@ -117,12 +133,30 @@ afterEach(() => {
 });
 
 describe("BuyPlans page interactions", () => {
+  it("shows real plan coverage and every pending holding without fake price bands", () => {
+    render(React.createElement(BuyPlans));
+
+    expect(screen.getByText("4 / 5 銘柄を作成済み。", { exact: false })).toBeTruthy();
+    expect(
+      screen
+        .getByRole("progressbar", { name: "価格帯プラン作成率" })
+        .getAttribute("aria-valuenow")
+    ).toBe("4");
+    expect(screen.getByText("NTT", { selector: "span" })).toBeTruthy();
+    expect(screen.getByText("Visa", { selector: "span" })).toBeTruthy();
+    expect(screen.getByText("未作成 2 銘柄")).toBeTruthy();
+  });
+
   it("switches BUY, VERIFY, OUTSIDE and ALL result sets", async () => {
     const user = userEvent.setup();
     render(React.createElement(BuyPlans));
 
     expect(screen.getByText("トヨタ自動車", { selector: "span" })).toBeTruthy();
     expect(screen.queryByText("NVIDIA", { selector: "span" })).toBeNull();
+
+    await user.click(screen.getByRole("button", { name: /様子見/ }));
+    expect(screen.getByText("Microsoft", { selector: "span" })).toBeTruthy();
+    expect(screen.queryByText("トヨタ自動車", { selector: "span" })).toBeNull();
 
     await user.click(screen.getByRole("button", { name: /確認が必要/ }));
     expect(screen.getByText("NVIDIA", { selector: "span" })).toBeTruthy();
@@ -134,6 +168,7 @@ describe("BuyPlans page interactions", () => {
     await user.click(screen.getByRole("button", { name: /すべて/ }));
     expect(screen.getByText("トヨタ自動車", { selector: "span" })).toBeTruthy();
     expect(screen.getByText("NVIDIA", { selector: "span" })).toBeTruthy();
+    expect(screen.getByText("Microsoft", { selector: "span" })).toBeTruthy();
     expect(screen.getByText("ソフトバンクグループ", { selector: "span" })).toBeTruthy();
     expect(screen.getByRole("button", { name: /すべて/ }).getAttribute("aria-pressed")).toBe(
       "true"
@@ -148,6 +183,7 @@ describe("BuyPlans page interactions", () => {
     const search = screen.getByPlaceholderText("銘柄名・ティッカー");
     await user.type(search, "NO-SUCH-SYMBOL");
     expect(screen.getByText("該当する銘柄はありません")).toBeTruthy();
+    expect(screen.getByText("この検索条件に一致する未作成銘柄はありません")).toBeTruthy();
 
     await user.click(
       screen.getByRole("button", { name: "検索をクリアして一覧に戻す" })

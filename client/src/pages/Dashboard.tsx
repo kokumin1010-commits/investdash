@@ -68,6 +68,7 @@ import {
 import { toast } from "sonner";
 import { Link } from "wouter";
 import { DataHealthCard } from "@/components/investing/DataHealthCard";
+import { AttentionEmptyState } from "@/components/investing/AttentionEmptyState";
 
 export default function Dashboard() {
   const utils = trpc.useUtils();
@@ -228,15 +229,24 @@ export default function Dashboard() {
 
   const sectorChart = useMemo(() => {
     if (!data) return [];
+    const classified = data.groups.filter(group => group.sector).length;
+    if (classified === 0) return [];
     return data.sectors
       .filter(s => s.value > 0)
       .map((s, i) => ({
         name: sectorJa(s.key),
+        unclassified: s.key === "未分類",
         value: Math.round(s.value),
         pct: s.pct,
         count: s.count,
-        fill: SECTOR_COLORS[i % SECTOR_COLORS.length],
+        fill: s.key === "未分類" ? "#94a3b8" : SECTOR_COLORS[i % SECTOR_COLORS.length],
       }));
+  }, [data]);
+
+  const sectorCoverage = useMemo(() => {
+    const groups = data?.groups ?? [];
+    const classified = groups.filter(group => group.sector).length;
+    return { total: groups.length, classified, pending: groups.length - classified };
   }, [data]);
 
   const trend = assetTrend.data?.points ?? [];
@@ -449,6 +459,7 @@ export default function Dashboard() {
         .slice(0, 5),
     [data]
   );
+  const unjudgedSignalCount = (data?.groups ?? []).filter(group => !group.signal).length;
 
   if (overview.isLoading) return <DashboardSkeleton />;
 
@@ -956,7 +967,7 @@ export default function Dashboard() {
           </div>
 
           {/*
-            「今から買うか」「株価と中身の伸び」の内訳。
+            「未保有と仮定した新規判断」「株価と中身の伸び」の内訳。
 
             シグナル（ADD/HOLD）とは別の軸なので独立したカードにする。
             ADD は今の保有をどうするかの判断で、判定は今から新規に買うかを見ている。
@@ -967,11 +978,11 @@ export default function Dashboard() {
               <CardHeader className="pb-3">
                 <CardTitle className="flex items-center gap-1.5 text-base">
                   <Brain className="h-4 w-4" />
-                  今から買うかの判定
+                  未保有と仮定した新規判断
                 </CardTitle>
                 <CardDescription className="text-xs">
-                  取得単価ではなく「今この値段で買うか」で見た内訳。
-                  押すとその銘柄だけを一覧で開く
+                  現在の保有を買い増す指示ではなく、まだ持っていない前提で
+                  「今この値段から新規に買うか」を見た内訳。押すとその銘柄だけを一覧で開きます
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-2">
@@ -1028,7 +1039,7 @@ export default function Dashboard() {
                   数字が間違っていると受け取られる。
                 */}
                 <p className="text-[11px] leading-relaxed text-muted-foreground">
-                  区分は重なります（「買わない＋株価先行」は「今からは買わない」と
+                  区分は重なります（「買わない＋株価先行」は「未保有なら今は買わない」と
                   「株価が中身より速い」の両方に含まれます）。
                   合計は {buffettBreakdown.total} 銘柄になりません
                   {buffettBreakdown.unjudged > 0
@@ -1574,6 +1585,7 @@ export default function Dashboard() {
                             </>
                           )}
                           {assetTrend.data.fellBack && " ・ 同じ月の記録のみなので日次で表示中"}
+                          {" ・ 日本時間の1日につき最新1点"}
                         </>
                       ) : (
                         "株価更新のたびにスナップショットを記録します"
@@ -1612,8 +1624,8 @@ export default function Dashboard() {
                     </p>
                     <p className="text-xs text-muted-foreground">
                       {assetTrend.data && assetTrend.data.snapshotCount > 0
-                        ? `記録は ${assetTrend.data.snapshotCount} 件ありますが、すべて同じ日のため点が 1 つになります。日をまたいで株価更新すると増えます。`
-                        : "株価更新を実行すると記録されます。"}
+                        ? `記録は ${assetTrend.data.snapshotCount} 件ありますが、すべて同じ日のため点が 1 つになります。次の取引日の自動株価更新で新しい点が増えます。`
+                        : "株価更新を実行すると記録され、以後は取引日の自動更新で増えます。"}
                     </p>
                   </div>
                 ) : (
@@ -1789,13 +1801,19 @@ export default function Dashboard() {
             <Card>
               <CardHeader>
                 <CardTitle className="text-base">業種別分布</CardTitle>
-                <CardDescription className="text-xs">評価額ベースの構成比</CardDescription>
+                <CardDescription className="text-xs">
+                  評価額ベースの構成比 ・ {sectorCoverage.classified}/{sectorCoverage.total} 銘柄を分類済み
+                </CardDescription>
               </CardHeader>
               <CardContent>
                 {sectorChart.length === 0 ? (
-                  <p className="py-16 text-center text-sm text-muted-foreground">
-                    業種情報がまだ取得されていません
-                  </p>
+                  <div className="space-y-2 py-14 text-center">
+                    <p className="text-sm font-medium">業種情報を取得中です</p>
+                    <p className="text-xs leading-relaxed text-muted-foreground">
+                      現在 {sectorCoverage.pending} 銘柄が未取得です。Yahoo の企業情報を小分けで補完し、
+                      ETF・投資信託は実際の金融商品種別で分類します。
+                    </p>
+                  </div>
                 ) : (
                   <>
                     <ResponsiveContainer width="100%" height={190}>
@@ -1844,6 +1862,12 @@ export default function Dashboard() {
                         </li>
                       ))}
                     </ul>
+                    {sectorCoverage.pending > 0 && (
+                      <p className="mt-3 border-t pt-2 text-[11px] leading-relaxed text-muted-foreground">
+                        未取得 {sectorCoverage.pending} 銘柄を自動補完中です。「未分類」は安全性や業種を
+                        推定した結果ではなく、外部資料をまだ取得できていない状態です。
+                      </p>
+                    )}
                   </>
                 )}
               </CardContent>
@@ -2177,9 +2201,7 @@ export default function Dashboard() {
               </CardHeader>
               <CardContent className="space-y-2">
                 {attention.length === 0 ? (
-                  <p className="py-8 text-center text-sm text-muted-foreground">
-                    対応が必要なシグナルはありません
-                  </p>
+                  <AttentionEmptyState unjudgedSignalCount={unjudgedSignalCount} />
                 ) : (
                   attention.map(p => (
                     <Link

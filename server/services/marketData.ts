@@ -283,8 +283,32 @@ type SearchResponse = {
     symbol?: unknown;
     sector?: unknown;
     industry?: unknown;
+    quoteType?: unknown;
   }>;
 };
+
+function classificationFromQuoteType(quoteType: string | null): {
+  sector: string;
+  industry: string;
+} | null {
+  switch (quoteType?.toUpperCase()) {
+    case "ETF":
+      return { sector: "ETF・ファンド", industry: "上場投資信託" };
+    case "MUTUALFUND":
+      return { sector: "ETF・ファンド", industry: "投資信託" };
+    case "MONEYMARKET":
+      return { sector: "現金性資産", industry: "マネー・マーケット" };
+    case "CURRENCY":
+      return { sector: "現金性資産", industry: "通貨" };
+    case "CRYPTOCURRENCY":
+      return { sector: "暗号資産", industry: "暗号資産" };
+    case "OPTION":
+    case "FUTURE":
+      return { sector: "デリバティブ", industry: quoteType.toUpperCase() };
+    default:
+      return null;
+  }
+}
 
 async function fetchPublicProfile(symbol: string): Promise<CompanyProfile | null> {
   const params = new URLSearchParams({
@@ -311,10 +335,11 @@ async function fetchPublicProfile(symbol: string): Promise<CompanyProfile | null
     if (!quote) return null;
     const sector = str(quote.sector);
     const industry = str(quote.industry);
-    if (!sector && !industry) return null;
+    const instrumentClassification = classificationFromQuoteType(str(quote.quoteType));
+    if (!sector && !industry && !instrumentClassification) return null;
     return {
-      sector,
-      industry,
+      sector: sector ?? instrumentClassification?.sector ?? null,
+      industry: industry ?? instrumentClassification?.industry ?? null,
       country: null,
       website: null,
       businessSummary: null,
@@ -336,13 +361,14 @@ export async function fetchCompanyProfile(symbol: string): Promise<CompanyProfil
 
       const sp = res?.quoteSummary?.result?.[0]?.summaryProfile;
       if (sp) {
-        return {
+        const profile = {
           sector: str(sp.sector),
           industry: str(sp.industry),
           country: str(sp.country),
           website: str(sp.website),
           businessSummary: str(sp.longBusinessSummary),
         };
+        if (profile.sector || profile.industry) return profile;
       }
     } catch (error) {
       rememberDataApiFailure(error);

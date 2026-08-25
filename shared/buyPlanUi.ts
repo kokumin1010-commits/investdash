@@ -6,7 +6,7 @@ export function formatNextBandHint(gapPct: number, actionLabel: string): string 
   return `${distance.toFixed(1)}% 下がると「${actionLabel}」`;
 }
 
-export type BuyPlanListFilter = "BUY" | "VERIFY" | "OUTSIDE" | "ALL";
+export type BuyPlanListFilter = "BUY" | "WAIT" | "VERIFY" | "OUTSIDE" | "ALL";
 
 export function filterBuyPlanRows<
   T extends {
@@ -20,6 +20,7 @@ export function filterBuyPlanRows<
   return plans.filter(plan => {
     if (
       (filter === "BUY" && plan.action !== "ADD_SMALL" && plan.action !== "ADD_MAIN") ||
+      (filter === "WAIT" && plan.action !== "HOLD") ||
       (filter === "VERIFY" && plan.action !== "VERIFY") ||
       (filter === "OUTSIDE" && plan.outsideDirection === null)
     ) {

@@ -9,7 +9,9 @@ const snap = (
   borrowed: number | null = null,
   netAssets: number | null = null
 ): SnapshotInput => ({
-  capturedAt: new Date(date),
+  // 既存テストの時刻文字列は画面上の日本時間として書かれている。
+  // タイムゾーン指定が無い文字列を Node 実行環境の TZ に任せると結果が変わるため固定する。
+  capturedAt: new Date(/[zZ]|[+-]\d{2}:\d{2}$/.test(date) ? date : `${date}+09:00`),
   totalValue: value,
   totalCost: cost,
   positionCount: count,
@@ -36,6 +38,25 @@ describe("buildAssetTrend", () => {
     expect(r.points[0].value).toBe(110);
     // 丸める前の件数は保持する（利用者に「何件記録済み」と伝えるため）
     expect(r.snapshotCount).toBe(3);
+  });
+
+  it("UTC では日付が違っても JST の同じ日なら 1 点にまとめる", () => {
+    const rows = [
+      snap("2026-08-25T15:05:00.000Z", 100, 90, 10),
+      snap("2026-08-26T14:55:00.000Z", 120, 90, 10),
+    ];
+    const r = buildAssetTrend(rows, "day");
+    expect(r.points).toHaveLength(1);
+    expect(r.points[0].date).toBe("8/26");
+    expect(r.points[0].value).toBe(120);
+  });
+
+  it("UTC の月末より JST の暦月を優先する", () => {
+    const rows = [
+      snap("2026-07-31T14:55:00.000Z", 100, 90, 10),
+      snap("2026-07-31T15:05:00.000Z", 120, 90, 10),
+    ];
+    expect(buildAssetTrend(rows, "month").points).toHaveLength(2);
   });
 
   it("月次では同じ月の記録が 1 点にまとまる", () => {
@@ -128,8 +149,8 @@ describe("buildAssetTrend", () => {
       snap("2026-08-16T17:00:00", 1100, 900, 10),
     ];
     const r = buildAssetTrend(rows, "month");
-    expect(r.firstAt?.toISOString()).toBe(new Date("2026-08-14T17:00:00").toISOString());
-    expect(r.lastAt?.toISOString()).toBe(new Date("2026-08-16T17:00:00").toISOString());
+    expect(r.firstAt?.toISOString()).toBe(new Date("2026-08-14T17:00:00+09:00").toISOString());
+    expect(r.lastAt?.toISOString()).toBe(new Date("2026-08-16T17:00:00+09:00").toISOString());
   });
 
   it("順序が乱れた入力でも時系列に並べる", () => {

@@ -89,4 +89,38 @@ describe("market data fallback", () => {
       businessSummary: null,
     });
   });
+
+  it("classifies ETFs from Yahoo quoteType without inventing a company sector", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      statusText: "OK",
+      json: async () => ({
+        quotes: [{ symbol: "1306.T", quoteType: "ETF" }],
+      }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(fetchCompanyProfile("1306.T")).resolves.toEqual({
+      sector: "ETF・ファンド",
+      industry: "上場投資信託",
+      country: null,
+      website: null,
+      businessSummary: null,
+    });
+  });
+
+  it("keeps an unknown instrument unclassified when Yahoo gives no evidence", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        statusText: "OK",
+        json: async () => ({ quotes: [{ symbol: "UNKNOWN", quoteType: "EQUITY" }] }),
+      })
+    );
+
+    await expect(fetchCompanyProfile("UNKNOWN")).resolves.toBeNull();
+  });
 });

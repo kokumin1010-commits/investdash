@@ -1,4 +1,4 @@
-import { and, desc, eq, inArray, sql } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, lt, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
 import {
   holdings,
@@ -26,6 +26,7 @@ import {
   type InsertCandidateSuggestion,
 } from "../drizzle/schema";
 import { ENV } from "./_core/env";
+import { jstDayBounds } from "../shared/jstDate";
 
 let _db: ReturnType<typeof drizzle> | null = null;
 
@@ -649,16 +650,53 @@ export async function listImportJobs(userId: number, limit = 10) {
 
 /* ------------------------------- snapshots -------------------------------- */
 
-export async function insertSnapshot(values: {
+export type DailySnapshotValues = {
   userId: number;
   totalValue: string;
   totalCost: string;
   positionCount: number;
   borrowed?: string | null;
   netAssets?: string | null;
-}) {
+};
+
+export async function insertSnapshot(values: DailySnapshotValues) {
   const db = await requireDb();
   await db.insert(portfolioSnapshots).values(values);
+}
+
+/**
+ * 日本時間の同じ日には 1 行だけ残し、後から取得した価格で更新する。
+ * 手動更新と JP/US の定時更新が同日に重なっても、グラフ用の原始行が増殖しない。
+ */
+export async function upsertDailySnapshot(
+  values: DailySnapshotValues,
+  capturedAt = new Date()
+): Promise<{ id: number; replaced: boolean }> {
+  const db = await requireDb();
+  const { start, end } = jstDayBounds(capturedAt);
+  const existing = await db
+    .select({ id: portfolioSnapshots.id })
+    .from(portfolioSnapshots)
+    .where(
+      and(
+        eq(portfolioSnapshots.userId, values.userId),
+        gte(portfolioSnapshots.capturedAt, start),
+        lt(portfolioSnapshots.capturedAt, end)
+      )
+    )
+    .orderBy(desc(portfolioSnapshots.capturedAt))
+    .limit(1);
+
+  if (existing[0]) {
+    await db
+      .update(portfolioSnapshots)
+      .set({ ...values, capturedAt })
+      .where(eq(portfolioSnapshots.id, existing[0].id));
+    return { id: existing[0].id, replaced: true };
+  }
+
+  const result = await db.insert(portfolioSnapshots).values({ ...values, capturedAt });
+  return { id: extractInsertId(result, "portfolioSnapshots"), replaced: false };
 }
 
 export async function listSnapshots(userId: number, limit = 90) {

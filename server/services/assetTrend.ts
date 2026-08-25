@@ -10,6 +10,8 @@
  * 値動きだけの変化を別途計算する。
  */
 
+import { jstDayKey } from "../../shared/jstDate";
+
 export type TrendScale = "day" | "month";
 
 export type SnapshotInput = {
@@ -65,10 +67,8 @@ export type TrendResult = {
 };
 
 function bucketKey(d: Date, scale: TrendScale): string {
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  if (scale === "month") return `${y}-${m}`;
-  return `${y}-${m}-${String(d.getDate()).padStart(2, "0")}`;
+  const day = jstDayKey(d);
+  return scale === "month" ? day.slice(0, 7) : day;
 }
 
 /**
@@ -118,8 +118,16 @@ export function buildAssetTrend(rows: SnapshotInput[], scale: TrendScale): Trend
     return {
       date:
         scale === "month"
-          ? r.capturedAt.toLocaleDateString("ja-JP", { year: "2-digit", month: "numeric" })
-          : r.capturedAt.toLocaleDateString("ja-JP", { month: "numeric", day: "numeric" }),
+          ? r.capturedAt.toLocaleDateString("ja-JP", {
+              year: "2-digit",
+              month: "numeric",
+              timeZone: "Asia/Tokyo",
+            })
+          : r.capturedAt.toLocaleDateString("ja-JP", {
+              month: "numeric",
+              day: "numeric",
+              timeZone: "Asia/Tokyo",
+            }),
       at: r.capturedAt,
       value: r.totalValue,
       cost: r.totalCost,

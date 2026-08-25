@@ -38,6 +38,7 @@ type Filter = BuyPlanListFilter;
 
 const FILTERS: Array<{ key: Filter; label: string; hint: string }> = [
   { key: "BUY", label: "買い増し圏", hint: "打診買い・主力買い増しの段にいる銘柄" },
+  { key: "WAIT", label: "様子見", hint: "現在の価格帯では急いで買い増さない銘柄" },
   { key: "VERIFY", label: "確認が必要", hint: "下落要因を確かめる段にいる銘柄" },
   { key: "OUTSIDE", label: "価格帯の外", hint: "登録した段より上か下にいる銘柄" },
   { key: "ALL", label: "すべて", hint: "プランがある全銘柄" },
@@ -50,6 +51,18 @@ export default function BuyPlans() {
   const { data, isLoading, error } = trpc.portfolio.priceBandOverview.useQuery();
   const allRows = data?.rows;
   const stats = data?.stats;
+  const coverage = data?.coverage;
+
+  const pendingRows = useMemo(() => {
+    const normalized = keyword.trim().toLowerCase();
+    const pending = coverage?.pending ?? [];
+    if (!normalized) return pending;
+    return pending.filter(
+      row =>
+        row.symbol.toLowerCase().includes(normalized) ||
+        row.name.toLowerCase().includes(normalized)
+    );
+  }, [coverage?.pending, keyword]);
 
   const rows = useMemo(() => {
     if (!allRows) return [];
@@ -78,10 +91,11 @@ export default function BuyPlans() {
   }, [allRows, filter, keyword]);
 
   const counts = useMemo(() => {
-    const c = { BUY: 0, VERIFY: 0, OUTSIDE: 0, ALL: 0 };
+    const c = { BUY: 0, WAIT: 0, VERIFY: 0, OUTSIDE: 0, ALL: 0 };
     for (const r of allRows ?? []) {
       c.ALL += 1;
       if (r.action === "ADD_SMALL" || r.action === "ADD_MAIN") c.BUY += 1;
+      if (r.action === "HOLD") c.WAIT += 1;
       if (r.action === "VERIFY") c.VERIFY += 1;
       if (r.outsideDirection !== null) c.OUTSIDE += 1;
     }
@@ -131,7 +145,75 @@ export default function BuyPlans() {
         </Card>
       )}
 
-      {/*
+      {coverage && coverage.total > 0 && (
+        <Card>
+          <CardHeader className="pb-3">
+            <div className="flex flex-wrap items-baseline justify-between gap-2">
+              <div>
+                <CardTitle className="text-base">価格帯プランの作成状況</CardTitle>
+                <CardDescription className="mt-1">
+                  {coverage.ready} / {coverage.total} 銘柄を作成済み。未作成は架空の価格を表示せず、Railway
+                  が小分けで自動生成します。
+                </CardDescription>
+              </div>
+              <span className="text-sm font-semibold tabular-nums">
+                {coverage.total > 0
+                  ? `${Math.round((coverage.ready / coverage.total) * 100)}%`
+                  : "0%"}
+              </span>
+            </div>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <div
+              className="h-2 overflow-hidden rounded-full bg-muted"
+              role="progressbar"
+              aria-label="価格帯プラン作成率"
+              aria-valuemin={0}
+              aria-valuemax={coverage.total}
+              aria-valuenow={coverage.ready}
+            >
+              <div
+                className="h-full rounded-full bg-emerald-500 transition-[width]"
+                style={{
+                  width: `${coverage.total > 0 ? (coverage.ready / coverage.total) * 100 : 0}%`,
+                }}
+              />
+            </div>
+
+            {coverage.pending.length > 0 ? (
+              <div>
+                <div className="mb-2 flex items-center justify-between gap-2 text-xs">
+                  <span className="font-medium">未作成 {coverage.pending.length} 銘柄</span>
+                  <span className="text-muted-foreground">既存プランは上書きしません</span>
+                </div>
+                <div className="max-h-64 divide-y overflow-y-auto rounded-lg border">
+                  {pendingRows.map(item => (
+                    <Link
+                      key={item.symbol}
+                      href={`/holdings?symbol=${encodeURIComponent(item.symbol)}`}
+                      className="flex items-center justify-between gap-3 px-3 py-2 text-sm transition-colors hover:bg-accent/50"
+                    >
+                      <span className="min-w-0 truncate font-medium">{item.name}</span>
+                      <span className="shrink-0 text-xs text-muted-foreground">{item.symbol}</span>
+                    </Link>
+                  ))}
+                  {pendingRows.length === 0 && (
+                    <p className="px-3 py-4 text-center text-xs text-muted-foreground">
+                      この検索条件に一致する未作成銘柄はありません
+                    </p>
+                  )}
+                </div>
+              </div>
+            ) : (
+              <p className="text-sm text-emerald-700 dark:text-emerald-300">
+                すべての保有銘柄に価格帯プランがあります。
+              </p>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
+      {/**
         AI の結論を一覧より前に置く。
         月 1 回しか開かない使い方では、123 行から自分で探させるのではなく
         「どれを買うべきか」の結論が先に見えている方が判断が始まる。
@@ -189,6 +271,8 @@ export default function BuyPlans() {
             <CardDescription>
               {filter === "BUY"
                 ? "今は買い増しの価格帯に入っている銘柄がありません。価格が下がるとここに出ます。"
+                : filter === "WAIT"
+                  ? "現在の価格帯で様子見になっている銘柄はありません。"
                 : filter === "VERIFY"
                   ? "下落要因を確認すべき段にいる銘柄はありません。"
                   : "条件を変えて試してください。"}

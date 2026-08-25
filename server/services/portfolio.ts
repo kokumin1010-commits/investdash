@@ -59,6 +59,9 @@ import {
 import { BROKER_LABELS, type Broker } from "../../shared/investing";
 import type { Market } from "../../shared/investing";
 import { FX_FALLBACK, convertToJpy, isPlausibleRate, type FxRates } from "./fx";
+import { isQuotaError } from "./aiErrors";
+import { listAiRuns } from "./aiRunLog";
+import { selectBackfillQueue } from "../../shared/backfillQueue";
 
 /**
  * 保有ポジションとウォッチリストに対する横断処理。
@@ -1251,7 +1254,7 @@ export async function syncPrices(userId: number): Promise<{
   try {
     const { summary } = await buildPortfolio(userId);
     if (summary.positionCount > 0) {
-      await db.insertSnapshot({
+      await db.upsertDailySnapshot({
         userId,
         totalValue: summary.totalValueBase.toFixed(2),
         totalCost: summary.totalCostBase.toFixed(2),
@@ -1349,36 +1352,107 @@ export async function syncFxRate(
 /**
  * 企業プロファイル（セクター等）が未取得の銘柄を補完する。
  */
+export type ProfileBatchResult = {
+  total: number;
+  processed: number;
+  updated: number;
+  skipped: number;
+  failed: Array<{ symbol: string; reason: string }>;
+  nextOffset: number | null;
+};
+
+export async function enrichProfileBatch(
+  userId: number,
+  opts: { force?: boolean; offset?: number; batchSize?: number } = {}
+): Promise<ProfileBatchResult> {
+  const force = opts.force ?? false;
+  const offset = Math.max(0, opts.offset ?? 0);
+  const batchSize = Math.min(30, Math.max(1, opts.batchSize ?? 20));
+  const [hs, ws] = await Promise.all([db.listHoldings(userId), db.listWatchlist(userId)]);
+
+  const symbols = new Map<
+    string,
+    { holdingMissing: boolean; watchMissing: boolean; watchIds: number[] }
+  >();
+  for (const h of hs) {
+    const current = symbols.get(h.symbol) ?? {
+      holdingMissing: false,
+      watchMissing: false,
+      watchIds: [],
+    };
+    current.holdingMissing ||= !h.sector || !h.profileUpdatedAt;
+    symbols.set(h.symbol, current);
+  }
+  for (const w of ws) {
+    const current = symbols.get(w.symbol) ?? {
+      holdingMissing: false,
+      watchMissing: false,
+      watchIds: [],
+    };
+    current.watchMissing ||= !w.sector;
+    current.watchIds.push(w.id);
+    symbols.set(w.symbol, current);
+  }
+
+  const targets = Array.from(symbols.entries())
+    .filter(([, state]) => force || state.holdingMissing || state.watchMissing)
+    .sort(([a], [b]) => a.localeCompare(b));
+  const batch = targets.slice(offset, offset + batchSize);
+  const failed: ProfileBatchResult["failed"] = [];
+  let updated = 0;
+  let skipped = 0;
+
+  for (const [symbol, state] of batch) {
+    try {
+      const profile = await fetchCompanyProfile(symbol);
+      if (!profile || (!profile.sector && !profile.industry)) {
+        failed.push({ symbol, reason: "Yahoo から業種情報を取得できませんでした" });
+        continue;
+      }
+      const now = new Date();
+      if (state.holdingMissing || force) {
+        await db.updateHoldingBySymbol(userId, symbol, {
+          sector: profile.sector ?? undefined,
+          industry: profile.industry ?? undefined,
+          website: profile.website ?? undefined,
+          businessSummary: profile.businessSummary ?? undefined,
+          profileUpdatedAt: now,
+        });
+      } else {
+        skipped += 1;
+      }
+      for (const watchId of state.watchIds) {
+        if (state.watchMissing || force) {
+          await db.updateWatchItem(userId, watchId, {
+            sector: profile.sector ?? undefined,
+            industry: profile.industry ?? undefined,
+          });
+        }
+      }
+      updated += 1;
+    } catch (error) {
+      failed.push({
+        symbol,
+        reason: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  const processed = offset + batch.length;
+  return {
+    total: targets.length,
+    processed,
+    updated,
+    skipped,
+    failed,
+    nextOffset: processed < targets.length ? processed : null,
+  };
+}
+
+/** 従来の設定画面向け。1 バッチの更新件数だけを返す互換 API。 */
 export async function enrichProfiles(userId: number, force = false): Promise<number> {
-  const hs = await db.listHoldings(userId);
-  const targets = force ? hs : hs.filter(h => !h.sector || !h.profileUpdatedAt);
-  let count = 0;
-
-  for (const h of targets.slice(0, 20)) {
-    const p = await fetchCompanyProfile(h.symbol);
-    if (!p) continue;
-    await db.updateHolding(userId, h.id, {
-      sector: p.sector ?? undefined,
-      industry: p.industry ?? undefined,
-      website: p.website ?? undefined,
-      businessSummary: p.businessSummary ?? undefined,
-      profileUpdatedAt: new Date(),
-    });
-    count += 1;
-  }
-
-  const ws = await db.listWatchlist(userId);
-  for (const w of (force ? ws : ws.filter(x => !x.sector)).slice(0, 20)) {
-    const p = await fetchCompanyProfile(w.symbol);
-    if (!p) continue;
-    await db.updateWatchItem(userId, w.id, {
-      sector: p.sector ?? undefined,
-      industry: p.industry ?? undefined,
-    });
-    count += 1;
-  }
-
-  return count;
+  const result = await enrichProfileBatch(userId, { force, batchSize: 20 });
+  return result.updated;
 }
 
 type NewsTarget = { symbol: string; name: string; tickerCode: string; market: Market };
@@ -1629,6 +1703,95 @@ export async function regenerateSignal(userId: number, holding: Holding) {
   });
 
   return result;
+}
+
+export type MissingSignalBatchResult = {
+  total: number;
+  eligible: number;
+  processed: number;
+  generated: number;
+  failed: Array<{ symbol: string; reason: string }>;
+  remaining: number;
+  nextOffset: number | null;
+  quotaExhausted: boolean;
+};
+
+/**
+ * 現在シグナルが無い保有銘柄だけを生成する。
+ * 既存判断を上書きしないので、全件再生成より費用が小さくユーザー編集とも競合しない。
+ */
+export async function generateMissingSignalsBatch(
+  userId: number,
+  opts: { batchSize?: number; retryFailed?: boolean; failureCooldownMs?: number } = {},
+  deps: {
+    listHoldings: typeof db.listHoldings;
+    buildPortfolio: typeof buildPortfolio;
+    listAiRuns: typeof listAiRuns;
+    regenerateSignal: typeof regenerateSignal;
+  } = {
+    listHoldings: db.listHoldings,
+    buildPortfolio,
+    listAiRuns,
+    regenerateSignal,
+  }
+): Promise<MissingSignalBatchResult> {
+  const batchSize = Math.min(6, Math.max(1, opts.batchSize ?? 4));
+  const retryFailed = opts.retryFailed ?? false;
+  const failureCooldownMs = opts.failureCooldownMs ?? 6 * 60 * 60 * 1000;
+  const [holdings, portfolio, recentRuns] = await Promise.all([
+    deps.listHoldings(userId),
+    deps.buildPortfolio(userId),
+    deps.listAiRuns(userId, { kind: "signal", limit: 300 }),
+  ]);
+
+  const holdingBySymbol = new Map<string, Holding>();
+  for (const holding of holdings) {
+    if (!holdingBySymbol.has(holding.symbol)) holdingBySymbol.set(holding.symbol, holding);
+  }
+  const missing = portfolio.groups
+    .filter(group => !group.signal)
+    .map(group => ({ ...group, value: group.marketValueBase ?? 0 }));
+  const { eligible } = selectBackfillQueue(missing, recentRuns, {
+    retryFailed,
+    failureCooldownMs,
+  });
+  const batch = eligible.slice(0, batchSize);
+  const failed: MissingSignalBatchResult["failed"] = [];
+  let generated = 0;
+  let quotaExhausted = false;
+
+  for (const group of batch) {
+    const holding = holdingBySymbol.get(group.symbol);
+    if (!holding) {
+      failed.push({ symbol: group.symbol, reason: "保有明細が見つかりません" });
+      continue;
+    }
+    try {
+      await deps.regenerateSignal(userId, holding);
+      generated += 1;
+    } catch (error) {
+      failed.push({
+        symbol: group.symbol,
+        reason: error instanceof Error ? error.message : String(error),
+      });
+      if (isQuotaError(error)) {
+        quotaExhausted = true;
+        break;
+      }
+    }
+  }
+
+  const remaining = Math.max(0, missing.length - generated);
+  return {
+    total: missing.length,
+    eligible: eligible.length,
+    processed: batch.length,
+    generated,
+    failed,
+    remaining,
+    nextOffset: quotaExhausted || remaining === 0 ? null : 0,
+    quotaExhausted,
+  };
 }
 
 export async function regenerateWatchSignal(userId: number, item: WatchlistItem) {

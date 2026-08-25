@@ -12,6 +12,7 @@ import {
 import {
   generateAndSavePlanForHolding,
   generateAndSavePlanForWatchItem,
+  generateMissingHoldingPlans,
   getPlan,
   listPlanStatus,
   listPlanOverview,
@@ -53,7 +54,9 @@ import {
 } from "../services/symbolNoteService";
 import {
   buildPortfolio,
+  enrichProfileBatch,
   enrichProfiles,
+  generateMissingSignalsBatch,
   syncDividends,
   regenerateSignal,
   syncFxRate,
@@ -629,6 +632,18 @@ export const portfolioRouter = router({
       return { count } as const;
     }),
 
+  enrichProfileBatch: protectedProcedure
+    .input(
+      z
+        .object({
+          force: z.boolean().default(false),
+          offset: z.number().int().min(0).default(0),
+          batchSize: z.number().int().min(1).max(30).default(20),
+        })
+        .default({ force: false, offset: 0, batchSize: 20 })
+    )
+    .mutation(async ({ ctx, input }) => enrichProfileBatch(ctx.user.id, input)),
+
   /**
    * 配当情報の取得。
    *
@@ -736,6 +751,28 @@ export const portfolioRouter = router({
 
       return { ok, failed, quotaExhausted, total, processed, nextOffset } as const;
     }),
+
+  generateMissingSignals: protectedProcedure
+    .input(
+      z
+        .object({
+          batchSize: z.number().int().min(1).max(6).default(4),
+          retryFailed: z.boolean().default(false),
+        })
+        .default({ batchSize: 4, retryFailed: false })
+    )
+    .mutation(async ({ ctx, input }) => generateMissingSignalsBatch(ctx.user.id, input)),
+
+  generateMissingPriceBandPlans: protectedProcedure
+    .input(
+      z
+        .object({
+          batchSize: z.number().int().min(1).max(4).default(2),
+          retryFailed: z.boolean().default(false),
+        })
+        .default({ batchSize: 2, retryFailed: false })
+    )
+    .mutation(async ({ ctx, input }) => generateMissingHoldingPlans(ctx.user.id, input)),
 
   snapshots: protectedProcedure.query(async ({ ctx }) => db.listSnapshots(ctx.user.id)),
 
@@ -910,9 +947,21 @@ export const portfolioRouter = router({
    * 買い増し圏に入っている銘柄と確認が必要な銘柄を横断で拾えるようにする。
    */
   priceBandOverview: protectedProcedure.query(async ({ ctx }) => {
-    const rows = await listPlanOverview(ctx.user.id);
+    const [rows, status] = await Promise.all([
+      listPlanOverview(ctx.user.id),
+      listPlanStatus(ctx.user.id),
+    ]);
+    const pending = status.filter(item => !item.hasPlan);
     // 構成比が多いか少ないかを判断するには全体の分布が必要なので併せて返す
-    return { rows, stats: computeOverviewStats(rows) };
+    return {
+      rows,
+      stats: computeOverviewStats(rows),
+      coverage: {
+        total: status.length,
+        ready: status.length - pending.length,
+        pending,
+      },
+    };
   }),
 
   /**

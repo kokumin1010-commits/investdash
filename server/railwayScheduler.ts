@@ -1,7 +1,14 @@
 import cron from "node-cron";
 import * as db from "./db";
 import { recordTransitions } from "./services/bandTransitionService";
-import { syncNewsForUser, syncPrices } from "./services/portfolio";
+import { saveMonthlySnapshot } from "./services/monthlySnapshotService";
+import { generateMissingHoldingPlans } from "./services/priceBandService";
+import {
+  enrichProfileBatch,
+  generateMissingSignalsBatch,
+  syncNewsForUser,
+  syncPrices,
+} from "./services/portfolio";
 import { syncSymbolNotes } from "./services/symbolNoteService";
 
 const NEWS_BATCH_SIZE = 4;
@@ -11,6 +18,8 @@ const NEWS_INTERVAL_MINUTES = 5;
 
 let priceRunActive = false;
 let newsRunActive = false;
+let backfillRunActive = false;
+const profileOffsets = new Map<number, number>();
 
 export function getNewsBatchForUtcDate(now: Date): number | null {
   const utcMinutes = now.getUTCHours() * 60 + now.getUTCMinutes();
@@ -43,8 +52,18 @@ export async function runRailwayPriceSync(trigger: "jp-close" | "us-close") {
           console.error(`[Railway scheduler] note sync failed for ${userId}:`, error);
           return { added: 0 };
         });
+        const monthly =
+          trigger === "us-close"
+            ? await saveMonthlySnapshot(userId, {
+                source: "scheduled_price_sync",
+                note: "Railway の米国市場終値同期で当月記録を更新",
+              }).catch(error => {
+                console.error(`[Railway scheduler] monthly snapshot failed for ${userId}:`, error);
+                return null;
+              })
+            : null;
         console.log(
-          `[Railway scheduler] ${trigger} user=${userId} updated=${result.updated} failed=${result.failed.length} transitions=${transitions.recorded} notes=${notes.added}`
+          `[Railway scheduler] ${trigger} user=${userId} updated=${result.updated} failed=${result.failed.length} transitions=${transitions.recorded} notes=${notes.added} monthly=${monthly ? monthly.periodYm : "skipped"}`
         );
       } catch (error) {
         console.error(`[Railway scheduler] ${trigger} user=${userId} failed:`, error);
@@ -92,6 +111,47 @@ export async function runRailwayNewsBatch(batch: number) {
   }
 }
 
+/**
+ * 再構築直後に不足している企業情報・判断・価格帯を少量ずつ埋める。
+ * 欠損だけが対象なので、完了後は no-op となり既存判断や編集済みプランを上書きしない。
+ */
+export async function runRailwayDataBackfill() {
+  if (backfillRunActive || priceRunActive || newsRunActive) {
+    console.warn("[Railway scheduler] data backfill skipped: another run active");
+    return;
+  }
+  backfillRunActive = true;
+  try {
+    const userIds = await db.listAllUserIds();
+    for (const userId of userIds) {
+      try {
+        const offset = profileOffsets.get(userId) ?? 0;
+        const profiles = await enrichProfileBatch(userId, { offset, batchSize: 10 });
+        profileOffsets.set(userId, profiles.nextOffset ?? 0);
+
+        const signals = await generateMissingSignalsBatch(userId, {
+          batchSize: 4,
+          retryFailed: false,
+        });
+        const plans = signals.quotaExhausted
+          ? null
+          : await generateMissingHoldingPlans(userId, {
+              batchSize: 2,
+              retryFailed: false,
+            });
+
+        console.log(
+          `[Railway scheduler] backfill user=${userId} profiles=${profiles.updated}/${profiles.processed} profileFailed=${profiles.failed.length} signals=${signals.generated}/${signals.processed} signalRemaining=${signals.remaining} plans=${plans ? `${plans.generated}/${plans.processed}` : "quota-skipped"} planRemaining=${plans?.remaining ?? "unknown"}`
+        );
+      } catch (error) {
+        console.error(`[Railway scheduler] data backfill user=${userId} failed:`, error);
+      }
+    }
+  } finally {
+    backfillRunActive = false;
+  }
+}
+
 function scheduleNewsBatchWindow(expression: string) {
   cron.schedule(
     expression,
@@ -128,9 +188,13 @@ export function startRailwayScheduler(): boolean {
   });
   scheduleNewsBatchWindow("*/5 22-23 * * *");
   scheduleNewsBatchWindow("0-30/5 0 * * *");
+  cron.schedule("0,20,40 1-7 * * *", () => void runRailwayDataBackfill(), {
+    timezone: "UTC",
+    noOverlap: true,
+  });
 
   console.log(
-    "[Railway scheduler] enabled: prices 06:30/21:30 UTC weekdays; news 22:00-00:30 UTC daily"
+    "[Railway scheduler] enabled: prices 06:30/21:30 UTC weekdays; news 22:00-00:30 UTC daily; data backfill every 20m 01:00-07:40 UTC"
   );
   return true;
 }
