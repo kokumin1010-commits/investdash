@@ -3,7 +3,11 @@ import { readFile, writeFile } from "node:fs/promises";
 
 const tokenFile = process.env.DEV_TOKEN_FILE ?? "/tmp/investdash-dev-token";
 const token = (await readFile(tokenFile, "utf8")).trim();
-if (!token) throw new Error("development token is empty");
+if (!token) throw new Error("passcode token is empty");
+const baseUrl = (process.env.BASE_URL ?? "http://127.0.0.1:3000").replace(/\/$/, "");
+const holdingsUrl = `${baseUrl}/holdings`;
+const buyPlansUrl = `${baseUrl}/buy-plans`;
+const expectedBuyPlansPath = new URL(buyPlansUrl).pathname;
 
 const debugPort = 9223;
 const chrome = spawn(
@@ -84,9 +88,12 @@ try {
     mobile: true,
   });
   await send("Emulation.setTouchEmulationEnabled", { enabled: true, maxTouchPoints: 5 });
-  await send("Page.navigate", {
-    url: `http://127.0.0.1:3000/holdings?devToken=${encodeURIComponent(token)}`,
-  });
+  await send("Page.navigate", { url: `${baseUrl}/` });
+  await sleep(1200);
+  await evaluate(
+    `localStorage.setItem('investdesk-passcode-token', ${JSON.stringify(token)})`
+  );
+  await send("Page.navigate", { url: holdingsUrl });
   await sleep(5000);
 
   const opened = await evaluate(`(() => {
@@ -149,10 +156,110 @@ try {
     };
   })()`);
 
+  let interactionState = null;
+  if (process.env.FULL_INTERACTION === "true") {
+    const filterResults = {};
+    for (const label of ["買い増し圏", "確認が必要", "価格帯の外", "すべて"]) {
+      const clicked = await evaluate(`(() => {
+        const button = [...document.querySelectorAll('button')].find(
+          item => item.textContent.trim().startsWith(${JSON.stringify(label)})
+        );
+        button?.click();
+        return Boolean(button);
+      })()`);
+      await sleep(350);
+      filterResults[label] = await evaluate(`({
+        clicked: ${clicked},
+        hasToyota: document.body.textContent.includes('トヨタ自動車'),
+        hasEmpty: document.body.textContent.includes('該当する銘柄はありません')
+      })`);
+    }
+
+    const searchInputFound = await evaluate(`(() => {
+      const input = document.querySelector('input[placeholder="銘柄名・ティッカー"]');
+      if (!input) return false;
+      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
+      setter?.call(input, 'NO-SUCH-SYMBOL');
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+      return true;
+    })()`);
+    await sleep(500);
+    const emptySearch = await evaluate(`({
+      hasEmpty: document.body.textContent.includes('該当する銘柄はありません'),
+      clearButton: [...document.querySelectorAll('button')].some(
+        button => button.textContent.trim() === '検索をクリアして一覧に戻す'
+      )
+    })`);
+    const clearClicked = await evaluate(`(() => {
+      const button = [...document.querySelectorAll('button')].find(
+        item => item.textContent.trim() === '検索をクリアして一覧に戻す'
+      );
+      button?.click();
+      return Boolean(button);
+    })()`);
+    await sleep(500);
+    const restoredSearch = await evaluate(
+      `document.body.textContent.includes('トヨタ自動車')`
+    );
+
+    const aiCtaClicked = await evaluate(`(() => {
+      const button = [...document.querySelectorAll('button')].find(
+        item => item.textContent.trim() === '判断が必要な銘柄を提案させる'
+      );
+      button?.click();
+      return Boolean(button);
+    })()`);
+    await sleep(15_000);
+    const aiProposalVisible = await evaluate(
+      `document.body.textContent.includes('AI の買い増し提案') && document.body.textContent.includes('トヨタ自動車')`
+    );
+
+    const planCardClicked = await evaluate(`(() => {
+      const link = [...document.querySelectorAll('a')].find(
+        item => item.href.includes('/holdings?symbol=7203.T') && item.textContent.includes('トヨタ自動車')
+      );
+      link?.click();
+      return Boolean(link);
+    })()`);
+    await sleep(900);
+    const planCardPath = await evaluate(`location.pathname + location.search`);
+
+    await send("Page.navigate", { url: buyPlansUrl });
+    await sleep(5000);
+    const consultClicked = await evaluate(`(() => {
+      const link = document.querySelector('a[href*="/consult?"]') ??
+        [...document.querySelectorAll('a')].find(
+          item => item.textContent.trim() === 'この件を相談する'
+        );
+      link?.click();
+      return Boolean(link);
+    })()`);
+    await sleep(900);
+    const consultState = await evaluate(`({
+      path: location.pathname,
+      search: location.search,
+      prefilled: Boolean(document.querySelector('textarea')?.value.includes('トヨタ自動車（7203.T）'))
+    })`);
+
+    interactionState = {
+      filterResults,
+      searchInputFound,
+      emptySearch,
+      clearClicked,
+      restoredSearch,
+      aiCtaClicked,
+      aiProposalVisible,
+      planCardClicked,
+      planCardPath,
+      consultClicked,
+      consultState,
+    };
+  }
+
   const screenshot = await send("Page.captureScreenshot", { format: "png" });
   await writeFile("/tmp/buy-plans-mobile-drawer.png", Buffer.from(screenshot.data, "base64"));
 
-  const result = { opened, drawerState, navigationState, activeState };
+  const result = { opened, drawerState, navigationState, activeState, interactionState };
   console.log(JSON.stringify(result, null, 2));
 
   const passed =
@@ -161,11 +268,29 @@ try {
     drawerState.buyButtonVisible &&
     drawerState.viewportWidth === 390 &&
     drawerState.scrollWidth <= 390 &&
-    navigationState.pathname === "/buy-plans" &&
+    navigationState.pathname === expectedBuyPlansPath &&
     activeState.activeButtonPresent &&
     activeState.activeState === "true" &&
     activeState.heading === "買い増しプラン";
-  if (!passed) process.exitCode = 1;
+  const fullInteractionPassed =
+    !interactionState ||
+    (Object.values(interactionState.filterResults).every(result => result.clicked) &&
+      interactionState.filterResults["すべて"].hasToyota &&
+      interactionState.searchInputFound &&
+      interactionState.emptySearch.hasEmpty &&
+      interactionState.emptySearch.clearButton &&
+      interactionState.clearClicked &&
+      interactionState.restoredSearch &&
+      interactionState.aiCtaClicked &&
+      interactionState.aiProposalVisible &&
+      interactionState.planCardClicked &&
+      interactionState.planCardPath.includes("/holdings?symbol=7203.T") &&
+      interactionState.consultClicked &&
+      interactionState.consultState.path.endsWith("/consult") &&
+      interactionState.consultState.search.includes("symbol=7203.T") &&
+      interactionState.consultState.search.includes("question=") &&
+      interactionState.consultState.prefilled);
+  if (!passed || !fullInteractionPassed) process.exitCode = 1;
 
   socket.close();
 } finally {

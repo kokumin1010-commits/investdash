@@ -29,3 +29,15 @@
 手机抽屉另以 Chromium CDP 做了实际交互验收：从 `/holdings` 点击可见的 Sidebar trigger，确认 drawer 与“買い増しプラン”按钮可见；点击后 URL 变为 `/buy-plans`，`h1` 为“買い増しプラン”，对应导航按钮的 `data-active` 为 `true`。视口宽 390、document scrollWidth 390，没有横向溢出；抽屉开启截图显示全部导航触控区域完整。
 
 自动化方面，新增 React Testing Library + jsdom 的真实 BuyPlans 页面渲染测试，实际点击 BUY/VERIFY/OUTSIDE/ALL 按钮，输入无结果关键字、断言空状态、点击清除按钮恢复列表，并从渲染后的提案卡读取咨询链接的 symbol/question 参数。SalesDash 代理为 4 项测试。InvestDash 全量 Vitest 共 **95 个测试文件、937 项测试，全部通过**；TypeScript 检查与生产构建也通过。
+
+## Railway 生产回归
+
+最终 InvestDash 版本 `1efd7646f23801b8d2bd63b7890528611d3f8691` 已上线。旧入口 `https://salesdash.buzzdrop.co.jp/buy-plans` 返回 308，并指向 `/investdash/buy-plans`。正确页面的“すべて”显示 Toyota 一条计划；“買い増し圏”计数为 0，Toyota 行写明“様子見（現状は買い増ししない）”，负零已改为“現在の水準が『小幅に買い増し検討』の目安”。
+
+生产搜索输入 `NO-SUCH-SYMBOL` 后出现“該当する銘柄はありません”与“検索をクリアして一覧に戻す”，点击清除后 Toyota 列表恢复。“この件を相談する”实际跳转到 `/investdash/consult?symbol=7203.T&question=...`，咨询 textarea 已预填构成比 5%、见送理由和覆写条件。
+
+持仓页 `https://salesdash.buzzdrop.co.jp/investdash/holdings?lens=BUY_NOW` 中 Toyota 的当前动作保持 **HOLD**，独立 Buffett 假设判断明确改为 **“仮に未保有なら買う”**。筛选标题、下拉选项和行内小字均使用相同措辞，不再表达“现在追加购买”。
+
+最终 Railway 生产 390×844 回归使用真实 1010 token：从持仓页实际打开手机 drawer，`drawerVisible=true`、买增按钮可见；点击后 pathname 为 `/investdash/buy-plans`、标题为“買い増しプラン”、对应导航 `data-active=true`。viewportWidth 与 document scrollWidth 均为 390，没有横向溢出。生产截图确认抽屉所有入口、触控区域和底部解锁状态均完整可见。
+
+同一 390 px 生产会话继续执行了完整点击矩阵：依次点击“買い増し圏 / 確認が必要 / 価格帯の外 / すべて”，前三项显示空状态、ALL 恢复 Toyota；输入 `NO-SUCH-SYMBOL` 后出现空状态与清除按钮，点击后列表恢复；AI 提案 CTA 可点击且提案可见；Toyota 计划卡跳转 `/investdash/holdings?symbol=7203.T`；返回后点击咨询链接，跳转 `/investdash/consult?symbol=7203.T&question=...`，textarea 确认已预填完整 Toyota 提案上下文。全部断言通过。
