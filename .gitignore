@@ -105,6 +105,7 @@ temp/
 *.db
 *.sqlite
 *.sqlite3
+railway-data-export*.json
 
 # Webdev artifacts (checkpoint zips, migrations, etc.)
 .webdev/

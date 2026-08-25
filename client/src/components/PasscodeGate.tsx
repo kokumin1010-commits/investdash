@@ -79,15 +79,16 @@ export default function PasscodeGate() {
   const canSubmit = digits.length >= MIN_LENGTH && !submitting;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-background px-4 overflow-auto">
-      <div className="w-full max-w-xs">
-        <div className="flex flex-col items-center gap-3 mb-8">
-          <div className="h-14 w-14 rounded-2xl bg-primary text-primary-foreground grid place-items-center">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-background px-4 py-8 overflow-auto">
+      <div className="w-full max-w-sm rounded-[2rem] border border-border/70 bg-card/96 p-6 shadow-[0_28px_80px_-42px_rgba(10,64,62,0.55)] sm:p-8">
+        <div className="flex flex-col items-center gap-3 mb-7">
+          <div className="h-14 w-14 rounded-2xl bg-primary text-primary-foreground grid place-items-center shadow-[0_14px_32px_-18px_color-mix(in_oklab,var(--primary)_85%,transparent)]">
             <LockKeyhole className="h-7 w-7" />
           </div>
           <div className="text-center">
-            <h1 className="text-xl font-semibold tracking-tight">InvestDesk</h1>
-            <p className="text-sm text-muted-foreground mt-1">パスコードを入力してください</p>
+            <p className="mb-1 text-[10px] font-semibold tracking-[0.22em] text-primary">PRIVATE PORTFOLIO OS</p>
+            <h1 className="text-2xl font-semibold tracking-[-0.035em]">InvestDash</h1>
+            <p className="text-sm text-muted-foreground mt-1.5">パスコードでポートフォリオを開く</p>
           </div>
         </div>
 
@@ -139,9 +140,11 @@ export default function PasscodeGate() {
           </KeypadButton>
         </div>
 
-        <p className="mt-8 text-xs text-muted-foreground text-center leading-relaxed">
+        <div className="mt-7 border-t border-border/70 pt-5">
+        <p className="text-[11px] text-muted-foreground text-center leading-relaxed">
           本アプリの分析結果は情報提供であり、投資助言ではありません。
         </p>
+        </div>
       </div>
 
       <style>{`
@@ -177,8 +180,8 @@ function KeypadButton({
       disabled={disabled}
       variant={variant === "primary" ? "default" : "outline"}
       className={cn(
-        "h-16 text-xl font-medium rounded-xl transition-transform active:scale-[0.97]",
-        variant === "default" && !muted && "bg-card hover:bg-accent",
+        "h-16 text-xl font-semibold tabular rounded-2xl transition-transform active:scale-[0.97]",
+        variant === "default" && !muted && "bg-background/70 border-border/80 shadow-[0_8px_20px_-18px_rgba(15,45,46,0.7)] hover:bg-accent",
         muted && "bg-transparent border-transparent hover:bg-accent"
       )}
       style={{ transitionDuration: "160ms", transitionTimingFunction: "cubic-bezier(0.23,1,0.32,1)" }}

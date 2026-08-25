@@ -32,15 +32,21 @@ export default function News() {
   const syncBatch = trpc.news.syncAll.useMutation();
   const syncRun = useBatchRun({
     runBatch: offset => syncBatch.mutateAsync({ offset, batchSize: 4 }),
+    shouldStop: res => res.analysisUnavailable,
     onDone: async results => {
       await utils.invalidate();
       const fetched = results.reduce((a, r) => a + r.fetched, 0);
       const analyzed = results.reduce((a, r) => a + r.analyzed, 0);
-      toast.success(
-        fetched > 0
-          ? `${fetched} 件を取得し、${analyzed} 件を分析しました`
-          : "新しいニュースはありませんでした"
-      );
+      const analysisUnavailable = results.some(r => r.analysisUnavailable);
+      if (analysisUnavailable) {
+        toast.warning(`${fetched} 件を保存しました。AI 利用枠の回復後に未分析分を再試行できます`);
+      } else {
+        toast.success(
+          fetched > 0
+            ? `${fetched} 件を取得し、${analyzed} 件を分析しました`
+            : "新しいニュースはありませんでした"
+        );
+      }
     },
     onError: e => toast.error(e instanceof Error ? e.message : "ニュースを取得できませんでした"),
   });

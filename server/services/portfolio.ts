@@ -1390,9 +1390,16 @@ export async function syncNewsForTargets(
   userId: number,
   targets: NewsTarget[],
   opts: { windowDays?: number } = {}
-): Promise<{ fetched: number; analyzed: number }> {
+): Promise<{
+  fetched: number;
+  analyzed: number;
+  analysisUnavailable: boolean;
+  failedSymbols: string[];
+}> {
   let fetched = 0;
   let analyzed = 0;
+  let analysisUnavailable = false;
+  const failedSymbols: string[] = [];
 
   for (const t of targets) {
     try {
@@ -1400,45 +1407,59 @@ export async function syncNewsForTargets(
       const raw = filterNoise(
         await searchNews(query, { market: t.market, windowDays: opts.windowDays ?? 30, limit: 14 })
       );
-      if (raw.length === 0) continue;
-
       const existing = await db.existingNewsHashes(
         userId,
         raw.map(r => r.urlHash)
       );
       const fresh = raw.filter(r => !existing.has(r.urlHash));
-      if (fresh.length === 0) continue;
+      if (fresh.length > 0) {
+        await db.insertNews(
+          fresh.map(r => ({
+            userId,
+            symbol: t.symbol,
+            title: r.title,
+            url: r.url,
+            urlHash: r.urlHash,
+            source: r.source ?? undefined,
+            publishedAt: r.publishedAt ?? undefined,
+          }))
+        );
+        fetched += fresh.length;
+      }
 
-      await db.insertNews(
-        fresh.map(r => ({
-          userId,
-          symbol: t.symbol,
-          title: r.title,
-          url: r.url,
-          urlHash: r.urlHash,
-          source: r.source ?? undefined,
-          publishedAt: r.publishedAt ?? undefined,
-        }))
+      // 前回 AI 利用枠切れで残った未分析記事も、次回の手動更新で再試行する。
+      const pending = (await db.listNews(userId, { symbol: t.symbol, limit: 14 })).filter(
+        item => !item.sentiment
       );
-      fetched += fresh.length;
+      if (pending.length === 0) continue;
 
-      const verdicts = await analyzeNewsBatch(t.name, fresh);
-      for (const v of verdicts) {
-        await db.updateNewsVerdict(userId, v.urlHash, {
-          sentiment: v.sentiment,
-          impactScore: v.impactScore,
-          summary: v.summary,
-          reasoning: v.reasoning,
-        });
-        analyzed += 1;
+      try {
+        const verdicts = await analyzeNewsBatch(t.name, pending);
+        for (const v of verdicts) {
+          await db.updateNewsVerdict(userId, v.urlHash, {
+            sentiment: v.sentiment,
+            impactScore: v.impactScore,
+            summary: v.summary,
+            reasoning: v.reasoning,
+          });
+          analyzed += 1;
+        }
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        if (/usage exhausted|412 Precondition|failed_precondition/i.test(message)) {
+          analysisUnavailable = true;
+        }
+        failedSymbols.push(t.symbol);
+        console.warn(`[portfolio] news analysis failed for ${t.symbol}:`, error);
       }
     } catch (error) {
       console.warn(`[portfolio] news sync failed for ${t.symbol}:`, error);
+      failedSymbols.push(t.symbol);
     }
   }
 
   await db.updateSettings(userId, { lastNewsSyncAt: new Date() });
-  return { fetched, analyzed };
+  return { fetched, analyzed, analysisUnavailable, failedSymbols };
 }
 
 /**
@@ -1454,6 +1475,8 @@ export async function syncNewsForUser(
 ): Promise<{
   fetched: number;
   analyzed: number;
+  analysisUnavailable: boolean;
+  failedSymbols: string[];
   total: number;
   processed: number;
   nextOffset: number | null;

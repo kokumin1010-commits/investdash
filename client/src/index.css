@@ -52,40 +52,40 @@
 }
 
 :root {
-  /* 深い藍色を基調とした、長時間の閲覧に耐える落ち着いた配色 */
-  --primary: oklch(0.42 0.09 235);
-  --primary-foreground: oklch(0.98 0.005 235);
-  --sidebar-primary: oklch(0.42 0.09 235);
-  --sidebar-primary-foreground: oklch(0.98 0.005 235);
-  --chart-1: oklch(0.52 0.1 235);
+  /* 深い青緑を基調にした、長時間使える個人投資コックピット */
+  --primary: oklch(0.39 0.075 181);
+  --primary-foreground: oklch(0.985 0.004 175);
+  --sidebar-primary: oklch(0.39 0.075 181);
+  --sidebar-primary-foreground: oklch(0.985 0.004 175);
+  --chart-1: oklch(0.49 0.09 181);
   --chart-2: oklch(0.58 0.11 165);
   --chart-3: oklch(0.65 0.13 55);
   --chart-4: oklch(0.55 0.12 300);
   --chart-5: oklch(0.6 0.1 25);
-  --radius: 0.5rem;
-  --background: oklch(0.985 0.003 90);
-  --foreground: oklch(0.24 0.012 250);
+  --radius: 0.75rem;
+  --background: oklch(0.982 0.006 88);
+  --foreground: oklch(0.235 0.017 205);
   --card: oklch(1 0 0);
   --card-foreground: oklch(0.24 0.012 250);
   --popover: oklch(1 0 0);
   --popover-foreground: oklch(0.24 0.012 250);
-  --secondary: oklch(0.965 0.005 240);
-  --secondary-foreground: oklch(0.36 0.015 250);
-  --muted: oklch(0.958 0.005 240);
-  --muted-foreground: oklch(0.52 0.012 250);
-  --accent: oklch(0.95 0.012 235);
-  --accent-foreground: oklch(0.27 0.03 235);
+  --secondary: oklch(0.955 0.01 177);
+  --secondary-foreground: oklch(0.33 0.03 183);
+  --muted: oklch(0.955 0.006 92);
+  --muted-foreground: oklch(0.5 0.016 205);
+  --accent: oklch(0.935 0.026 177);
+  --accent-foreground: oklch(0.28 0.052 181);
   --destructive: oklch(0.55 0.2 18);
   --destructive-foreground: oklch(0.99 0 0);
-  --border: oklch(0.9 0.005 240);
-  --input: oklch(0.9 0.005 240);
-  --ring: oklch(0.52 0.1 235);
-  --sidebar: oklch(0.975 0.004 240);
-  --sidebar-foreground: oklch(0.28 0.012 250);
-  --sidebar-accent: oklch(0.94 0.014 235);
-  --sidebar-accent-foreground: oklch(0.26 0.035 235);
-  --sidebar-border: oklch(0.9 0.005 240);
-  --sidebar-ring: oklch(0.52 0.1 235);
+  --border: oklch(0.89 0.01 180);
+  --input: oklch(0.89 0.01 180);
+  --ring: oklch(0.52 0.09 181);
+  --sidebar: oklch(0.968 0.012 177);
+  --sidebar-foreground: oklch(0.27 0.022 203);
+  --sidebar-accent: oklch(0.925 0.03 177);
+  --sidebar-accent-foreground: oklch(0.27 0.055 181);
+  --sidebar-border: oklch(0.88 0.015 177);
+  --sidebar-ring: oklch(0.52 0.09 181);
   /* 損益表示に用いる意味色（日本の慣習に合わせず、国際的な緑=益／赤=損を採用） */
   --gain: oklch(0.52 0.13 155);
   --loss: oklch(0.55 0.19 20);
@@ -136,7 +136,13 @@
   }
   body {
     @apply bg-background text-foreground;
+    font-family: "Noto Sans JP", "Inter", system-ui, sans-serif;
     font-feature-settings: "palt" 1;
+    letter-spacing: -0.01em;
+    min-width: 320px;
+  }
+  h1, h2, h3 {
+    letter-spacing: -0.035em;
   }
   /* 数値は等幅で桁を揃える */
   .tabular {

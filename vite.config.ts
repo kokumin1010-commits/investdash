@@ -151,8 +151,10 @@ function vitePluginManusDebugCollector(): Plugin {
 }
 
 const plugins = [react(), tailwindcss(), jsxLocPlugin(), vitePluginManusRuntime(), vitePluginManusDebugCollector()];
+const appBasePath = process.env.VITE_APP_BASE_PATH ?? "/";
 
 export default defineConfig({
+  base: appBasePath.endsWith("/") ? appBasePath : `${appBasePath}/`,
   plugins,
   resolve: {
     dedupe: ["react", "react-dom"],

@@ -42,6 +42,80 @@ type ChartResponse = {
   };
 };
 
+type ChartQuery = {
+  interval: string;
+  range: string;
+  events?: string;
+  includeAdjustedClose?: string;
+};
+
+const PUBLIC_YAHOO_CHART = "https://query1.finance.yahoo.com/v8/finance/chart";
+const PUBLIC_YAHOO_SEARCH = "https://query1.finance.yahoo.com/v1/finance/search";
+const DATA_API_QUOTA_BACKOFF_MS = 15 * 60 * 1000;
+let dataApiRetryAfter = 0;
+
+function dataApiCircuitOpen(): boolean {
+  return Date.now() < dataApiRetryAfter;
+}
+
+function rememberDataApiFailure(error: unknown): void {
+  const message = error instanceof Error ? error.message : String(error);
+  if (/usage exhausted|failed_precondition|quota/i.test(message)) {
+    dataApiRetryAfter = Date.now() + DATA_API_QUOTA_BACKOFF_MS;
+  }
+}
+
+async function fetchPublicChart(symbol: string, query: ChartQuery): Promise<ChartResponse> {
+  const params = new URLSearchParams({
+    interval: query.interval,
+    range: query.range,
+  });
+  if (query.events) {
+    params.set("events", query.events.replace(/(^|,)split(,|$)/g, "$1splits$2"));
+  }
+  if (query.includeAdjustedClose) {
+    params.set("includeAdjustedClose", query.includeAdjustedClose);
+  }
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 15_000);
+  try {
+    const response = await fetch(
+      `${PUBLIC_YAHOO_CHART}/${encodeURIComponent(symbol)}?${params.toString()}`,
+      {
+        headers: {
+          Accept: "application/json",
+          "User-Agent": "Mozilla/5.0 (compatible; InvestDash/1.0)",
+        },
+        signal: controller.signal,
+      }
+    );
+    if (!response.ok) {
+      throw new Error(`Yahoo public chart failed (${response.status} ${response.statusText})`);
+    }
+    return (await response.json()) as ChartResponse;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function fetchChart(symbol: string, query: ChartQuery): Promise<ChartResponse> {
+  if (!dataApiCircuitOpen()) {
+    try {
+      return (await callDataApi("YahooFinance/get_stock_chart", {
+        query: { symbol, region: "US", ...query },
+      })) as ChartResponse;
+    } catch (dataApiError) {
+      rememberDataApiFailure(dataApiError);
+      console.warn(
+        `[marketData] Data API unavailable for ${symbol}; trying Yahoo public chart:`,
+        dataApiError
+      );
+    }
+  }
+  return fetchPublicChart(symbol, query);
+}
+
 function num(v: unknown): number | null {
   return typeof v === "number" && Number.isFinite(v) ? v : null;
 }
@@ -70,15 +144,11 @@ export type DividendHistory = {
  */
 export async function fetchDividendHistory(symbol: string): Promise<DividendHistory | null> {
   try {
-    const res = (await callDataApi("YahooFinance/get_stock_chart", {
-      query: {
-        symbol,
-        region: "US",
-        interval: "1d",
-        range: "2y",
-        events: "div,split",
-      },
-    })) as ChartResponse;
+    const res = await fetchChart(symbol, {
+      interval: "1d",
+      range: "2y",
+      events: "div,split",
+    });
 
     const result = res?.chart?.result?.[0];
     if (!result?.meta) return null;
@@ -128,16 +198,12 @@ export async function fetchDividendHistory(symbol: string): Promise<DividendHist
  */
 export async function fetchQuote(symbol: string): Promise<Quote | null> {
   try {
-    const res = (await callDataApi("YahooFinance/get_stock_chart", {
-      query: {
-        symbol,
-        region: "US",
-        interval: "1d",
-        range: "5d",
-        // Data API のクエリ値は文字列である必要がある（真偽値を渡すと 400 になる）
-        includeAdjustedClose: "true",
-      },
-    })) as ChartResponse;
+    const res = await fetchChart(symbol, {
+      interval: "1d",
+      range: "5d",
+      // Data API のクエリ値は文字列である必要がある（真偽値を渡すと 400 になる）
+      includeAdjustedClose: "true",
+    });
 
     const meta = res?.chart?.result?.[0]?.meta;
     if (!meta) return null;
@@ -174,9 +240,11 @@ export async function fetchPriceHistory(
   interval = "1d"
 ): Promise<PriceBar[]> {
   try {
-    const res = (await callDataApi("YahooFinance/get_stock_chart", {
-      query: { symbol, region: "US", interval, range, includeAdjustedClose: "true" },
-    })) as ChartResponse;
+    const res = await fetchChart(symbol, {
+      interval,
+      range,
+      includeAdjustedClose: "true",
+    });
 
     const result = res?.chart?.result?.[0];
     const timestamps = result?.timestamp ?? [];
@@ -210,25 +278,80 @@ type ProfileResponse = {
   };
 };
 
+type SearchResponse = {
+  quotes?: Array<{
+    symbol?: unknown;
+    sector?: unknown;
+    industry?: unknown;
+  }>;
+};
+
+async function fetchPublicProfile(symbol: string): Promise<CompanyProfile | null> {
+  const params = new URLSearchParams({
+    q: symbol,
+    quotesCount: "3",
+    newsCount: "0",
+    listsCount: "0",
+  });
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 15_000);
+  try {
+    const response = await fetch(`${PUBLIC_YAHOO_SEARCH}?${params.toString()}`, {
+      headers: {
+        Accept: "application/json",
+        "User-Agent": "Mozilla/5.0 (compatible; InvestDash/1.0)",
+      },
+      signal: controller.signal,
+    });
+    if (!response.ok) return null;
+    const payload = (await response.json()) as SearchResponse;
+    const quote =
+      payload.quotes?.find(item => str(item.symbol)?.toUpperCase() === symbol.toUpperCase()) ??
+      payload.quotes?.[0];
+    if (!quote) return null;
+    const sector = str(quote.sector);
+    const industry = str(quote.industry);
+    if (!sector && !industry) return null;
+    return {
+      sector,
+      industry,
+      country: null,
+      website: null,
+      businessSummary: null,
+    };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 /**
  * 企業プロファイル（セクター・業種・事業概要）を取得する。
  */
 export async function fetchCompanyProfile(symbol: string): Promise<CompanyProfile | null> {
+  if (!dataApiCircuitOpen()) {
+    try {
+      const res = (await callDataApi("YahooFinance/get_stock_profile", {
+        query: { symbol, region: "US", lang: "en-US" },
+      })) as ProfileResponse;
+
+      const sp = res?.quoteSummary?.result?.[0]?.summaryProfile;
+      if (sp) {
+        return {
+          sector: str(sp.sector),
+          industry: str(sp.industry),
+          country: str(sp.country),
+          website: str(sp.website),
+          businessSummary: str(sp.longBusinessSummary),
+        };
+      }
+    } catch (error) {
+      rememberDataApiFailure(error);
+      console.warn(`[marketData] Data API profile failed for ${symbol}; trying public search:`, error);
+    }
+  }
+
   try {
-    const res = (await callDataApi("YahooFinance/get_stock_profile", {
-      query: { symbol, region: "US", lang: "en-US" },
-    })) as ProfileResponse;
-
-    const sp = res?.quoteSummary?.result?.[0]?.summaryProfile;
-    if (!sp) return null;
-
-    return {
-      sector: str(sp.sector),
-      industry: str(sp.industry),
-      country: str(sp.country),
-      website: str(sp.website),
-      businessSummary: str(sp.longBusinessSummary),
-    };
+    return await fetchPublicProfile(symbol);
   } catch (error) {
     console.warn(`[marketData] fetchCompanyProfile failed for ${symbol}:`, error);
     return null;

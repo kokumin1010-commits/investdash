@@ -105,15 +105,23 @@ export default function Dashboard() {
 
   const newsRun = useBatchRun({
     runBatch: offset => syncNewsBatch.mutateAsync({ offset, batchSize: 4 }),
+    shouldStop: res => res.analysisUnavailable,
     onDone: async results => {
       await utils.invalidate();
       const fetched = results.reduce((a, r) => a + r.fetched, 0);
       const analyzed = results.reduce((a, r) => a + r.analyzed, 0);
-      toast.success(
-        fetched > 0
-          ? `${fetched} 件のニュースを取得し、${analyzed} 件を分析しました`
-          : "新しいニュースはありませんでした"
-      );
+      const analysisUnavailable = results.some(r => r.analysisUnavailable);
+      if (analysisUnavailable) {
+        toast.warning(
+          `${fetched} 件のニュースを保存しました。AI 利用枠が回復すると未分析分を再分析できます`
+        );
+      } else {
+        toast.success(
+          fetched > 0
+            ? `${fetched} 件のニュースを取得し、${analyzed} 件を分析しました`
+            : "新しいニュースはありませんでした"
+        );
+      }
     },
     onError: e => toast.error(e instanceof Error ? e.message : "ニュースを取得できませんでした"),
   });

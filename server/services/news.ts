@@ -61,7 +61,7 @@ export async function searchNews(
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 15000);
     const res = await fetch(url, {
-      headers: { "User-Agent": "Mozilla/5.0 (compatible; InvestDesk/1.0)" },
+      headers: { "User-Agent": "Mozilla/5.0 (compatible; InvestDash/1.0)" },
       signal: controller.signal,
     });
     clearTimeout(timer);

@@ -28,7 +28,7 @@ queryClient.getMutationCache().subscribe(event => {
 const trpcClient = trpc.createClient({
   links: [
     httpBatchLink({
-      url: "/api/trpc",
+      url: `${import.meta.env.BASE_URL.replace(/\/$/, "")}/api/trpc`,
       transformer: superjson,
       headers() {
         // パスコード認証で得たトークンを全リクエストに付与する

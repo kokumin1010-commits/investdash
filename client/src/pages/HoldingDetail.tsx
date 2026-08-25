@@ -141,9 +141,17 @@ export default function HoldingDetail({ params }: { params: { id: string } }) {
   const syncNews = trpc.news.syncOne.useMutation({
     onSuccess: async res => {
       await utils.invalidate();
-      toast.success(
-        res.fetched > 0 ? `${res.fetched} 件のニュースを取得しました` : "新しいニュースはありませんでした"
-      );
+      if (res.analysisUnavailable) {
+        toast.warning(
+          `${res.fetched} 件のニュースを保存しました。AI 利用枠の回復後に再分析できます`
+        );
+      } else {
+        toast.success(
+          res.fetched > 0
+            ? `${res.fetched} 件のニュースを取得しました`
+            : "新しいニュースはありませんでした"
+        );
+      }
     },
     onError: e => toast.error(e.message),
   });

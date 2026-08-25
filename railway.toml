@@ -1,0 +1,9 @@
+[build]
+builder = "NIXPACKS"
+buildCommand = "corepack enable && pnpm install --frozen-lockfile && pnpm build"
+
+[deploy]
+startCommand = "pnpm railway:start"
+healthcheckPath = "/healthz"
+healthcheckTimeout = 120
+restartPolicyType = "ALWAYS"

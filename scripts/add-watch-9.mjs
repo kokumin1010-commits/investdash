@@ -1,6 +1,7 @@
 // AI が提案した未保有 9 銘柄をウォッチリストに登録する。
 // 目標価格は指定せず null にする（後で AI に価格帯を提案させるため）。
-const BASE = "http://127.0.0.1:3000";
+const BASE = process.env.SEED_BASE ?? "http://127.0.0.1:3000";
+const PASSCODE = process.env.SEED_PASSCODE ?? "1010";
 
 const ITEMS = [
   { code: "CDNS", watchReason: "EDA の二強の一角。半導体設計の必需品で景気に左右されにくい収益構造。AI チップの設計需要が増えるほどライセンス収入が伸びる。" },
@@ -14,15 +15,12 @@ const ITEMS = [
   { code: "CRM", watchReason: "企業向けソフトの最大手。AI エージェントの追加課金が浸透すれば既存顧客からの単価上昇が見込める。PE 23 倍台。" },
 ];
 
-const token = process.env.TOKEN;
-if (!token) throw new Error("TOKEN env required");
-
-async function call(path, json) {
+async function call(path, json, token) {
   const res = await fetch(`${BASE}/api/trpc/${path}`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      Authorization: `Bearer ${token}`,
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
     },
     body: JSON.stringify({ json }),
   });
@@ -34,13 +32,19 @@ async function call(path, json) {
   }
 }
 
+const unlock = await call("auth.unlock", { passcode: PASSCODE });
+const token = unlock?.result?.data?.json?.token;
+if (!token) {
+  throw new Error(unlock?.error?.json?.message ?? "パスコード認証に失敗しました");
+}
+
 for (const item of ITEMS) {
   const out = await call("watchlist.add", {
     code: item.code,
     watchReason: item.watchReason,
     priority: "MEDIUM",
     targetPrice: null,
-  });
+  }, token);
   const ok = out?.result?.data?.json;
   const err = out?.error?.json?.message ?? out?.error?.message ?? out?.raw;
   console.log(item.code, ok ? `OK id=${ok.id} ${ok.symbol}` : `FAIL ${err}`);

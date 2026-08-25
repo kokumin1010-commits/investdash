@@ -23,7 +23,28 @@ type PasscodeContextValue = {
 const PasscodeContext = createContext<PasscodeContextValue | null>(null);
 
 export function PasscodeProvider({ children }: { children: ReactNode }) {
-  const [token, setToken] = useState<string | null>(() => getStoredToken());
+  const [token, setToken] = useState<string | null>(() => {
+    if (import.meta.env.DEV) {
+      const params = new URLSearchParams(window.location.search);
+      if (params.get("forceLock") === "1") {
+        clearToken();
+        return null;
+      }
+    }
+
+    const stored = getStoredToken();
+    if (stored) return stored;
+
+    if (import.meta.env.DEV) {
+      const previewToken = new URLSearchParams(window.location.search).get("devToken");
+      if (previewToken) {
+        storeToken(previewToken);
+        return previewToken;
+      }
+    }
+
+    return null;
+  });
   // 解錠操作を経た直後は auth.me の検証結果を待たずに解錠済みとして扱う。
   // トークンはサーバーが発行した直後なので有効性は確定している。
   const [justUnlocked, setJustUnlocked] = useState(false);

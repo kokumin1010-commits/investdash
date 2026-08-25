@@ -1,8 +1,8 @@
 import type { CreateExpressContextOptions } from "@trpc/server/adapters/express";
 import type { User } from "../../drizzle/schema";
-import { sdk } from "./sdk";
-import { verifyToken } from "../services/passcode";
 import { getUserById } from "../db";
+import { verifyToken } from "../services/passcode";
+import { sdk } from "./sdk";
 
 export type TrpcContext = {
   req: CreateExpressContextOptions["req"];
@@ -10,11 +10,6 @@ export type TrpcContext = {
   user: User | null;
 };
 
-/**
- * `Authorization: Bearer <token>` からパスコードセッションを解決する。
- * このアプリは Manus OAuth の代わりにパスコード認証を使うため、
- * まずこちらを優先して判定する。
- */
 async function resolvePasscodeUser(
   req: CreateExpressContextOptions["req"]
 ): Promise<User | null> {
@@ -35,7 +30,6 @@ export async function createContext(
 ): Promise<TrpcContext> {
   let user: User | null = null;
 
-  // 1) パスコードセッションを優先
   try {
     user = await resolvePasscodeUser(opts.req);
   } catch (error) {
@@ -43,11 +37,10 @@ export async function createContext(
     user = null;
   }
 
-  // 2) 従来の Manus OAuth（cron からの呼び出しなどで使う）
   if (!user) {
     try {
       user = await sdk.authenticateRequest(opts.req);
-    } catch (error) {
+    } catch {
       // Authentication is optional for public procedures.
       user = null;
     }

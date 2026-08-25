@@ -3,7 +3,7 @@ import { SidebarProvider } from "@/components/ui/sidebar";
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import NotFound from "@/pages/NotFound";
-import { Route, Switch } from "wouter";
+import { Route, Router as WouterRouter, Switch } from "wouter";
 import ErrorBoundary from "./components/ErrorBoundary";
 import { PasscodeProvider } from "./contexts/PasscodeContext";
 import { ThemeProvider } from "./contexts/ThemeContext";
@@ -19,7 +19,7 @@ import Consult from "./pages/Consult";
 import SettingsPage from "./pages/Settings";
 import Watchlist from "./pages/Watchlist";
 
-function Router() {
+function AppRoutes() {
   return (
     <Switch>
       <Route path="/" component={Dashboard} />
@@ -40,6 +40,11 @@ function Router() {
 }
 
 function App() {
+  const basePath =
+    import.meta.env.BASE_URL === "/"
+      ? undefined
+      : import.meta.env.BASE_URL.replace(/\/$/, "");
+
   return (
     <ErrorBoundary>
       <ThemeProvider defaultTheme="light" switchable>
@@ -48,7 +53,9 @@ function App() {
           <PasscodeProvider>
             <SidebarProvider>
               <DashboardLayout>
-                <Router />
+                <WouterRouter base={basePath}>
+                  <AppRoutes />
+                </WouterRouter>
               </DashboardLayout>
             </SidebarProvider>
           </PasscodeProvider>

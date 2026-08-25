@@ -29,6 +29,7 @@ import {
   Lock,
   Newspaper,
   PanelLeft,
+  TrendingUp,
   ScanLine,
   Settings,
   Wallet,
@@ -158,7 +159,7 @@ function DashboardLayoutContent({
           className="border-r-0"
           disableTransition={isResizing}
         >
-          <SidebarHeader className="h-16 justify-center">
+          <SidebarHeader className="h-18 justify-center border-b border-sidebar-border/70">
             <div className="flex items-center gap-3 px-2 transition-all w-full">
               <button
                 onClick={toggleSidebar}
@@ -168,10 +169,18 @@ function DashboardLayoutContent({
                 <PanelLeft className="h-4 w-4 text-muted-foreground" />
               </button>
               {!isCollapsed ? (
-                <div className="flex items-center gap-2 min-w-0">
-                  <span className="font-semibold tracking-tight truncate">
-                    InvestDesk
-                  </span>
+                <div className="flex items-center gap-2.5 min-w-0">
+                  <div className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-primary text-primary-foreground shadow-[0_8px_24px_-12px_color-mix(in_oklab,var(--primary)_80%,transparent)]">
+                    <TrendingUp className="h-4 w-4" />
+                  </div>
+                  <div className="min-w-0">
+                    <span className="block truncate text-[15px] font-semibold tracking-[-0.02em]">
+                      InvestDash
+                    </span>
+                    <span className="block truncate text-[9px] font-semibold tracking-[0.18em] text-muted-foreground">
+                      PRIVATE PORTFOLIO OS
+                    </span>
+                  </div>
                 </div>
               ) : null}
             </div>
@@ -243,12 +252,18 @@ function DashboardLayoutContent({
 
       <SidebarInset>
         {isMobile && (
-          <div className="flex border-b h-14 items-center justify-between bg-background/95 px-2 backdrop-blur supports-[backdrop-filter]:backdrop-blur sticky top-0 z-40">
+          <div className="flex border-b h-16 items-center justify-between bg-background/92 px-3 backdrop-blur-xl supports-[backdrop-filter]:backdrop-blur-xl sticky top-0 z-40">
             <div className="flex items-center gap-2">
-              <SidebarTrigger className="h-9 w-9 rounded-lg bg-background" />
-              <div className="flex items-center gap-3">
-                <div className="flex flex-col gap-1">
-                  <span className="tracking-tight text-foreground">
+              <SidebarTrigger className="h-10 w-10 rounded-xl border border-border/70 bg-card shadow-sm" />
+              <div className="flex items-center gap-2.5">
+                <div className="grid h-8 w-8 place-items-center rounded-lg bg-primary text-primary-foreground">
+                  <TrendingUp className="h-3.5 w-3.5" />
+                </div>
+                <div className="flex flex-col">
+                  <span className="text-[10px] font-semibold tracking-[0.14em] text-primary">
+                    INVESTDASH
+                  </span>
+                  <span className="text-sm font-medium tracking-tight text-foreground">
                     {activeMenuItem?.label ?? "Menu"}
                   </span>
                 </div>
@@ -256,7 +271,7 @@ function DashboardLayoutContent({
             </div>
           </div>
         )}
-        <main className="flex-1 p-4">{children}</main>
+        <main className="flex-1 p-4 sm:p-5 lg:p-7">{children}</main>
       </SidebarInset>
     </>
   );

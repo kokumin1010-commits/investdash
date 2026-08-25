@@ -1,6 +1,6 @@
 # 内蔵 LLM プロキシのモデル別挙動（実測）
 
-2026-08-15 に InvestDesk で検証した結果。`response_format: json_schema` を指定しても
+2026-08-15 に InvestDash で検証した結果。`response_format: json_schema` を指定しても
 モデルによってスキーマが無視されるため、モデル選定はコードの前提条件になる。
 
 ## JSON スキーマ遵守の実測結果

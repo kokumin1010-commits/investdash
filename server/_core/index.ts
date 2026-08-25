@@ -6,14 +6,16 @@ import { createExpressMiddleware } from "@trpc/server/adapters/express";
 import { registerOAuthRoutes } from "./oauth";
 import { registerStorageProxy } from "./storageProxy";
 import { appRouter } from "../routers";
-import { createContext } from "./context";
-import { serveStatic, setupVite } from "./vite";
 import {
   syncNewsHandler,
   syncPricesHandler,
   urgentReportHandler,
   weeklyReportHandler,
 } from "../scheduled";
+import { createContext } from "./context";
+import { serveStatic, setupVite } from "./vite";
+import { registerRailwayFileStorage } from "../railwayFileStorage";
+import { startRailwayScheduler } from "../railwayScheduler";
 
 function isPortAvailable(port: number): Promise<boolean> {
   return new Promise(resolve => {
@@ -37,9 +39,13 @@ async function findAvailablePort(startPort: number = 3000): Promise<number> {
 async function startServer() {
   const app = express();
   const server = createServer(app);
+  app.get("/healthz", (_req, res) => {
+    res.json({ ok: true, service: "investdash", version: process.env.RAILWAY_GIT_COMMIT_SHA ?? "local" });
+  });
   // Configure body parser with larger size limit for file uploads
   app.use(express.json({ limit: "50mb" }));
   app.use(express.urlencoded({ limit: "50mb", extended: true }));
+  registerRailwayFileStorage(app);
   registerStorageProxy(app);
   registerOAuthRoutes(app);
   // tRPC API
@@ -50,10 +56,9 @@ async function startServer() {
       createContext,
     })
   );
-
-  // Heartbeat（定期実行）コールバック。Vite / 静的配信のフォールスルーより前に登録する。
   app.post("/api/scheduled/syncPrices", syncPricesHandler);
   app.post("/api/scheduled/syncNews", syncNewsHandler);
+  app.post("/api/scheduled/syncNews/:batch", syncNewsHandler);
   app.post("/api/scheduled/weeklyReport", weeklyReportHandler);
   app.post("/api/scheduled/urgentReport", urgentReportHandler);
   // development mode uses Vite, production mode uses static files
@@ -63,8 +68,11 @@ async function startServer() {
     serveStatic(app);
   }
 
-  const preferredPort = parseInt(process.env.PORT || "3000");
-  const port = await findAvailablePort(preferredPort);
+  const preferredPort = parseInt(process.env.PORT || "3000", 10);
+  const port =
+    process.env.NODE_ENV === "production"
+      ? preferredPort
+      : await findAvailablePort(preferredPort);
 
   if (port !== preferredPort) {
     console.log(`Port ${preferredPort} is busy, using port ${port} instead`);
@@ -72,6 +80,7 @@ async function startServer() {
 
   server.listen(port, () => {
     console.log(`Server running on http://localhost:${port}/`);
+    startRailwayScheduler();
   });
 }
 

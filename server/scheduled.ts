@@ -9,7 +9,7 @@
 import type { Request, Response } from "express";
 import * as db from "./db";
 import { sdk } from "./_core/sdk";
-import { regenerateSignal, syncNewsForUser, syncPrices } from "./services/portfolio";
+import { syncNewsForUser, syncPrices } from "./services/portfolio";
 import { createWeeklyReport } from "./services/reportService";
 import { createUrgentReports } from "./services/urgentReport";
 import { recordTransitions } from "./services/bandTransitionService";
@@ -214,9 +214,24 @@ export async function urgentReportHandler(req: Request, res: Response) {
   }
 }
 
-/** ニュースの定期取得・AI 分析・シグナル再生成 */
+/**
+ * ニュースの定期取得・AI 分析。
+ *
+ * Heartbeat は 1 回 2 分までなので、URL の batch 番号を 4 銘柄単位の
+ * offset に変換する。静的な複数 cron が別々の batch URL を呼ぶことで、
+ * DB に実行状態を持たず、再試行されても同じ範囲だけを冪等に処理できる。
+ */
 export async function syncNewsHandler(req: Request, res: Response) {
   if (!(await assertCron(req, res))) return;
+
+  const batchRaw = req.params.batch ?? "0";
+  const batchIndex = Number(batchRaw);
+  if (!Number.isInteger(batchIndex) || batchIndex < 0 || batchIndex > 99) {
+    res.status(400).json({ error: "invalid-news-batch", batch: batchRaw });
+    return;
+  }
+  const batchSize = 4;
+  const offset = batchIndex * batchSize;
 
   try {
     const userIds = await db.listAllUserIds();
@@ -224,7 +239,11 @@ export async function syncNewsHandler(req: Request, res: Response) {
       userId: number;
       fetched: number;
       analyzed: number;
-      signals: number;
+      analysisUnavailable: boolean;
+      failedSymbols: string[];
+      total: number;
+      processed: number;
+      nextOffset: number | null;
       skipped?: boolean;
     }[] = [];
 
@@ -232,26 +251,21 @@ export async function syncNewsHandler(req: Request, res: Response) {
       try {
         const settings = await db.getSettings(userId);
         if (!settings.autoNewsEnabled) {
-          results.push({ userId, fetched: 0, analyzed: 0, signals: 0, skipped: true });
+          results.push({
+            userId,
+            fetched: 0,
+            analyzed: 0,
+            analysisUnavailable: false,
+            failedSymbols: [],
+            total: 0,
+            processed: offset,
+            nextOffset: null,
+            skipped: true,
+          });
           continue;
         }
 
-        const news = await syncNewsForUser(userId);
-
-        // 影響度の高いニュースが入った銘柄のシグナルを再生成する
-        let signals = 0;
-        const holdings = await db.listHoldings(userId);
-        for (const holding of holdings) {
-          try {
-            await regenerateSignal(userId, holding);
-            signals += 1;
-          } catch (error) {
-            console.error(
-              `[cron:syncNews] signal failed for user ${userId} / ${holding.symbol}:`,
-              error
-            );
-          }
-        }
+        const news = await syncNewsForUser(userId, { offset, batchSize });
 
         // 古いニュースを整理する
         await db.pruneOldNews(userId, 90);
@@ -266,14 +280,32 @@ export async function syncNewsHandler(req: Request, res: Response) {
           console.error(`[cron:syncNews] note sync failed for user ${userId}:`, error);
         }
 
-        results.push({ userId, fetched: news.fetched, analyzed: news.analyzed, signals });
+        results.push({
+          userId,
+          fetched: news.fetched,
+          analyzed: news.analyzed,
+          analysisUnavailable: news.analysisUnavailable,
+          failedSymbols: news.failedSymbols,
+          total: news.total,
+          processed: news.processed,
+          nextOffset: news.nextOffset,
+        });
       } catch (error) {
         console.error(`[cron:syncNews] user ${userId} failed:`, error);
-        results.push({ userId, fetched: 0, analyzed: 0, signals: 0 });
+        results.push({
+          userId,
+          fetched: 0,
+          analyzed: 0,
+          analysisUnavailable: false,
+          failedSymbols: [],
+          total: 0,
+          processed: offset,
+          nextOffset: null,
+        });
       }
     }
 
-    res.json({ ok: true, users: userIds.length, results });
+    res.json({ ok: true, batch: batchIndex, offset, batchSize, users: userIds.length, results });
   } catch (error) {
     console.error("[cron:syncNews] fatal:", error);
     res.status(500).json(errorPayload(error, req));
