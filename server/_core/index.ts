@@ -15,6 +15,8 @@ import {
 import { createContext } from "./context";
 import { serveStatic, setupVite } from "./vite";
 import { registerRailwayFileStorage } from "../railwayFileStorage";
+import { getUserById } from "../db";
+import { verifyToken } from "../services/passcode";
 import { startRailwayScheduler } from "../railwayScheduler";
 
 function isPortAvailable(port: number): Promise<boolean> {
@@ -41,6 +43,19 @@ async function startServer() {
   const server = createServer(app);
   app.get("/healthz", (_req, res) => {
     res.json({ ok: true, service: "investdash", version: process.env.RAILWAY_GIT_COMMIT_SHA ?? "local" });
+  });
+  app.get("/healthz/auth", async (req, res) => {
+    const authorization = req.headers.authorization;
+    const bearerPresent = authorization?.startsWith("Bearer ") ?? false;
+    const token = bearerPresent ? authorization!.slice("Bearer ".length).trim() : "";
+    const ownerUserId = token ? await verifyToken(token) : null;
+    const user = ownerUserId ? await getUserById(ownerUserId) : null;
+    res.json({
+      authorizationPresent: Boolean(authorization),
+      bearerPresent,
+      tokenValid: Boolean(ownerUserId),
+      userResolved: Boolean(user),
+    });
   });
   // Configure body parser with larger size limit for file uploads
   app.use(express.json({ limit: "50mb" }));

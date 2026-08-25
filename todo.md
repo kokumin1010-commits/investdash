@@ -39,12 +39,19 @@
 - [x] 检查 Railway 项目 5248baa0-4810-4a83-b0c4-cdd63bef47bb 的现有服务、数据库、仓库和域名配置
 - [x] 检查 salesdash.buzzdrop.co.jp 当前技术栈及 /investdash 路径的反向代理或应用路由方式
 - [ ] 改造 InvestDash 的数据库、认证、静态资源和基础路径以兼容 Railway 外部运行环境
-- [ ] 为 Railway 配置持久数据库与必要环境变量，迁移 156 条持仓及关联业务数据
+- [x] 为 Railway 配置持久数据库与必要环境变量，迁移 156 条持仓及关联业务数据
 - [ ] 将定时行情与新闻任务改为 Railway 可持续运行的调度方式
 - [ ] 经用户确认后部署 InvestDash 到指定 Railway 项目
 - [ ] 将 salesdash.buzzdrop.co.jp/investdash 路由接入 Railway 服务并验证 HTTPS
 - [ ] 验证 Railway 生产环境的 1010 解锁、真实数据、手动行情、新闻与定时任务
 - [ ] 更新最终恢复报告与运维说明，交付 Railway 公开网址
-- [ ] 验证 Railway MySQL DATABASE_URL 的迁移、应用启动和读写流程
+- [ ] 为 SalesDash 代理加入 investdash.railway.internal:8080 安全默认上游并验证
+- [x] 验证 Railway MySQL DATABASE_URL 的迁移、应用启动和读写流程
 - [x] 为截图历史存储提供 Railway S3 兼容实现或明确的安全降级
 - [ ] 完成 /investdash 子路径、1010 鉴权、数据库读写和真实页面加载的 Railway 端到端验收
+- [ ] 盘点 SalesDash 现有 schema、迁移文件和当前数据持久化方式
+- [ ] 在同一 Railway MySQL 实例新建 salesdash database 与最小权限独立用户
+- [ ] 为 SalesDash 配置独立 DATABASE_URL 并安全应用其数据库迁移
+- [ ] 验证 SalesDash 只能访问 salesdash database，InvestDash 继续使用 railway database
+- [ ] 修复 SalesDash 私网代理的 Authorization/Cookie 转发并验证密码 token 可访问受保护 tRPC
+- [ ] 用 Railway 直连认证诊断区分 Authorization、JWT 与用户解析根因，修复后移除诊断端点

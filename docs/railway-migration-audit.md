@@ -60,3 +60,35 @@ SalesDash 仓库新增 `/investdash` 私网代理，目标由 `INVESTDASH_UPSTRE
 截图历史已增加 Railway 持久卷存储：设置 `STORAGE_LOCAL_DIR=/data/investdash-files` 并挂载 volume 后，上传文件写入持久目录，浏览器通过 `/investdash/files/...` 读取；未设置该变量时仍保留 Manus Forge S3 逻辑。专项测试验证了写入、读取、随机后缀和子路径 URL。
 
 数据库迁移脚本会在 Railway 服务启动前执行 Drizzle 历史迁移；当前真实数据库已通过 migrate-only 模式验证“Database migrations are current”。受控导出覆盖 26 张业务表，其中 holdings 156、monthlyHoldings 156、watchlist 11、newsItems 14、portfolioSnapshots 7，文件权限为 600 并被 `.gitignore` 排除，导出脚本也已验证可正常退出。
+
+## Railway 执行状态
+
+2026-08-25 已在 `sales-dash / production` environment 中创建独立 MySQL 服务与 `mysql-volume`。Railway 架构视图显示服务 `Online · Initializing`；现有 `main-sales-management-system` 保持 Online，没有连接或修改该新数据库。下一步是等待 MySQL ready，再创建 GitHub `investdash/railway-migration` 服务并使用变量引用连接该数据库。
+
+Railway 的 GitHub App 已列出 `kokumin1010-commits/investdash`，说明新服务可以直接连接已推送的 `railway-migration` 分支，无需调整仓库授权。创建服务时仍需在 Settings 中把 branch 从默认 `main` 改为 `railway-migration`，避免部署旧版本。
+
+已创建 Railway 服务 `investdash`，Service ID 为 `de7ff767-7acd-428c-bbe7-e759bced5203`。生产来源已从默认 `main` 切换到 `railway-migration`；该变更目前与 MySQL/服务创建一起处于 Railway 的 staged changes，尚未点击 Deploy。现有 SalesDash 服务仍为 Online。
+
+InvestDash 的 Raw Editor 已填写以下变量，等待点击 Update Variables：`DATABASE_URL` 引用 `MySQL.MYSQL_URL`；`VITE_APP_BASE_PATH=/investdash/`；`PUBLIC_BASE_PATH=/investdash`；`STORAGE_LOCAL_DIR=/data/investdash-files`；`INVESTDASH_SCHEDULER_ENABLED=false`；`OPENAI_API_KEY` 引用 `main-sales-management-system.OPENAI_API_KEY`；`OPENAI_MODEL=gpt-4.1-mini`；`NODE_ENV=production`；另有独立随机 `JWT_SECRET`。文档不保存 JWT 或任何 API 密钥值。
+
+MySQL 已从 Initializing 转为 Online。Raw Editor 的变量已提交到 Railway staged changes；在首轮应用部署、数据库导入和页面验证完成前，`INVESTDASH_SCHEDULER_ENABLED` 保持 `false`，避免空库或迁移中途触发自动任务。
+
+持久卷首次创建时 Railway 的服务选择结果落在 `main-sales-management-system`，生成了 `main-sales-management-system-volume`（挂载 `/data`）。该卷仍只是 staged change、没有部署或写入数据。必须先删除该错误卷，再明确选择 `investdash` 重建；在修正前不会点击 Deploy。
+
+错误的 SalesDash 卷连接已移除，SalesDash 卡片恢复 Online 且无 staged change。随后通过服务名筛选 `investdash` 重新创建卷；架构视图现显示 `investdash-volume` 隶属于 InvestDash，服务为 `New · 3 Settings`，挂载路径 `/data`。全部变更仍未 Deploy。
+
+六项变更已应用，首次 InvestDash deployment ID 为 `434eed77-737e-4490-9e1c-b2bca14955f5`。Railway 当前状态为 `BUILDING`，日志显示 Nixpacks 正在获取构建环境并安装依赖；界面暂时显示 `Service is offline` 是因为尚无完成的首个 deployment，不是健康检查失败。日志中的 Dockerfile `undefined-var` 为生成器规则警告，当前未导致构建中止。
+
+Railway 实际构建计划为 Node.js 24、pnpm 10、OpenSSL；install 执行 `pnpm i --frozen-lockfile`，build 执行 `corepack enable && pnpm install --frozen-lockfile && pnpm build`，start 使用 `pnpm railway:start`。依赖安装已完成，当前进入生产 build 步骤，尚未出现应用代码错误。
+
+首次容器启动日志确认镜像与持久卷均成功，但 `DATABASE_URL` 未进入实际 runtime，`railway-start.mjs` 因此主动退出。根因是 Raw Editor 的内容没有被 Railway 编辑器接收，页面仍显示源代码扫描产生的 Suggested Variables。现已改用建议变量表单逐项填写：`DATABASE_URL` 指向 `MySQL.MYSQL_URL`、JWT 使用独立随机值、`OPENAI_API_KEY` 指向 SalesDash 同名变量；尚未点击表单底部 Add，因此不会把占位值误部署。
+
+Suggested Variables 表单已完成并点击 Add。Railway 现明确显示 **8 Service Variables**：`DATABASE_URL`、`INVESTDASH_SCHEDULER_ENABLED`、`JWT_SECRET`、`OPENAI_API_KEY`、`OPENAI_MODEL`、`PUBLIC_BASE_PATH`、`STORAGE_LOCAL_DIR`、`VITE_APP_BASE_PATH`；全部以掩码显示并处于 `Edited · 8 Changes`。下一步应用这些变量以触发修复部署。
+
+修复 deployment `f5081a2e-d46e-42f9-9437-25e0037afcb5` 已 Completed，InvestDash 服务状态为 **Online**。运行日志确认：`[Railway] Database migrations are current`、服务器监听 `localhost:8080`、调度器仍为 disabled、持久卷存储启用于 `/data/investdash-files`。OAuth 缺少 `OAUTH_SERVER_URL` 的日志不影响个人 1010 パスコード模式；Railway 版不要求 Manus OAuth。
+
+使用 MySQL 的公共 TCP 代理执行一次受控导入。首轮在 `brokerBalances.capturedAt` 遇到 ISO 8601 字符串与 MySQL DATETIME 格式差异；导入脚本已改为根据 `SHOW COLUMNS` 类型把 ISO 时间转换为 JavaScript Date。幂等重试成功恢复 holdings 156、monthlyHoldings 156、watchlist 11、newsItems 14、portfolioSnapshots 7、interestAssets 4、brokerBalances 1、monthlySnapshots 1、passcodeAuth 1 和 users 1；导出文件与数据库凭据均未提交 Git。
+
+独立只读核验脚本随后连接 Railway MySQL，对 users、holdings、watchlist、monthlyHoldings、monthlySnapshots、newsItems、passcodeAuth、portfolioSnapshots、interestAssets、brokerBalances 共 10 张关键表逐项执行 COUNT；全部与导出预期一致并返回 OK。
+
+SalesDash 主分支已推送私网代理提交 `1b5b37b5`。公开健康端点 [https://salesdash.buzzdrop.co.jp/investdash/healthz](https://salesdash.buzzdrop.co.jp/investdash/healthz) 返回 `application/json` 与 `{"ok":true,"service":"investdash","version":"386cabce7e417fb72a839bc444be6659d5a332c6"}`，证明 HTTPS → SalesDash → `investdash.railway.internal:8080` 链路已接通。公开首页标题为 `InvestDash — 個人投資ダッシュボード`，脚本资源 `/investdash/assets/index-DZyplF-o.js` 返回 HTTP/2 200 和 JavaScript content-type。浏览器已显示独立 InvestDash 1010 パスコード页，不受 SalesDash 现有页面或登录流程影响。

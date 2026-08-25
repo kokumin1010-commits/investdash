@@ -13,6 +13,17 @@ if (payload.format !== "investdash-railway-export-v1") {
   throw new Error("Unsupported InvestDash export format");
 }
 
+function normalizeValue(value, columnType) {
+  if (
+    typeof value === "string" &&
+    /^(date|datetime|timestamp)/i.test(columnType) &&
+    /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z$/.test(value)
+  ) {
+    return new Date(value);
+  }
+  return value;
+}
+
 const connection = await mysql.createConnection(databaseUrl);
 try {
   await connection.query("SET FOREIGN_KEY_CHECKS = 0");
@@ -35,12 +46,17 @@ try {
       `SHOW COLUMNS FROM ${connection.escapeId(tableName)}`
     );
     const allowedColumns = new Set(columnRows.map(column => column.Field));
+    const columnTypes = new Map(
+      columnRows.map(column => [column.Field, String(column.Type ?? "")])
+    );
 
     let imported = 0;
     for (const row of rows) {
       const columns = Object.keys(row).filter(column => allowedColumns.has(column));
       if (columns.length === 0) continue;
-      const values = columns.map(column => row[column]);
+      const values = columns.map(column =>
+        normalizeValue(row[column], columnTypes.get(column) ?? "")
+      );
       const columnSql = columns.map(column => connection.escapeId(column)).join(", ");
       const placeholders = columns.map(() => "?").join(", ");
       const updates = columns
