@@ -27,6 +27,9 @@ import { convertToJpy, FX_FALLBACK, type FxRates } from "./fx";
 import { calcPnlPct, isCostRecovered } from "../../shared/pnlLabel";
 import { computeTargetDistance } from "../../shared/targetDistance";
 import { selectBackfillQueue } from "../../shared/backfillQueue";
+import { isQuotaError } from "./aiErrors";
+
+export const BAND_CHECK_FAILURE_COOLDOWN_MS = 6 * 60 * 60 * 1000;
 
 /** 文字列の数値カラム（decimal）を数値にする。空や不正値は null */
 const toNum = (v: string | null | undefined): number | null => {
@@ -55,6 +58,13 @@ export type BandWithCheck = BandInput & {
     status: "CLEAR" | "CONCERN" | "UNKNOWN";
     finding: string;
     sourceCount: number;
+    sources: Array<{
+      title: string;
+      url: string;
+      source: string | null;
+      publishedAt: string | null;
+      match: "MATCHED" | "CANDIDATE";
+    }>;
     checkedAt: Date;
   }>;
 };
@@ -125,6 +135,7 @@ export async function getPlan(
         status: c.status,
         finding: c.finding,
         sourceCount: c.sourceCount,
+        sources: c.sources ?? [],
         checkedAt: c.createdAt,
       }));
 
@@ -643,7 +654,8 @@ export async function generateAndSavePlanForWatchItem(
 /** 保有銘柄すべてのプラン有無を返す（一覧表示・一括生成の進捗確認に使う） */
 export async function runChecksForBand(
   userId: number,
-  bandId: number
+  bandId: number,
+  options: { missingOnly?: boolean } = {}
 ): Promise<PriceBandPlanView> {
   const d = await requireDb();
 
@@ -659,6 +671,13 @@ export async function runChecksForBand(
 
   const items = (band.checkItems as string[] | null) ?? [];
   if (items.length === 0) throw new Error("この価格帯には確認項目が設定されていません");
+
+  const existingRows = await d
+    .select()
+    .from(bandCheckResults)
+    .where(and(eq(bandCheckResults.userId, userId), eq(bandCheckResults.bandId, bandId)));
+  const doneItems = new Set(existingRows.map(row => row.checkItem));
+  const targetItems = options.missingOnly ? items.filter(item => !doneItems.has(item)) : items;
 
   const holdings = await db.listHoldings(userId);
   const holding = holdings.find(h => h.symbol === plan.symbol);
@@ -688,6 +707,12 @@ export async function runChecksForBand(
     );
   }
 
+  if (targetItems.length === 0) {
+    const saved = await getPlan(userId, plan.symbol, currentPrice);
+    if (!saved) throw new Error("プランを取得できませんでした");
+    return saved;
+  }
+
   const outcomes = await withAiRunLog(
     {
       userId,
@@ -705,7 +730,7 @@ export async function runChecksForBand(
         name: holding.name,
         symbol: plan.symbol,
         actionLabel: band.actionLabel,
-        checkItems: items,
+        checkItems: targetItems,
         news: news.map(n => ({
           title: n.title,
           summary: n.summary,
@@ -722,6 +747,16 @@ export async function runChecksForBand(
    * 残しておくと「いつの判断か」が混ざり、古い懸念を今のものと誤読する。
    */
   for (const o of outcomes) {
+    const sources = o.sourceIndexes
+      .map(index => news[index - 1])
+      .filter((item): item is NonNullable<typeof item> => Boolean(item))
+      .map(item => ({
+        title: item.title,
+        url: item.url,
+        source: item.source,
+        publishedAt: item.publishedAt?.toISOString() ?? null,
+        match: "MATCHED" as const,
+      }));
     await d
       .delete(bandCheckResults)
       .where(and(eq(bandCheckResults.bandId, bandId), eq(bandCheckResults.checkItem, o.checkItem)));
@@ -731,7 +766,10 @@ export async function runChecksForBand(
       checkItem: o.checkItem,
       status: o.status,
       finding: o.finding,
-      sourceCount: o.sourceCount,
+      sourceCount: sources.length,
+      sources,
+      priceAtCheck: currentPrice === null ? null : String(currentPrice),
+      model: BAND_CHECKER_MODEL,
     });
   }
 
@@ -878,6 +916,10 @@ export type PlanOverviewRow = {
   nextActionLabel: string | null;
   /** 確認が必要な段にいて、まだ照合していない項目があるか */
   needsCheck: boolean;
+  /** 現在いる価格帯。自動照合はこの band だけを対象にする */
+  currentBandId: number | null;
+  /** 現在の価格帯に残っている未照合項目数 */
+  pendingCheckCount: number;
   /** 照合済みで懸念ありの件数 */
   concernCount: number;
   generatedAt: Date;
@@ -1051,12 +1093,14 @@ export async function listPlanOverview(userId: number): Promise<PlanOverviewRow[
      * 残っている場合だけ立てる。帯の外にいる銘柄では立てない。
      */
     let needsCheck = false;
+    let pendingCheckCount = 0;
     let concernCount = 0;
     if (current?.checkItems?.length) {
       const done = new Set(
         checkRows.filter(c => c.bandId === current.id).map(c => c.checkItem)
       );
-      needsCheck = current.checkItems.some(item => !done.has(item));
+      pendingCheckCount = current.checkItems.filter(item => !done.has(item)).length;
+      needsCheck = pendingCheckCount > 0;
       concernCount = checkRows.filter(
         c => c.bandId === current.id && c.status === "CONCERN"
       ).length;
@@ -1073,6 +1117,8 @@ export async function listPlanOverview(userId: number): Promise<PlanOverviewRow[
       nextGapPct: ev.gapToNextPct,
       nextActionLabel: ev.nextBand?.actionLabel ?? null,
       needsCheck,
+      currentBandId: current?.id ?? null,
+      pendingCheckCount,
       concernCount,
       generatedAt: plan.generatedAt,
       ...buildHoldingFacts(aggBySymbol.get(plan.symbol), info.price, totalValueJpy),
@@ -1080,6 +1126,89 @@ export async function listPlanOverview(userId: number): Promise<PlanOverviewRow[
     });
   }
   return out;
+}
+
+export type MissingBandCheckBatchResult = {
+  total: number;
+  processed: number;
+  checked: number;
+  itemsChecked: number;
+  failed: string[];
+  errors: Array<{ symbol: string; message: string }>;
+  deferred: string[];
+  remaining: number;
+  quotaExhausted: boolean;
+};
+
+export type MissingBandCheckBatchDeps = {
+  listOverview: typeof listPlanOverview;
+  listAiRuns: typeof listAiRuns;
+  runOne: typeof runChecksForBand;
+};
+
+/** 現在の価格帯で未照合の項目だけを少量ずつ確認する。 */
+export async function runMissingBandChecksBatch(
+  userId: number,
+  options: { batchSize?: number; retryFailed?: boolean } = {},
+  deps: MissingBandCheckBatchDeps = {
+    listOverview: listPlanOverview,
+    listAiRuns,
+    runOne: runChecksForBand,
+  }
+): Promise<MissingBandCheckBatchResult> {
+  const batchSize = Math.min(3, Math.max(1, options.batchSize ?? 2));
+  const rows = await deps.listOverview(userId);
+  const candidates = rows
+    .filter(row => row.held && row.needsCheck && row.currentBandId !== null)
+    .map(row => ({
+      symbol: row.symbol,
+      bandId: row.currentBandId as number,
+      value: row.holdingValueJpy ?? 0,
+      pendingCheckCount: row.pendingCheckCount,
+    }));
+  const runs = await deps.listAiRuns(userId, { kind: "band_check", limit: 1000 });
+  const queue = selectBackfillQueue(candidates, runs, {
+    retryFailed: options.retryFailed ?? false,
+    failureCooldownMs: BAND_CHECK_FAILURE_COOLDOWN_MS,
+  });
+  const targets = queue.eligible.slice(0, batchSize);
+  let processed = 0;
+  let checked = 0;
+  let itemsChecked = 0;
+  let quotaExhausted = false;
+  const failed: string[] = [];
+  const errors: Array<{ symbol: string; message: string }> = [];
+
+  for (const target of targets) {
+    processed += 1;
+    try {
+      await deps.runOne(userId, target.bandId, { missingOnly: true });
+      checked += 1;
+      itemsChecked += target.pendingCheckCount;
+    } catch (error) {
+      failed.push(target.symbol);
+      errors.push({
+        symbol: target.symbol,
+        message: error instanceof Error ? error.message : String(error),
+      });
+      if (isQuotaError(error)) {
+        quotaExhausted = true;
+        break;
+      }
+    }
+  }
+
+  return {
+    total: candidates.length,
+    processed,
+    checked,
+    itemsChecked,
+    failed,
+    errors,
+    deferred: queue.deferred.map(item => item.symbol),
+    remaining: Math.max(0, candidates.length - checked),
+    quotaExhausted,
+  };
 }
 
 /**

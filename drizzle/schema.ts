@@ -793,6 +793,19 @@ export const bandCheckResults = mysqlTable(
     finding: text("finding").notNull(),
     /** 根拠にしたニュースの件数 */
     sourceCount: int("sourceCount").default(0).notNull(),
+    /**
+     * 照合時に AI へ渡したニュースのうち、結果の根拠として保存するもの。
+     * URL・公開日を残し、後から同じ材料を開いて確認できるようにする。
+     */
+    sources: json("sources").$type<
+      Array<{
+        title: string;
+        url: string;
+        source: string | null;
+        publishedAt: string | null;
+        match: "MATCHED" | "CANDIDATE";
+      }>
+    >(),
     /** 照合時の株価。後から見たときに状況を再現できるように */
     priceAtCheck: decimal("priceAtCheck", { precision: 20, scale: 4 }),
     model: varchar("model", { length: 64 }),
@@ -947,6 +960,45 @@ export const aiRunLogs = mysqlTable(
 
 export type AiRunLog = typeof aiRunLogs.$inferSelect;
 export type InsertAiRunLog = typeof aiRunLogs.$inferInsert;
+
+/**
+ * Railway 后台任务的批次级运行记录。
+ *
+ * aiRunLogs 负责逐标的 AI 调用；此表负责一次价格同步、新闻批次、资料补全、
+ * 投资卡补全或价格带核验的整体结果。进程重启后仍可审计。
+ */
+export const schedulerRunLogs = mysqlTable(
+  "schedulerRunLogs",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    userId: int("userId").notNull(),
+    kind: varchar("kind", { length: 64 }).notNull(),
+    trigger: mysqlEnum("trigger", ["SCHEDULED", "MANUAL", "STARTUP"])
+      .default("SCHEDULED")
+      .notNull(),
+    status: mysqlEnum("status", ["RUNNING", "SUCCESS", "PARTIAL", "FAILED", "SKIPPED"])
+      .default("RUNNING")
+      .notNull(),
+    processed: int("processed").default(0).notNull(),
+    succeeded: int("succeeded").default(0).notNull(),
+    failed: int("failed").default(0).notNull(),
+    skipped: int("skipped").default(0).notNull(),
+    remaining: int("remaining"),
+    detailJson: json("detailJson").$type<Record<string, unknown>>(),
+    errorMessage: text("errorMessage"),
+    startedAt: timestamp("startedAt").defaultNow().notNull(),
+    finishedAt: timestamp("finishedAt"),
+    createdAt: timestamp("createdAt").defaultNow().notNull(),
+  },
+  table => ({
+    userStartedIdx: index("scheduler_runs_user_started_idx").on(table.userId, table.startedAt),
+    kindStartedIdx: index("scheduler_runs_kind_started_idx").on(table.kind, table.startedAt),
+    statusStartedIdx: index("scheduler_runs_status_started_idx").on(table.status, table.startedAt),
+  })
+);
+
+export type SchedulerRunLog = typeof schedulerRunLogs.$inferSelect;
+export type InsertSchedulerRunLog = typeof schedulerRunLogs.$inferInsert;
 
 /**
  * 簡易パスコード認証。

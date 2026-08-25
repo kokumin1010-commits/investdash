@@ -1,0 +1,1 @@
+ALTER TABLE `bandCheckResults` ADD `sources` json;

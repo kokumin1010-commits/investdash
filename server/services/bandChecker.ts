@@ -47,6 +47,8 @@ export type CheckOutcome = {
   finding: string;
   /** 根拠にしたニュース件数 */
   sourceCount: number;
+  /** 根拠にしたニュースの 1 始まり番号。入力一覧と対応させる */
+  sourceIndexes: number[];
 };
 
 const CHECKER_SYSTEM = `あなたは投資判断の材料を整理する分析アシスタントです。
@@ -82,8 +84,13 @@ const CHECKER_SCHEMA = {
               status: { type: "string", enum: ["CLEAR", "CONCERN", "UNKNOWN"] },
               finding: { type: "string", description: "見つかった内容。なければ確認できなかった旨" },
               sourceCount: { type: "number", description: "根拠にしたニュース件数" },
+              sourceIndexes: {
+                type: "array",
+                items: { type: "integer" },
+                description: "根拠にしたニュースの番号（1始まり）。根拠がなければ空配列",
+              },
             },
-            required: ["checkItem", "status", "finding", "sourceCount"],
+            required: ["checkItem", "status", "finding", "sourceCount", "sourceIndexes"],
             additionalProperties: false,
           },
         },
@@ -188,6 +195,7 @@ export async function runBandChecks(ctx: CheckerContext): Promise<CheckOutcome[]
       finding:
         "この銘柄のニュースが未取得のため確認できません。先にニュースを取得してから再度確認してください。",
       sourceCount: 0,
+      sourceIndexes: [],
     }));
   }
 
@@ -280,6 +288,7 @@ export function matchCheckOutcomes(
         status: "UNKNOWN" as const,
         finding: "この項目についての判定が得られませんでした。もう一度確認してください。",
         sourceCount: 0,
+        sourceIndexes: [],
       };
     }
     const status: CheckStatus =
@@ -294,6 +303,13 @@ export function matchCheckOutcomes(
         typeof hit.sourceCount === "number" && hit.sourceCount >= 0
           ? Math.min(hit.sourceCount, newsCount)
           : 0,
+      sourceIndexes: Array.from(
+        new Set(
+          (Array.isArray(hit.sourceIndexes) ? hit.sourceIndexes : [])
+            .map(Number)
+            .filter(index => Number.isInteger(index) && index >= 1 && index <= newsCount)
+        )
+      ).slice(0, newsCount),
     };
   });
 }

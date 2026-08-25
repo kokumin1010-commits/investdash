@@ -17,6 +17,7 @@ import Reports from "./pages/Reports";
 import Consult from "./pages/Consult";
 import SettingsPage from "./pages/Settings";
 import Watchlist from "./pages/Watchlist";
+import Operations from "./pages/Operations";
 
 function AppRoutes() {
   return (
@@ -32,6 +33,7 @@ function AppRoutes() {
       <Route path="/news" component={News} />
       <Route path="/import" component={ImportScreenshot} />
       <Route path="/settings" component={SettingsPage} />
+      <Route path="/operations" component={Operations} />
       <Route path="/404" component={NotFound} />
       <Route component={NotFound} />
     </Switch>

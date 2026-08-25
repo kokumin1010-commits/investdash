@@ -2,7 +2,12 @@ import cron from "node-cron";
 import * as db from "./db";
 import { recordTransitions } from "./services/bandTransitionService";
 import { saveMonthlySnapshot } from "./services/monthlySnapshotService";
-import { generateMissingHoldingPlans } from "./services/priceBandService";
+import {
+  generateMissingHoldingPlans,
+  runMissingBandChecksBatch,
+} from "./services/priceBandService";
+import { draftMissingCards } from "./services/cardService";
+import { withSchedulerRunLog } from "./services/schedulerRunLog";
 import {
   enrichProfileBatch,
   generateMissingSignalsBatch,
@@ -30,6 +35,10 @@ type RailwayBackfillUserSummary = {
   signalRemaining: number;
   plansGenerated: number | null;
   planRemaining: number | null;
+  cardsCreated: number | null;
+  cardRemaining: number | null;
+  bandsChecked: number | null;
+  bandCheckRemaining: number | null;
   error?: string;
 };
 
@@ -71,25 +80,44 @@ export async function runRailwayPriceSync(trigger: "jp-close" | "us-close") {
     const userIds = await db.listAllUserIds();
     for (const userId of userIds) {
       try {
-        const result = await syncPrices(userId);
-        const transitions = await recordTransitions(userId).catch(error => {
-          console.error(`[Railway scheduler] transition sync failed for ${userId}:`, error);
-          return { recorded: 0 };
+        const { result, transitions, notes, monthly } = await withSchedulerRunLog({
+          userId,
+          kind: trigger === "jp-close" ? "price_sync_jp" : "price_sync_us",
+          trigger: "SCHEDULED",
+          run: async () => {
+            const result = await syncPrices(userId);
+            const transitions = await recordTransitions(userId).catch(error => {
+              console.error(`[Railway scheduler] transition sync failed for ${userId}:`, error);
+              return { recorded: 0 };
+            });
+            const notes = await syncSymbolNotes(userId).catch(error => {
+              console.error(`[Railway scheduler] note sync failed for ${userId}:`, error);
+              return { added: 0 };
+            });
+            const monthly =
+              trigger === "us-close"
+                ? await saveMonthlySnapshot(userId, {
+                    source: "scheduled_price_sync",
+                    note: "Railway の米国市場終値同期で当月記録を更新",
+                  }).catch(error => {
+                    console.error(`[Railway scheduler] monthly snapshot failed for ${userId}:`, error);
+                    return null;
+                  })
+                : null;
+            return { result, transitions, notes, monthly };
+          },
+          summarize: value => ({
+            processed: value.result.updated + value.result.failed.length,
+            succeeded: value.result.updated,
+            failed: value.result.failed.length,
+            detail: {
+              failedSymbols: value.result.failed,
+              transitions: value.transitions.recorded,
+              notes: value.notes.added,
+              monthlyPeriod: value.monthly?.periodYm ?? null,
+            },
+          }),
         });
-        const notes = await syncSymbolNotes(userId).catch(error => {
-          console.error(`[Railway scheduler] note sync failed for ${userId}:`, error);
-          return { added: 0 };
-        });
-        const monthly =
-          trigger === "us-close"
-            ? await saveMonthlySnapshot(userId, {
-                source: "scheduled_price_sync",
-                note: "Railway の米国市場終値同期で当月記録を更新",
-              }).catch(error => {
-                console.error(`[Railway scheduler] monthly snapshot failed for ${userId}:`, error);
-                return null;
-              })
-            : null;
         console.log(
           `[Railway scheduler] ${trigger} user=${userId} updated=${result.updated} failed=${result.failed.length} transitions=${transitions.recorded} notes=${notes.added} monthly=${monthly ? monthly.periodYm : "skipped"}`
         );
@@ -119,9 +147,27 @@ export async function runRailwayNewsBatch(batch: number) {
         const settings = await db.getSettings(userId);
         if (!settings.autoNewsEnabled) continue;
 
-        const result = await syncNewsForUser(userId, {
-          offset,
-          batchSize: NEWS_BATCH_SIZE,
+        const result = await withSchedulerRunLog({
+          userId,
+          kind: "news_sync",
+          trigger: "SCHEDULED",
+          run: () =>
+            syncNewsForUser(userId, {
+              offset,
+              batchSize: NEWS_BATCH_SIZE,
+            }),
+          summarize: value => ({
+            processed: NEWS_BATCH_SIZE,
+            succeeded: value.fetched,
+            failed: value.analysisUnavailable ? 1 : 0,
+            detail: {
+              batch,
+              offset,
+              fetched: value.fetched,
+              analyzed: value.analyzed,
+              analysisUnavailable: value.analysisUnavailable,
+            },
+          }),
         });
         await db.pruneOldNews(userId, 90);
         await syncSymbolNotes(userId).catch(error => {
@@ -156,22 +202,109 @@ export async function runRailwayDataBackfill() {
     for (const userId of userIds) {
       try {
         const offset = profileOffsets.get(userId) ?? 0;
-        const profiles = await enrichProfileBatch(userId, { offset, batchSize: 10 });
+        const profiles = await withSchedulerRunLog({
+          userId,
+          kind: "profile_backfill",
+          trigger: "SCHEDULED",
+          run: () => enrichProfileBatch(userId, { offset, batchSize: 10 }),
+          summarize: value => ({
+            processed: value.processed,
+            succeeded: value.updated,
+            failed: value.failed.length,
+            skipped: value.skipped,
+            remaining: value.nextOffset === null ? 0 : Math.max(0, value.total - value.nextOffset),
+            detail: { failedSymbols: value.failed, nextOffset: value.nextOffset },
+          }),
+        });
         profileOffsets.set(userId, profiles.nextOffset ?? 0);
 
-        const signals = await generateMissingSignalsBatch(userId, {
-          batchSize: 4,
-          retryFailed: false,
+        const signals = await withSchedulerRunLog({
+          userId,
+          kind: "signal_backfill",
+          trigger: "SCHEDULED",
+          run: () =>
+            generateMissingSignalsBatch(userId, {
+              batchSize: 4,
+              retryFailed: false,
+            }),
+          summarize: value => ({
+            processed: value.processed,
+            succeeded: value.generated,
+            failed: value.failed.length,
+            remaining: value.remaining,
+            detail: {
+              failedSymbols: value.failed,
+              quotaExhausted: value.quotaExhausted,
+            },
+          }),
         });
         const plans = signals.quotaExhausted
           ? null
-          : await generateMissingHoldingPlans(userId, {
-              batchSize: 2,
-              retryFailed: false,
+          : await withSchedulerRunLog({
+              userId,
+              kind: "price_band_plan_backfill",
+              trigger: "SCHEDULED",
+              run: () =>
+                generateMissingHoldingPlans(userId, {
+                  batchSize: 2,
+                  retryFailed: false,
+                }),
+              summarize: value => ({
+                processed: value.processed,
+                succeeded: value.generated,
+                failed: value.failed.length,
+                remaining: value.remaining,
+                detail: {
+                  failedSymbols: value.failed,
+                  quotaExhausted: value.quotaExhausted,
+                },
+              }),
             });
+        const cards =
+          signals.quotaExhausted || plans?.quotaExhausted
+            ? null
+            : await withSchedulerRunLog({
+                userId,
+                kind: "investment_card_backfill",
+                trigger: "SCHEDULED",
+                run: () => draftMissingCards(userId, { batchSize: 2, retryFailed: false }),
+                summarize: value => ({
+                  processed: value.processed,
+                  succeeded: value.created,
+                  failed: value.failed.length,
+                  skipped: value.skipped,
+                  remaining: value.remaining,
+                  detail: {
+                    failedSymbols: value.failed,
+                    deferredSymbols: value.deferred,
+                    quotaExhausted: value.quotaExhausted,
+                  },
+                }),
+              });
+        const bandChecks =
+          signals.quotaExhausted || plans?.quotaExhausted || cards?.quotaExhausted
+            ? null
+            : await withSchedulerRunLog({
+                userId,
+                kind: "band_check_backfill",
+                trigger: "SCHEDULED",
+                run: () => runMissingBandChecksBatch(userId, { batchSize: 2, retryFailed: false }),
+                summarize: value => ({
+                  processed: value.processed,
+                  succeeded: value.checked,
+                  failed: value.failed.length,
+                  remaining: value.remaining,
+                  detail: {
+                    itemsChecked: value.itemsChecked,
+                    failedSymbols: value.failed,
+                    deferredSymbols: value.deferred,
+                    quotaExhausted: value.quotaExhausted,
+                  },
+                }),
+              });
 
         console.log(
-          `[Railway scheduler] backfill user=${userId} profiles=${profiles.updated}/${profiles.processed} profileFailed=${profiles.failed.length} signals=${signals.generated}/${signals.processed} signalRemaining=${signals.remaining} plans=${plans ? `${plans.generated}/${plans.processed}` : "quota-skipped"} planRemaining=${plans?.remaining ?? "unknown"}`
+          `[Railway scheduler] backfill user=${userId} profiles=${profiles.updated}/${profiles.processed} profileFailed=${profiles.failed.length} signals=${signals.generated}/${signals.processed} signalRemaining=${signals.remaining} plans=${plans ? `${plans.generated}/${plans.processed}` : "quota-skipped"} planRemaining=${plans?.remaining ?? "unknown"} cards=${cards ? `${cards.created}/${cards.processed}` : "quota-skipped"} cardRemaining=${cards?.remaining ?? "unknown"} bandChecks=${bandChecks ? `${bandChecks.checked}/${bandChecks.processed}` : "quota-skipped"} bandCheckRemaining=${bandChecks?.remaining ?? "unknown"}`
         );
         summaries.push({
           userId,
@@ -181,6 +314,10 @@ export async function runRailwayDataBackfill() {
           signalRemaining: signals.remaining,
           plansGenerated: plans?.generated ?? null,
           planRemaining: plans?.remaining ?? null,
+          cardsCreated: cards?.created ?? null,
+          cardRemaining: cards?.remaining ?? null,
+          bandsChecked: bandChecks?.checked ?? null,
+          bandCheckRemaining: bandChecks?.remaining ?? null,
         });
       } catch (error) {
         console.error(`[Railway scheduler] data backfill user=${userId} failed:`, error);
@@ -192,6 +329,10 @@ export async function runRailwayDataBackfill() {
           signalRemaining: -1,
           plansGenerated: null,
           planRemaining: null,
+          cardsCreated: null,
+          cardRemaining: null,
+          bandsChecked: null,
+          bandCheckRemaining: null,
           error: error instanceof Error ? error.message : String(error),
         });
       }

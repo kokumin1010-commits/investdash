@@ -169,8 +169,12 @@ export default function Holdings() {
       } else {
         toast.success(`${res.created} 銘柄の投資カードを下書きしました`, {
           description:
-            res.remaining > 0
+            res.quotaExhausted
+              ? `AI 利用枠に達したため中断しました。残り ${res.remaining} 銘柄は自動で続行します`
+              : res.remaining > 0
               ? `残り ${res.remaining} 銘柄。もう一度押すと続けて下書きします`
+              : res.deferred.length > 0
+                ? `${res.deferred.length} 銘柄は直近失敗のため一時保留です`
               : res.failed.length > 0
                 ? `失敗: ${res.failed.join(", ")}`
                 : "すべての銘柄に下書きが入りました",
@@ -208,6 +212,7 @@ export default function Holdings() {
    * 口座ごとの明細は entries に入っており、カード内の内訳として展開する。
    */
   const groups = overview.data?.groups ?? [];
+  const cardReadyCount = groups.filter(group => group.hasCard).length;
   const summary = overview.data?.summary;
 
   /*
@@ -387,15 +392,15 @@ export default function Holdings() {
           <Button
             variant="outline"
             size="sm"
-            disabled={draftCards.isPending || positions.length === 0}
-            onClick={() => draftCards.mutate({ limit: 10 })}
+            disabled={draftCards.isPending || positions.length === 0 || cardReadyCount === groups.length}
+            onClick={() => draftCards.mutate({ batchSize: 4 })}
           >
             {draftCards.isPending ? (
               <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
             ) : (
               <Sparkles className="mr-1.5 h-3.5 w-3.5" />
             )}
-            投資カードを下書き
+            投資カード {cardReadyCount}/{groups.length}
           </Button>
           <Button size="sm" onClick={() => setAddOpen(true)}>
             <Plus className="mr-1.5 h-4 w-4" />

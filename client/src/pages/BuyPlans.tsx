@@ -15,9 +15,10 @@ import {
   BAND_ACTION_STYLES,
   type BandAction,
 } from "@shared/priceBands";
-import { AlertTriangle, ArrowDown, Search, TrendingUp } from "lucide-react";
+import { AlertTriangle, ArrowDown, Loader2, Search, TrendingUp } from "lucide-react";
 import { useMemo, useState } from "react";
 import { Link } from "wouter";
+import { toast } from "sonner";
 import { TransitionHistoryCard } from "@/components/investing/TransitionHistoryCard";
 import { AddProposalCard } from "@/components/investing/AddProposalCard";
 import {
@@ -49,6 +50,28 @@ export default function BuyPlans() {
   const [keyword, setKeyword] = useState("");
 
   const { data, isLoading, error } = trpc.portfolio.priceBandOverview.useQuery();
+  const utils = trpc.useUtils();
+  const runMissingChecks = trpc.portfolio.runMissingBandChecks.useMutation({
+    onSuccess: async result => {
+      await Promise.all([
+        utils.portfolio.priceBandOverview.invalidate(),
+        utils.portfolio.schedulerRuns.invalidate(),
+      ]);
+      if (result.checked > 0) {
+        toast.success(`${result.checked} 銘柄・${result.itemsChecked} 項目を照合しました`, {
+          description:
+            result.remaining > 0
+              ? `残り ${result.remaining} 銘柄は Railway が自動で続行します`
+              : "現在の価格帯にある確認項目をすべて照合しました",
+        });
+      } else if (result.deferred.length > 0) {
+        toast.info(`${result.deferred.length} 銘柄は直近失敗のため一時保留です`);
+      } else {
+        toast.info("現在、未照合の確認項目はありません");
+      }
+    },
+    onError: mutationError => toast.error(mutationError.message),
+  });
   const allRows = data?.rows;
   const stats = data?.stats;
   const coverage = data?.coverage;
@@ -103,6 +126,10 @@ export default function BuyPlans() {
   }, [allRows]);
 
   const needsCheckCount = (allRows ?? []).filter(r => r.needsCheck).length;
+  const pendingCheckItemCount = (allRows ?? []).reduce(
+    (sum, row) => sum + row.pendingCheckCount,
+    0
+  );
   const concernCount = (allRows ?? []).filter(r => r.concernCount > 0).length;
 
   return (
@@ -131,7 +158,9 @@ export default function BuyPlans() {
               <div className="flex items-center gap-2 text-sm">
                 <AlertTriangle className="size-4 text-amber-600" />
                 <span className="font-medium">{needsCheckCount} 銘柄</span>
-                <span className="text-muted-foreground">が未照合の確認項目を持っています</span>
+                <span className="text-muted-foreground">
+                  に未照合 {pendingCheckItemCount} 項目があります
+                </span>
               </div>
             )}
             {concernCount > 0 && (
@@ -141,8 +170,30 @@ export default function BuyPlans() {
                 <span className="text-muted-foreground">に懸念材料が見つかっています</span>
               </div>
             )}
+            {needsCheckCount > 0 && (
+              <Button
+                size="sm"
+                variant="outline"
+                className="ml-auto border-amber-300 bg-white"
+                disabled={runMissingChecks.isPending}
+                onClick={() => runMissingChecks.mutate({ batchSize: 2, retryFailed: false })}
+              >
+                {runMissingChecks.isPending ? (
+                  <Loader2 className="mr-1.5 size-4 animate-spin" />
+                ) : (
+                  <AlertTriangle className="mr-1.5 size-4" />
+                )}
+                2 銘柄を今すぐ照合
+              </Button>
+            )}
           </CardContent>
         </Card>
+      )}
+
+      {needsCheckCount > 0 && (
+        <p className="-mt-3 text-xs leading-5 text-muted-foreground">
+          未照合分は Railway が 20 分ごとに小分けで自動確認します。ニュース根拠がない項目は「不明」のまま残し、安全と断定しません。
+        </p>
       )}
 
       {coverage && coverage.total > 0 && (

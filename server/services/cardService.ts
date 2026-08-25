@@ -14,6 +14,9 @@ import { extractCardFields, mergeField } from "./consultToCard";
 import { getConsultation } from "./consultService";
 import { listPlanOverview } from "./priceBandService";
 import { isEarningsNews } from "../../shared/eventDetect";
+import { selectBackfillQueue } from "../../shared/backfillQueue";
+import { isQuotaError } from "./aiErrors";
+import { listAiRuns } from "./aiRunLog";
 import {
   CARD_TRIGGER_LABELS,
   selectCardTargets,
@@ -27,6 +30,7 @@ import {
  * 短すぎると週末や取得失敗の日にきっかけを取り逃す。
  */
 export const TRIGGER_NEWS_DAYS = 14;
+export const CARD_FAILURE_COOLDOWN_MS = 24 * 60 * 60 * 1000;
 
 /** 投資カードが実質的に空か（AI の下書き対象か）を判定する */
 export function isCardEmpty(card: {
@@ -234,43 +238,105 @@ export async function applyConsultToCard(params: {
  * 影響が大きいため。上限を設けるのは、全 112 銘柄を一度に回すと
  * 40 分以上かかり途中で失敗したときに何が終わったか分からなくなるため。
  */
+export type DraftMissingCardsOptions = {
+  batchSize?: number;
+  retryFailed?: boolean;
+};
+
+export type DraftMissingCardsResult = {
+  total: number;
+  processed: number;
+  created: number;
+  skipped: number;
+  failed: string[];
+  errors: Array<{ symbol: string; message: string }>;
+  deferred: string[];
+  remaining: number;
+  quotaExhausted: boolean;
+};
+
+export type DraftMissingCardsDeps = {
+  listHoldings: typeof db.listHoldings;
+  buildPortfolio: typeof buildPortfolio;
+  listCards: typeof db.listCards;
+  listAiRuns: typeof listAiRuns;
+  draftOne: typeof draftCardForSymbol;
+};
+
 export async function draftMissingCards(
   userId: number,
-  limit = 10
-): Promise<{ processed: number; created: number; failed: string[]; remaining: number }> {
+  options: number | DraftMissingCardsOptions = {},
+  deps: DraftMissingCardsDeps = {
+    listHoldings: db.listHoldings,
+    buildPortfolio,
+    listCards: db.listCards,
+    listAiRuns,
+    draftOne: draftCardForSymbol,
+  }
+): Promise<DraftMissingCardsResult> {
+  const batchSize =
+    typeof options === "number" ? options : Math.min(4, Math.max(1, options.batchSize ?? 2));
+  const retryFailed = typeof options === "number" ? false : options.retryFailed ?? false;
   const [holdings, portfolio] = await Promise.all([
-    db.listHoldings(userId),
-    buildPortfolio(userId),
+    deps.listHoldings(userId),
+    deps.buildPortfolio(userId),
   ]);
 
   const symbols = Array.from(new Set(holdings.map(h => h.symbol)));
-  const cards = await Promise.all(symbols.map(s => db.getCard(userId, s)));
+  const cards = await deps.listCards(userId);
+  const cardBySymbol = new Map(cards.map(card => [card.symbol, card]));
 
-  const empty = symbols.filter((_, i) => isCardEmpty(cards[i]));
+  const empty = symbols.filter(symbol => isCardEmpty(cardBySymbol.get(symbol) ?? null));
   // 円換算の評価額で並べる。通貨が混在するため現地通貨では比較できない
   const valueOf = (s: string) =>
     portfolio.groups.find(g => g.symbol === s)?.marketValueBase ?? 0;
-  empty.sort((a, b) => valueOf(b) - valueOf(a));
-
-  const targets = empty.slice(0, limit);
+  const runs = await deps.listAiRuns(userId, { kind: "card_draft", limit: 1000 });
+  const queue = selectBackfillQueue(
+    empty.map(symbol => ({ symbol, value: valueOf(symbol) })),
+    runs,
+    {
+      retryFailed,
+      failureCooldownMs: CARD_FAILURE_COOLDOWN_MS,
+    }
+  );
+  const targets = queue.eligible.slice(0, batchSize);
   let created = 0;
+  let processed = 0;
+  let skipped = 0;
   const failed: string[] = [];
+  const errors: Array<{ symbol: string; message: string }> = [];
+  let quotaExhausted = false;
 
-  for (const symbol of targets) {
+  for (const { symbol } of targets) {
+    processed += 1;
     try {
-      const r = await draftCardForSymbol(userId, symbol, false);
+      const r = await deps.draftOne(userId, symbol, false);
       if (r.created) created += 1;
+      else skipped += 1;
     } catch (error) {
       console.error(`[cardService] draft failed for ${symbol}:`, error);
       failed.push(symbol);
+      errors.push({
+        symbol,
+        message: error instanceof Error ? error.message : String(error),
+      });
+      if (isQuotaError(error)) {
+        quotaExhausted = true;
+        break;
+      }
     }
   }
 
   return {
-    processed: targets.length,
+    total: symbols.length,
+    processed,
     created,
+    skipped,
     failed,
-    remaining: Math.max(0, empty.length - targets.length),
+    errors,
+    deferred: queue.deferred.map(item => item.symbol),
+    remaining: Math.max(0, empty.length - created),
+    quotaExhausted,
   };
 }
 

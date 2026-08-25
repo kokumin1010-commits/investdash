@@ -18,6 +18,7 @@ import {
   listPlanOverview,
   computeOverviewStats,
   runChecksForBand,
+  runMissingBandChecksBatch,
   updateBand,
 } from "../services/priceBandService";
 import {
@@ -65,6 +66,11 @@ import {
 import { BROKERS, normalizeSymbol } from "../../shared/investing";
 import { BAND_ACTIONS } from "../../shared/priceBands";
 import { getRailwayDataBackfillStatus } from "../railwayScheduler";
+import {
+  listSchedulerRuns,
+  SCHEDULER_RUN_KINDS,
+  withSchedulerRunLog,
+} from "../services/schedulerRunLog";
 
 const decimalString = z.union([z.number(), z.string()]).transform(v => String(v));
 
@@ -78,6 +84,34 @@ export const portfolioRouter = router({
 
   /** Railway 常駐 cron が実際に動いた時刻と不足件数（運用確認用） */
   railwayDataBackfillStatus: protectedProcedure.query(() => getRailwayDataBackfillStatus()),
+
+  schedulerRuns: protectedProcedure
+    .input(
+      z
+        .object({
+          kind: z.string().max(64).optional(),
+          status: z.enum(["RUNNING", "SUCCESS", "PARTIAL", "FAILED", "SKIPPED"]).optional(),
+          trigger: z.enum(["SCHEDULED", "MANUAL", "STARTUP"]).optional(),
+          from: z.coerce.date().optional(),
+          to: z.coerce.date().optional(),
+          limit: z.number().int().min(1).max(300).default(100),
+        })
+        .default({ limit: 100 })
+    )
+    .query(async ({ ctx, input }) => {
+      const rows = await listSchedulerRuns(ctx.user.id, input);
+      return {
+        rows,
+        kinds: SCHEDULER_RUN_KINDS,
+        stats: {
+          total: rows.length,
+          success: rows.filter(row => row.status === "SUCCESS").length,
+          partial: rows.filter(row => row.status === "PARTIAL").length,
+          failed: rows.filter(row => row.status === "FAILED").length,
+          running: rows.filter(row => row.status === "RUNNING").length,
+        },
+      } as const;
+    }),
 
   updateSettings: protectedProcedure
     .input(
@@ -626,8 +660,40 @@ export const portfolioRouter = router({
 
   /** カードが空の銘柄をまとめて下書きする（評価額の大きい順） */
   draftMissingCards: protectedProcedure
-    .input(z.object({ limit: z.number().int().min(1).max(30).default(10) }).optional())
-    .mutation(async ({ ctx, input }) => draftMissingCards(ctx.user.id, input?.limit ?? 10)),
+    .input(
+      z
+        .object({
+          batchSize: z.number().int().min(1).max(4).optional(),
+          /** 旧画面の互換入力。指定時は batchSize より優先する */
+          limit: z.number().int().min(1).max(4).optional(),
+          retryFailed: z.boolean().default(false),
+        })
+        .default({ retryFailed: false })
+    )
+    .mutation(async ({ ctx, input }) =>
+      withSchedulerRunLog({
+        userId: ctx.user.id,
+        kind: "investment_card_backfill",
+        trigger: "MANUAL",
+        run: () =>
+          draftMissingCards(ctx.user.id, {
+            batchSize: input.limit ?? input.batchSize ?? 2,
+            retryFailed: input.retryFailed,
+          }),
+        summarize: value => ({
+          processed: value.processed,
+          succeeded: value.created,
+          failed: value.failed.length,
+          skipped: value.skipped,
+          remaining: value.remaining,
+          detail: {
+            failedSymbols: value.failed,
+            deferredSymbols: value.deferred,
+            quotaExhausted: value.quotaExhausted,
+          },
+        }),
+      })
+    ),
 
   enrichProfiles: protectedProcedure
     .input(z.object({ force: z.boolean().default(false) }).optional())
@@ -777,6 +843,36 @@ export const portfolioRouter = router({
         .default({ batchSize: 2, retryFailed: false })
     )
     .mutation(async ({ ctx, input }) => generateMissingHoldingPlans(ctx.user.id, input)),
+
+  runMissingBandChecks: protectedProcedure
+    .input(
+      z
+        .object({
+          batchSize: z.number().int().min(1).max(3).default(2),
+          retryFailed: z.boolean().default(false),
+        })
+        .default({ batchSize: 2, retryFailed: false })
+    )
+    .mutation(async ({ ctx, input }) =>
+      withSchedulerRunLog({
+        userId: ctx.user.id,
+        kind: "band_check_backfill",
+        trigger: "MANUAL",
+        run: () => runMissingBandChecksBatch(ctx.user.id, input),
+        summarize: value => ({
+          processed: value.processed,
+          succeeded: value.checked,
+          failed: value.failed.length,
+          remaining: value.remaining,
+          detail: {
+            itemsChecked: value.itemsChecked,
+            failedSymbols: value.failed,
+            deferredSymbols: value.deferred,
+            quotaExhausted: value.quotaExhausted,
+          },
+        }),
+      })
+    ),
 
   snapshots: protectedProcedure.query(async ({ ctx }) => db.listSnapshots(ctx.user.id)),
 

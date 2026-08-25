@@ -9,19 +9,29 @@ const mocks = vi.hoisted(() => ({
   useOverview: vi.fn(),
   useAddProposals: vi.fn(),
   mutateProposal: vi.fn(),
+  mutateChecks: vi.fn(),
   invalidateProposals: vi.fn(),
+  invalidateOverview: vi.fn(),
+  invalidateScheduler: vi.fn(),
 }));
 
 vi.mock("@/lib/trpc", () => ({
   trpc: {
     useUtils: () => ({
-      portfolio: { addProposals: { invalidate: mocks.invalidateProposals } },
+      portfolio: {
+        addProposals: { invalidate: mocks.invalidateProposals },
+        priceBandOverview: { invalidate: mocks.invalidateOverview },
+        schedulerRuns: { invalidate: mocks.invalidateScheduler },
+      },
     }),
     portfolio: {
       priceBandOverview: { useQuery: mocks.useOverview },
       addProposals: { useQuery: mocks.useAddProposals },
       generateAddProposalBatch: {
         useMutation: () => ({ mutate: mocks.mutateProposal }),
+      },
+      runMissingBandChecks: {
+        useMutation: () => ({ mutate: mocks.mutateChecks, isPending: false }),
       },
     },
   },
@@ -40,6 +50,8 @@ const commonRow = {
   nextGapPct: null,
   nextActionLabel: null,
   needsCheck: false,
+  currentBandId: null,
+  pendingCheckCount: 0,
   concernCount: 0,
   holdingValueJpy: 10_000_000,
   weightPct: 2,
@@ -71,6 +83,8 @@ const overviewData = {
       actionLabel: "下落要因を確認",
       outsideDirection: null,
       needsCheck: true,
+      currentBandId: 22,
+      pendingCheckCount: 3,
     },
     {
       ...commonRow,
@@ -145,6 +159,9 @@ describe("BuyPlans page interactions", () => {
     expect(screen.getByText("NTT", { selector: "span" })).toBeTruthy();
     expect(screen.getByText("Visa", { selector: "span" })).toBeTruthy();
     expect(screen.getByText("未作成 2 銘柄")).toBeTruthy();
+    expect(screen.getByText("に未照合 3 項目があります", { exact: false })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "2 銘柄を今すぐ照合" })).toBeTruthy();
+    expect(screen.getByText("Railway が 20 分ごとに", { exact: false })).toBeTruthy();
   });
 
   it("switches BUY, VERIFY, OUTSIDE and ALL result sets", async () => {

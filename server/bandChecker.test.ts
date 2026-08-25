@@ -77,6 +77,7 @@ describe("ニュースが無いときの挙動", () => {
     expect(out).toHaveLength(2);
     expect(out.every(o => o.status === "UNKNOWN")).toBe(true);
     expect(out.every(o => o.sourceCount === 0)).toBe(true);
+    expect(out.every(o => o.sourceIndexes.length === 0)).toBe(true);
     // 「懸念なし」と読める文言になっていないこと
     expect(out[0].finding).toContain("未取得");
     expect(out[0].finding).not.toContain("問題ありません");
@@ -116,12 +117,14 @@ describe("AI の返答とこちらの確認項目の突き合わせ", () => {
           status: "CONCERN",
           finding: "投資計画の見直し報道あり",
           sourceCount: 2,
+          sourceIndexes: [1, 2],
         },
         {
           checkItem: "2. ASIC分野でのブロードコムへのシェア流出",
           status: "CLEAR",
           finding: "受注拡大の報道あり",
           sourceCount: 1,
+          sourceIndexes: [3],
         },
       ],
       5
@@ -141,6 +144,7 @@ describe("AI の返答とこちらの確認項目の突き合わせ", () => {
           status: "UNKNOWN",
           finding: "記述なし",
           sourceCount: 0,
+          sourceIndexes: [],
         },
       ],
       3
@@ -152,7 +156,7 @@ describe("AI の返答とこちらの確認項目の突き合わせ", () => {
   it("返ってこなかった項目は UNKNOWN で埋めて消さない", () => {
     const out = matchCheckOutcomes(
       ITEMS,
-      [{ checkItem: "1. 主要顧客のAI投資計画の縮小・延期", status: "CONCERN", finding: "x", sourceCount: 1 }],
+      [{ checkItem: "1. 主要顧客のAI投資計画の縮小・延期", status: "CONCERN", finding: "x", sourceCount: 1, sourceIndexes: [1] }],
       4
     );
     expect(out).toHaveLength(2);
@@ -163,7 +167,7 @@ describe("AI の返答とこちらの確認項目の突き合わせ", () => {
   it("1 つの回答が 2 項目に使い回されない", () => {
     const out = matchCheckOutcomes(
       ["売上の減速", "売上の減速に伴う利益率の低下"],
-      [{ checkItem: "売上の減速", status: "CONCERN", finding: "減速あり", sourceCount: 2 }],
+      [{ checkItem: "売上の減速", status: "CONCERN", finding: "減速あり", sourceCount: 2, sourceIndexes: [1, 2] }],
       4
     );
     expect(out[0].status).toBe("CONCERN");
@@ -173,7 +177,7 @@ describe("AI の返答とこちらの確認項目の突き合わせ", () => {
   it("根拠件数はニュース件数を超えない", () => {
     const out = matchCheckOutcomes(
       ["何か"],
-      [{ checkItem: "何か", status: "CONCERN", finding: "x", sourceCount: 99 }],
+      [{ checkItem: "何か", status: "CONCERN", finding: "x", sourceCount: 99, sourceIndexes: [1, 2, 3] }],
       3
     );
     expect(out[0].sourceCount).toBe(3);
@@ -182,9 +186,24 @@ describe("AI の返答とこちらの確認項目の突き合わせ", () => {
   it("知らない status は UNKNOWN に寄せる", () => {
     const out = matchCheckOutcomes(
       ["何か"],
-      [{ checkItem: "何か", status: "OK" as never, finding: "x", sourceCount: 1 }],
+      [{ checkItem: "何か", status: "OK" as never, finding: "x", sourceCount: 1, sourceIndexes: [1] }],
       3
     );
     expect(out[0].status).toBe("UNKNOWN");
+  });
+
+  it("ニュース番号は重複を除き、範囲外を保存しない", () => {
+    const out = matchCheckOutcomes(
+      ["何か"],
+      [{
+        checkItem: "何か",
+        status: "CONCERN",
+        finding: "x",
+        sourceCount: 4,
+        sourceIndexes: [2, 2, 0, 5, 1],
+      }],
+      3
+    );
+    expect(out[0].sourceIndexes).toEqual([2, 1]);
   });
 });
