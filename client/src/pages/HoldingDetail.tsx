@@ -456,18 +456,20 @@ export default function HoldingDetail({ params }: { params: { id: string } }) {
         savingBandId={updateBand.isPending ? (updateBand.variables?.bandId ?? null) : null}
       />
 
-      <Tabs defaultValue="card">
-        <TabsList>
-          <TabsTrigger value="card">投資カード</TabsTrigger>
-          <TabsTrigger value="chart">価格チャート</TabsTrigger>
-          <TabsTrigger value="news">ニュース ({news.length})</TabsTrigger>
-          {/*
-            件数は重複を畳んだ後の数にする。タブに 13 と出して中身が 9 行だと
-            「4 件抜けている」と受け取られる。
-          */}
-          <TabsTrigger value="history">分析の履歴 ({historyRows.length})</TabsTrigger>
-          <TabsTrigger value="consult">相談 ({consults.data?.length ?? 0})</TabsTrigger>
-        </TabsList>
+      <Tabs defaultValue="card" className="min-w-0">
+        <div className="max-w-full overflow-x-auto pb-1">
+          <TabsList className="min-w-max">
+            <TabsTrigger value="card">投資カード</TabsTrigger>
+            <TabsTrigger value="chart">価格チャート</TabsTrigger>
+            <TabsTrigger value="news">ニュース ({news.length})</TabsTrigger>
+            {/*
+              件数は重複を畳んだ後の数にする。タブに 13 と出して中身が 9 行だと
+              「4 件抜けている」と受け取られる。
+            */}
+            <TabsTrigger value="history">分析の履歴 ({historyRows.length})</TabsTrigger>
+            <TabsTrigger value="consult">相談 ({consults.data?.length ?? 0})</TabsTrigger>
+          </TabsList>
+        </div>
 
         <TabsContent value="card" className="mt-4">
           <InvestmentCardForm
