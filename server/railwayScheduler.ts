@@ -20,6 +20,7 @@ let priceRunActive = false;
 let newsRunActive = false;
 let backfillRunActive = false;
 const profileOffsets = new Map<number, number>();
+export const RAILWAY_DATA_BACKFILL_CRON = "0,20,40 1-21 * * *";
 
 export function getNewsBatchForUtcDate(now: Date): number | null {
   const utcMinutes = now.getUTCHours() * 60 + now.getUTCMinutes();
@@ -188,13 +189,13 @@ export function startRailwayScheduler(): boolean {
   });
   scheduleNewsBatchWindow("*/5 22-23 * * *");
   scheduleNewsBatchWindow("0-30/5 0 * * *");
-  cron.schedule("0,20,40 1-7 * * *", () => void runRailwayDataBackfill(), {
+  cron.schedule(RAILWAY_DATA_BACKFILL_CRON, () => void runRailwayDataBackfill(), {
     timezone: "UTC",
     noOverlap: true,
   });
 
   console.log(
-    "[Railway scheduler] enabled: prices 06:30/21:30 UTC weekdays; news 22:00-00:30 UTC daily; data backfill every 20m 01:00-07:40 UTC"
+    "[Railway scheduler] enabled: prices 06:30/21:30 UTC weekdays; news 22:00-00:30 UTC daily; data backfill every 20m 01:00-21:40 UTC"
   );
   return true;
 }

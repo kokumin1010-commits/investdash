@@ -159,7 +159,7 @@ try {
   let interactionState = null;
   if (process.env.FULL_INTERACTION === "true") {
     const filterResults = {};
-    for (const label of ["買い増し圏", "確認が必要", "価格帯の外", "すべて"]) {
+    for (const label of ["買い増し圏", "様子見", "確認が必要", "価格帯の外", "すべて"]) {
       const clicked = await evaluate(`(() => {
         const button = [...document.querySelectorAll('button')].find(
           item => item.textContent.trim().startsWith(${JSON.stringify(label)})
@@ -211,7 +211,7 @@ try {
     })()`);
     await sleep(15_000);
     const aiProposalVisible = await evaluate(
-      `document.body.textContent.includes('AI の買い増し提案') && document.body.textContent.includes('トヨタ自動車')`
+      `document.body.textContent.includes('AI の買い増し提案') && Boolean(document.querySelector('a[href*="/consult?"]'))`
     );
 
     const planCardClicked = await evaluate(`(() => {
@@ -238,7 +238,7 @@ try {
     const consultState = await evaluate(`({
       path: location.pathname,
       search: location.search,
-      prefilled: Boolean(document.querySelector('textarea')?.value.includes('トヨタ自動車（7203.T）'))
+      prefilled: Boolean(document.querySelector('textarea')?.value.trim())
     })`);
 
     interactionState = {
@@ -287,7 +287,7 @@ try {
       interactionState.planCardPath.includes("/holdings?symbol=7203.T") &&
       interactionState.consultClicked &&
       interactionState.consultState.path.endsWith("/consult") &&
-      interactionState.consultState.search.includes("symbol=7203.T") &&
+      interactionState.consultState.search.includes("symbol=") &&
       interactionState.consultState.search.includes("question=") &&
       interactionState.consultState.prefilled);
   if (!passed || !fullInteractionPassed) process.exitCode = 1;

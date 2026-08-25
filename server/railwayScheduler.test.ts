@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   getNewsBatchForUtcDate,
   RAILWAY_NEWS_SCHEDULE,
+  RAILWAY_DATA_BACKFILL_CRON,
   shouldStartRailwayScheduler,
 } from "./railwayScheduler";
 
@@ -38,5 +39,9 @@ describe("Railway news schedule", () => {
     expect(
       shouldStartRailwayScheduler({ INVESTDASH_SCHEDULER_ENABLED: "false" })
     ).toBe(false);
+  });
+
+  it("runs data completeness checks every 20 minutes outside the news window", () => {
+    expect(RAILWAY_DATA_BACKFILL_CRON).toBe("0,20,40 1-21 * * *");
   });
 });
