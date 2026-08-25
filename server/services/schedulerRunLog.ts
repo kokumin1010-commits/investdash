@@ -22,7 +22,7 @@ export function resolveSchedulerRunStatus(summary: SchedulerRunSummary): Exclude
       ? summary.succeeded > 0
         ? "PARTIAL"
         : "FAILED"
-      : summary.processed === 0 && (summary.skipped ?? 0) > 0
+      : summary.processed === 0
         ? "SKIPPED"
         : "SUCCESS")
   );

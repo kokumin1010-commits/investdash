@@ -127,5 +127,6 @@ describe("调度运行状态", () => {
     expect(resolveSchedulerRunStatus({ processed: 2, succeeded: 1, failed: 1 })).toBe("PARTIAL");
     expect(resolveSchedulerRunStatus({ processed: 1, succeeded: 0, failed: 1 })).toBe("FAILED");
     expect(resolveSchedulerRunStatus({ processed: 0, succeeded: 0, failed: 0, skipped: 1 })).toBe("SKIPPED");
+    expect(resolveSchedulerRunStatus({ processed: 0, succeeded: 0, failed: 0 })).toBe("SKIPPED");
   });
 });

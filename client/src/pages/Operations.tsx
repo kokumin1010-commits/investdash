@@ -47,6 +47,22 @@ const TRIGGER_LABELS = {
   STARTUP: "起動時",
 } as const;
 
+const DETAIL_LABELS: Record<string, string> = {
+  batch: "バッチ",
+  offset: "開始位置",
+  fetched: "取得",
+  analyzed: "分析済み",
+  analysisUnavailable: "分析未完了",
+  failedSymbols: "失敗銘柄",
+  deferredSymbols: "一時保留銘柄",
+  quotaExhausted: "AI 利用枠上限",
+  nextOffset: "次の開始位置",
+  transitions: "価格帯移動",
+  notes: "メモ追加",
+  monthlyPeriod: "月次記録",
+  itemsChecked: "照合項目",
+};
+
 type Status = keyof typeof STATUS_LABELS;
 type Trigger = keyof typeof TRIGGER_LABELS;
 
@@ -84,7 +100,9 @@ function detailText(detail: unknown): string | null {
   });
   if (entries.length === 0) return null;
   return entries
-    .map(([key, value]) => `${key}: ${Array.isArray(value) ? value.join(", ") : String(value)}`)
+    .map(([key, value]) =>
+      `${DETAIL_LABELS[key] ?? key}: ${Array.isArray(value) ? value.join(", ") : String(value)}`
+    )
     .join(" / ");
 }
 
