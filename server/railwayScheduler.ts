@@ -103,8 +103,17 @@ function scheduleNewsBatchWindow(expression: string) {
   );
 }
 
+export function shouldStartRailwayScheduler(
+  env: NodeJS.ProcessEnv = process.env
+): boolean {
+  return (
+    env.INVESTDASH_SCHEDULER_ENABLED === "true" ||
+    Boolean(env.RAILWAY_ENVIRONMENT_ID || env.RAILWAY_PROJECT_ID)
+  );
+}
+
 export function startRailwayScheduler(): boolean {
-  if (process.env.INVESTDASH_SCHEDULER_ENABLED !== "true") {
+  if (!shouldStartRailwayScheduler()) {
     console.log("[Railway scheduler] disabled");
     return false;
   }

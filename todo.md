@@ -55,3 +55,6 @@
 - [ ] 验证 SalesDash 只能访问 salesdash database，InvestDash 继续使用 railway database
 - [ ] 修复 SalesDash 私网代理的 Authorization/Cookie 转发并验证密码 token 可访问受保护 tRPC
 - [ ] 用 Railway 直连认证诊断区分 Authorization、JWT 与用户解析根因，修复后移除诊断端点
+- [ ] 最短路径优先：完成公开真实数据验收后立即启用 Railway 调度
+- [ ] Railway 环境默认启用内置调度器，不再依赖手机端变量页面操作
+- [ ] 最短路径优先：SalesDash 仅创建 salesdash database 与独立账号，不扩展额外业务表

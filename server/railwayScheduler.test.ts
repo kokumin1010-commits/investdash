@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   getNewsBatchForUtcDate,
   RAILWAY_NEWS_SCHEDULE,
+  shouldStartRailwayScheduler,
 } from "./railwayScheduler";
 
 describe("Railway news schedule", () => {
@@ -25,5 +26,17 @@ describe("Railway news schedule", () => {
     expect(
       RAILWAY_NEWS_SCHEDULE.batchSize * RAILWAY_NEWS_SCHEDULE.batchCount
     ).toBeGreaterThanOrEqual(123);
+  });
+
+  it("starts automatically on Railway even when the legacy flag is false", () => {
+    expect(
+      shouldStartRailwayScheduler({
+        RAILWAY_ENVIRONMENT_ID: "production-id",
+        INVESTDASH_SCHEDULER_ENABLED: "false",
+      })
+    ).toBe(true);
+    expect(
+      shouldStartRailwayScheduler({ INVESTDASH_SCHEDULER_ENABLED: "false" })
+    ).toBe(false);
   });
 });
