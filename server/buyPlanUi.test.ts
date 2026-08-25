@@ -77,10 +77,10 @@ describe("buy-plan UI wording", () => {
   it("labels the separate Buffett question as a new-purchase decision", () => {
     expect(
       renderToStaticMarkup(createElement(WouldBuyNowBadge, { value: "YES" }))
-    ).toContain("未保有なら買う");
+    ).toContain("仮に未保有なら買う");
     expect(
       renderToStaticMarkup(createElement(WouldBuyNowMark, { value: "YES" }))
-    ).toContain("新規なら買う");
+    ).toContain("仮に未保有なら買う");
     expect(
       renderToStaticMarkup(
         createElement(BuffettLensBlock, {
@@ -91,7 +91,7 @@ describe("buy-plan UI wording", () => {
         })
       )
     ).toContain("新規購入の判断");
-    expect(BUFFETT_FILTER_LABELS.BUY_NOW).toBe("新規なら買う");
+    expect(BUFFETT_FILTER_LABELS.BUY_NOW).toBe("仮に未保有なら買う");
     expect(BUFFETT_FILTER_LABELS.ALL).toBe("すべての新規判定");
   });
 });

@@ -14,7 +14,7 @@ type WouldBuy = "YES" | "NO" | "UNCLEAR";
 type PriceVsValue = "PRICE_AHEAD" | "VALUE_AHEAD" | "IN_LINE" | "UNKNOWN";
 
 const BUY_LABEL: Record<WouldBuy, string> = {
-  YES: "未保有なら買う",
+  YES: "仮に未保有なら買う",
   NO: "新規購入は見送る",
   UNCLEAR: "新規購入は判断保留",
 };
@@ -100,7 +100,11 @@ export function WouldBuyNowMark({ value }: { value: WouldBuy | null }) {
         ? "text-muted-foreground"
         : "text-amber-600 dark:text-amber-400";
   const label =
-    value === "YES" ? "新規なら買う" : value === "NO" ? "新規は見送る" : "新規判断保留";
+    value === "YES"
+      ? "仮に未保有なら買う"
+      : value === "NO"
+        ? "未保有でも見送る"
+        : "未保有時も判断保留";
   return <p className={`mt-0.5 text-[10px] leading-tight ${style}`}>{label}</p>;
 }
 

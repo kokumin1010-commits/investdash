@@ -47,7 +47,7 @@ export const BUFFETT_FILTER_LABELS: Record<BuffettFilter, string> = {
   NOT_BUY_NOW: "新規では見送る",
   PRICE_AHEAD: "株価が中身より速い",
   OVERHEATED: "新規見送り＋株価先行",
-  BUY_NOW: "新規なら買う",
+  BUY_NOW: "仮に未保有なら買う",
   VALUE_AHEAD: "中身が株価より速い",
   UNCLEAR: "新規判断・材料不足",
 };
