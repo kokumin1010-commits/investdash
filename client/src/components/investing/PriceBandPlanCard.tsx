@@ -52,6 +52,13 @@ type Band = {
     status: "CLEAR" | "CONCERN" | "UNKNOWN";
     finding: string;
     sourceCount: number;
+    sources?: Array<{
+      title: string;
+      url: string;
+      source: string | null;
+      publishedAt: string | null;
+      match: "MATCHED" | "CANDIDATE";
+    }>;
     checkedAt: string | Date;
   }>;
 };
@@ -86,6 +93,22 @@ function CheckStatusIcon({ status }: { status: "CLEAR" | "CONCERN" | "UNKNOWN" }
   if (status === "CLEAR") return <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-emerald-600" />;
   if (status === "CONCERN") return <AlertTriangle className="h-3.5 w-3.5 shrink-0 text-rose-600" />;
   return <HelpCircle className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />;
+}
+
+const CHECK_STATUS_LABEL = {
+  CLEAR: "反証あり",
+  CONCERN: "懸念あり",
+  UNKNOWN: "情報不足",
+} as const;
+
+function formatCheckedAt(value: string | Date): string {
+  return new Date(value).toLocaleString("ja-JP", {
+    timeZone: "Asia/Tokyo",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
 }
 
 /**
@@ -456,9 +479,52 @@ export function PriceBandPlanCard({
                               <span className="mt-1 h-1 w-1 shrink-0 rounded-full bg-current opacity-50" />
                             )}
                             <span className="flex-1">
-                              {item}
+                              <span className="flex flex-wrap items-center gap-1.5">
+                                <span>{item}</span>
+                                {result ? (
+                                  <Badge
+                                    variant="outline"
+                                    className={cn(
+                                      "h-5 px-1.5 text-[10px]",
+                                      result.status === "CLEAR" &&
+                                        "border-emerald-300 bg-emerald-50 text-emerald-700",
+                                      result.status === "CONCERN" &&
+                                        "border-rose-300 bg-rose-50 text-rose-700",
+                                      result.status === "UNKNOWN" &&
+                                        "border-slate-300 bg-slate-50 text-slate-600"
+                                    )}
+                                  >
+                                    {CHECK_STATUS_LABEL[result.status]}
+                                  </Badge>
+                                ) : null}
+                              </span>
                               {result ? (
-                                <span className="mt-0.5 block opacity-80">{result.finding}</span>
+                                <>
+                                  <span className="mt-0.5 block opacity-80">{result.finding}</span>
+                                  <span className="mt-1 block text-[10px] opacity-65">
+                                    {formatCheckedAt(result.checkedAt)} JST · 根拠ニュース {result.sourceCount} 件
+                                  </span>
+                                  {(result.sources?.length ?? 0) > 0 ? (
+                                    <span className="mt-1 block space-y-1">
+                                      {result.sources?.map(source => (
+                                        <a
+                                          key={`${source.url}-${source.title}`}
+                                          href={source.url}
+                                          target="_blank"
+                                          rel="noreferrer"
+                                          className="block truncate text-[10px] font-medium text-primary underline-offset-2 hover:underline"
+                                        >
+                                          {source.source ? `${source.source} · ` : ""}
+                                          {source.title}
+                                        </a>
+                                      ))}
+                                    </span>
+                                  ) : result.status === "UNKNOWN" ? (
+                                    <span className="mt-1 block text-[10px] font-medium text-amber-700">
+                                      判断材料が未取得です。安全を意味しません。
+                                    </span>
+                                  ) : null}
+                                </>
                               ) : null}
                             </span>
                           </li>
