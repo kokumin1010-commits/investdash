@@ -22,6 +22,33 @@ let backfillRunActive = false;
 const profileOffsets = new Map<number, number>();
 export const RAILWAY_DATA_BACKFILL_CRON = "0,20,40 1-21 * * *";
 
+type RailwayBackfillUserSummary = {
+  userId: number;
+  profilesUpdated: number;
+  profileFailed: number;
+  signalsGenerated: number;
+  signalRemaining: number;
+  plansGenerated: number | null;
+  planRemaining: number | null;
+  error?: string;
+};
+
+let lastBackfillRun:
+  | {
+      startedAt: string;
+      finishedAt: string;
+      users: RailwayBackfillUserSummary[];
+    }
+  | null = null;
+
+export function getRailwayDataBackfillStatus() {
+  return {
+    cron: RAILWAY_DATA_BACKFILL_CRON,
+    running: backfillRunActive,
+    lastRun: lastBackfillRun,
+  };
+}
+
 export function getNewsBatchForUtcDate(now: Date): number | null {
   const utcMinutes = now.getUTCHours() * 60 + now.getUTCMinutes();
   const elapsed =
@@ -122,6 +149,8 @@ export async function runRailwayDataBackfill() {
     return;
   }
   backfillRunActive = true;
+  const startedAt = new Date().toISOString();
+  const summaries: RailwayBackfillUserSummary[] = [];
   try {
     const userIds = await db.listAllUserIds();
     for (const userId of userIds) {
@@ -144,11 +173,35 @@ export async function runRailwayDataBackfill() {
         console.log(
           `[Railway scheduler] backfill user=${userId} profiles=${profiles.updated}/${profiles.processed} profileFailed=${profiles.failed.length} signals=${signals.generated}/${signals.processed} signalRemaining=${signals.remaining} plans=${plans ? `${plans.generated}/${plans.processed}` : "quota-skipped"} planRemaining=${plans?.remaining ?? "unknown"}`
         );
+        summaries.push({
+          userId,
+          profilesUpdated: profiles.updated,
+          profileFailed: profiles.failed.length,
+          signalsGenerated: signals.generated,
+          signalRemaining: signals.remaining,
+          plansGenerated: plans?.generated ?? null,
+          planRemaining: plans?.remaining ?? null,
+        });
       } catch (error) {
         console.error(`[Railway scheduler] data backfill user=${userId} failed:`, error);
+        summaries.push({
+          userId,
+          profilesUpdated: 0,
+          profileFailed: 0,
+          signalsGenerated: 0,
+          signalRemaining: -1,
+          plansGenerated: null,
+          planRemaining: null,
+          error: error instanceof Error ? error.message : String(error),
+        });
       }
     }
   } finally {
+    lastBackfillRun = {
+      startedAt,
+      finishedAt: new Date().toISOString(),
+      users: summaries,
+    };
     backfillRunActive = false;
   }
 }

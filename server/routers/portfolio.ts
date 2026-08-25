@@ -64,6 +64,7 @@ import {
 } from "../services/portfolio";
 import { BROKERS, normalizeSymbol } from "../../shared/investing";
 import { BAND_ACTIONS } from "../../shared/priceBands";
+import { getRailwayDataBackfillStatus } from "../railwayScheduler";
 
 const decimalString = z.union([z.number(), z.string()]).transform(v => String(v));
 
@@ -74,6 +75,9 @@ export const portfolioRouter = router({
   }),
 
   settings: protectedProcedure.query(async ({ ctx }) => db.getSettings(ctx.user.id)),
+
+  /** Railway 常駐 cron が実際に動いた時刻と不足件数（運用確認用） */
+  railwayDataBackfillStatus: protectedProcedure.query(() => getRailwayDataBackfillStatus()),
 
   updateSettings: protectedProcedure
     .input(
