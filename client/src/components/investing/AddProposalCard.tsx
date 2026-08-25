@@ -12,6 +12,7 @@ import { Sparkles, Check, Clock, XCircle } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 import { Link } from "wouter";
+import { buildProposalConsultHref } from "@shared/buyPlanUi";
 
 /**
  * AI の買い増し提案。
@@ -114,7 +115,7 @@ export function AddProposalCard() {
           <Button
             size="sm"
             variant="outline"
-            className="bg-background"
+            className="w-full bg-background sm:w-auto"
             disabled={busy}
             onClick={() => {
               setBusy(true);
@@ -267,7 +268,16 @@ export function AddProposalCard() {
                         {p.priceChangePct.toFixed(1)}%
                       </span>
                     ) : null}
-                    <Link href="/consult" className="hover:underline">
+                    <Link
+                      href={buildProposalConsultHref({
+                        symbol: p.symbol,
+                        name: p.name,
+                        stanceLabel: s.label,
+                        conclusion: p.conclusion,
+                        invalidation: p.invalidation,
+                      })}
+                      className="hover:underline"
+                    >
                       この件を相談する
                     </Link>
                   </div>

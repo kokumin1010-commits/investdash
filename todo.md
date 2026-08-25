@@ -12,7 +12,7 @@
 - [x] Data API 额度耗尽时自动回退 Yahoo 公共行情端点
 - [x] AI 额度不足时保留新闻、标记未分析状态并向用户明确提示
 - [x] 验证企业资料运行时输出并记录 website 与 businessSummary 的额度降级范围
-- [ ] 外部模型服务恢复后实测新闻分析、持仓信号和分析提案生成
+- [x] 外部模型服务恢复后实测新闻分析、持仓信号和分析提案生成
 - [x] tRPC 实测手动行情更新 167 条成功、新闻抓取 14 条成功
 - [x] 注册日本市场、美国市场价格更新及每日新闻分析任务
 - [x] 将每日新闻分析拆分为每次四个标的的静态批次回调，满足两分钟限制
@@ -22,7 +22,7 @@
 - [x] 完成 Vitest、TypeScript 类型检查与生产构建验证
 - [x] 完成桌面端与手机端页面、解锁流程、核心数据和手动更新验收
 - [x] 整理已恢复数据、无法恢复数据及需要重新输入的数据清单
-- [ ] 保存最终可发布版本并交付独立于旧站点的新访问地址
+- [x] 保存最终可发布版本并交付独立于旧站点的新访问地址
 - [x] 生产环境严格监听平台分配的 PORT，仅本地开发允许寻找备用端口
 - [x] 发布后验证首页、tRPC 与 Railway 内置调度底层任务的生产响应
 - [x] 恢复仅开发环境可用的 devToken 预览解锁并用于页面验收
@@ -43,20 +43,35 @@
 - [x] 将定时行情与新闻任务改为 Railway 可持续运行的调度方式
 - [x] 经用户确认后部署 InvestDash 到指定 Railway 项目
 - [x] 将 salesdash.buzzdrop.co.jp/investdash 路由接入 Railway 服务并验证 HTTPS
-- [ ] 验证 Railway 生产环境的 1010 解锁、真实数据、手动行情、新闻与定时任务
-- [ ] 更新最终恢复报告与运维说明，交付 Railway 公开网址
+- [x] 验证 Railway 生产环境的 1010 解锁、真实数据、手动行情、新闻与定时任务
+- [x] 更新最终恢复报告与运维说明，交付 Railway 公开网址
 - [x] 为 SalesDash 代理加入 investdash.railway.internal:8080 安全默认上游并验证
 - [x] 验证 Railway MySQL DATABASE_URL 的迁移、应用启动和读写流程
 - [x] 为截图历史存储提供 Railway S3 兼容实现或明确的安全降级
-- [ ] 完成 /investdash 子路径、1010 鉴权、数据库读写和真实页面加载的 Railway 端到端验收
+- [x] 完成 /investdash 子路径、1010 鉴权、数据库读写和真实页面加载的 Railway 端到端验收
 - [x] 盘点 SalesDash 现有 schema、迁移文件和当前数据持久化方式
 - [x] 在同一 Railway MySQL 实例新建 salesdash database 与最小权限独立用户
-- [ ] 为 SalesDash 配置独立 DATABASE_URL 并安全应用其数据库迁移
+- [x] 为 SalesDash 配置独立 DATABASE_URL 并安全应用其数据库迁移
 - [x] 验证 SalesDash 只能访问 salesdash database，InvestDash 继续使用 railway database
 - [x] 修复 SalesDash 私网代理的 Authorization/Cookie 转发并验证密码 token 可访问受保护 tRPC
-- [ ] 用 Railway 直连认证诊断区分 Authorization、JWT 与用户解析根因，修复后移除诊断端点
+- [x] 用 Railway 直连认证诊断区分 Authorization、JWT 与用户解析根因，修复后移除诊断端点
 - [x] 最短路径优先：完成公开真实数据验收后立即启用 Railway 调度
 - [x] Railway 环境默认启用内置调度器，不再依赖手机端变量页面操作
 - [x] 最短路径优先：SalesDash 使用独立 database 与账号，并应用其现有 326 张 schema 表而不写入业务数据
-- [ ] 实测 Railway 生产环境的持仓信号生成与分析提案生成
-- [ ] 推送诊断端点移除并验证 /healthz/auth 已不可访问
+- [x] 实测 Railway 生产环境的持仓信号生成与分析提案生成
+- [x] 推送诊断 JSON 路由移除并验证 /healthz/auth 仅回退普通 SPA HTML
+- [x] 检查 Railway MySQL 的 Backups 与保留周期，并确认当前 MySQL 不提供 PITR 时间点恢复
+- [x] 确认共享 MySQL 实例已启用日、周、月自动备份，覆盖 railway 与 salesdash 两个 database
+- [x] 验证现有 1.62 GB 快照与 Restore 入口，并记录非破坏性的恢复演练流程
+- [x] 更新 Railway 运维文档，明确持久卷与备份的区别、频率、保留和恢复步骤
+- [x] 逐项点击检查买い増しプラン页面的按钮、筛选、卡片、弹窗、导航和移动端抽屉
+- [x] 修复已持有标的错误显示「今からでも買う」，区分追加购买与新建仓语义
+- [x] 修复 `/buy-plans` 与 `/investdash/buy-plans` 的路由一致性和刷新行为
+- [x] 优化买い増しプラン的手机布局、触控区域、状态反馈与说明文字
+- [x] 为买增计划分类、筛选、路由和关键交互补充自动化测试
+- [ ] 在桌面与手机生产页面完成全交互回归并部署 Railway 修复
+- [x] 手机端实际打开导航抽屉、点击买い増しプラン、验证 URL 与当前高亮
+- [x] 为 BuyPlans 补充筛选切换、搜索空状态和清除恢复列表的页面级自动化测试
+- [x] 页面级渲染 BuyPlans 并点击 BUY/VERIFY/OUTSIDE/ALL，断言结果与选中状态
+- [x] 页面级输入无结果关键字、断言空状态并点击清除按钮恢复列表
+- [x] 页面级渲染提案卡并断言咨询链接实际包含 symbol 与 question

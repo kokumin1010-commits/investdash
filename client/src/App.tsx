@@ -1,5 +1,4 @@
 import DashboardLayout from "@/components/DashboardLayout";
-import { SidebarProvider } from "@/components/ui/sidebar";
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import NotFound from "@/pages/NotFound";
@@ -51,13 +50,11 @@ function App() {
         <TooltipProvider delayDuration={200}>
           <Toaster position="top-center" />
           <PasscodeProvider>
-            <SidebarProvider>
+            <WouterRouter base={basePath}>
               <DashboardLayout>
-                <WouterRouter base={basePath}>
-                  <AppRoutes />
-                </WouterRouter>
+                <AppRoutes />
               </DashboardLayout>
-            </SidebarProvider>
+            </WouterRouter>
           </PasscodeProvider>
         </TooltipProvider>
       </ThemeProvider>

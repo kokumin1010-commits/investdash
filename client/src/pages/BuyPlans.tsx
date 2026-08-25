@@ -20,6 +20,11 @@ import { useMemo, useState } from "react";
 import { Link } from "wouter";
 import { TransitionHistoryCard } from "@/components/investing/TransitionHistoryCard";
 import { AddProposalCard } from "@/components/investing/AddProposalCard";
+import {
+  filterBuyPlanRows,
+  formatNextBandHint,
+  type BuyPlanListFilter,
+} from "@shared/buyPlanUi";
 
 /**
  * 買い増しプランの一覧。
@@ -29,7 +34,7 @@ import { AddProposalCard } from "@/components/investing/AddProposalCard";
  * 確認が必要な銘柄だけを拾えるようにする。
  */
 
-type Filter = "ALL" | "BUY" | "VERIFY" | "OUTSIDE";
+type Filter = BuyPlanListFilter;
 
 const FILTERS: Array<{ key: Filter; label: string; hint: string }> = [
   { key: "BUY", label: "買い増し圏", hint: "打診買い・主力買い増しの段にいる銘柄" },
@@ -48,23 +53,7 @@ export default function BuyPlans() {
 
   const rows = useMemo(() => {
     if (!allRows) return [];
-    const kw = keyword.trim().toLowerCase();
-    return allRows
-      .filter(r => {
-        if (kw && !r.name.toLowerCase().includes(kw) && !r.symbol.toLowerCase().includes(kw)) {
-          return false;
-        }
-        switch (filter) {
-          case "BUY":
-            return r.action === "ADD_SMALL" || r.action === "ADD_MAIN";
-          case "VERIFY":
-            return r.action === "VERIFY";
-          case "OUTSIDE":
-            return r.outsideDirection !== null;
-          default:
-            return true;
-        }
-      })
+    return filterBuyPlanRows(allRows, filter, keyword)
       .sort((a, b) => {
         /*
          * 買う量が多い段を上に出す。同じ段なら「次の段まで近い」順。
@@ -150,19 +139,22 @@ export default function BuyPlans() {
       <AddProposalCard />
 
       <div className="flex flex-wrap items-center gap-2">
-        {FILTERS.map(f => (
-          <Button
-            key={f.key}
-            size="sm"
-            variant={filter === f.key ? "default" : "outline"}
-            className={filter === f.key ? "" : "bg-background"}
-            onClick={() => setFilter(f.key)}
-            title={f.hint}
-          >
-            {f.label}
-            <span className="ml-1.5 opacity-70">{counts[f.key]}</span>
-          </Button>
-        ))}
+        <div className="grid w-full grid-cols-2 gap-2 sm:flex sm:w-auto">
+          {FILTERS.map(f => (
+            <Button
+              key={f.key}
+              size="sm"
+              variant={filter === f.key ? "default" : "outline"}
+              className={`w-full sm:w-auto ${filter === f.key ? "" : "bg-background"}`}
+              onClick={() => setFilter(f.key)}
+              title={f.hint}
+              aria-pressed={filter === f.key}
+            >
+              {f.label}
+              <span className="ml-1.5 opacity-70">{counts[f.key]}</span>
+            </Button>
+          ))}
+        </div>
         <div className="relative ml-auto w-full sm:w-56">
           <Search className="text-muted-foreground pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2" />
           <Input
@@ -202,6 +194,13 @@ export default function BuyPlans() {
                   : "条件を変えて試してください。"}
             </CardDescription>
           </CardHeader>
+          {keyword.trim() && (
+            <CardContent className="pt-0">
+              <Button variant="outline" size="sm" onClick={() => setKeyword("")}>
+                検索をクリアして一覧に戻す
+              </Button>
+            </CardContent>
+          )}
         </Card>
       )}
 
@@ -381,7 +380,7 @@ function PlanRow({ row, stats }: { row: Row; stats?: Stats }) {
             {row.nextGapPct !== null && row.nextActionLabel && (
               <div className="text-muted-foreground flex items-center gap-1 text-xs">
                 <ArrowDown className="size-3" />
-                {row.nextGapPct.toFixed(1)}% で「{row.nextActionLabel}」
+                {formatNextBandHint(row.nextGapPct, row.nextActionLabel)}
               </div>
             )}
 

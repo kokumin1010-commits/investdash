@@ -1,3 +1,5 @@
+import React from "react";
+
 /**
  * 「今この株を持っていなかったら、この値段で買うか」の判定表示。
  *
@@ -12,9 +14,9 @@ type WouldBuy = "YES" | "NO" | "UNCLEAR";
 type PriceVsValue = "PRICE_AHEAD" | "VALUE_AHEAD" | "IN_LINE" | "UNKNOWN";
 
 const BUY_LABEL: Record<WouldBuy, string> = {
-  YES: "今からでも買う",
-  NO: "今からは買わない",
-  UNCLEAR: "判断できない",
+  YES: "未保有なら買う",
+  NO: "新規購入は見送る",
+  UNCLEAR: "新規購入は判断保留",
 };
 
 /**
@@ -97,7 +99,8 @@ export function WouldBuyNowMark({ value }: { value: WouldBuy | null }) {
       : value === "NO"
         ? "text-muted-foreground"
         : "text-amber-600 dark:text-amber-400";
-  const label = value === "YES" ? "今も買う" : value === "NO" ? "今は買わず" : "判断不能";
+  const label =
+    value === "YES" ? "新規なら買う" : value === "NO" ? "新規は見送る" : "新規判断保留";
   return <p className={`mt-0.5 text-[10px] leading-tight ${style}`}>{label}</p>;
 }
 
@@ -121,7 +124,7 @@ export function BuffettLensBlock({
       {wouldBuyNow ? (
         <div>
           <div className="flex flex-wrap items-center gap-2">
-            <span className="text-xs text-muted-foreground">持っていなかったら</span>
+            <span className="text-xs text-muted-foreground">新規購入の判断</span>
             <WouldBuyNowBadge value={wouldBuyNow} />
           </div>
           {wouldBuyNowReason ? (

@@ -49,7 +49,9 @@ export default function Consult() {
    * 書き方に揃えて壊れないようにする。
    */
   const search = useSearch();
-  const symbolParam = new URLSearchParams(search).get("symbol");
+  const searchParams = new URLSearchParams(search);
+  const symbolParam = searchParams.get("symbol");
+  const questionParam = searchParams.get("question");
   /*
    * 銘柄詳細の相談タブから特定の相談を開き直せるようにする。
    * 一覧から探し直させると、銘柄が多い場合に目的の相談まで辿れない。
@@ -73,17 +75,19 @@ export default function Consult() {
   if (openId !== null) {
     return <ConsultThread id={openId} onBack={() => setOpenId(null)} />;
   }
-  return <ConsultStart symbol={symbolParam} onOpen={setOpenId} />;
+  return <ConsultStart symbol={symbolParam} initialQuestion={questionParam} onOpen={setOpenId} />;
 }
 
 function ConsultStart({
   symbol,
+  initialQuestion,
   onOpen,
 }: {
   symbol: string | null;
+  initialQuestion: string | null;
   onOpen: (id: number) => void;
 }) {
-  const [question, setQuestion] = useState("");
+  const [question, setQuestion] = useState(() => initialQuestion ?? "");
   const utils = trpc.useUtils();
   const list = trpc.consult.list.useQuery();
 

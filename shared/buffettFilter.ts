@@ -43,13 +43,13 @@ export const BUFFETT_FILTERS = [
 export type BuffettFilter = (typeof BUFFETT_FILTERS)[number];
 
 export const BUFFETT_FILTER_LABELS: Record<BuffettFilter, string> = {
-  ALL: "すべての判定",
-  NOT_BUY_NOW: "今からは買わない",
+  ALL: "すべての新規判定",
+  NOT_BUY_NOW: "新規では見送る",
   PRICE_AHEAD: "株価が中身より速い",
-  OVERHEATED: "買わない＋株価先行",
-  BUY_NOW: "今からでも買う",
+  OVERHEATED: "新規見送り＋株価先行",
+  BUY_NOW: "新規なら買う",
   VALUE_AHEAD: "中身が株価より速い",
-  UNCLEAR: "判断材料が足りない",
+  UNCLEAR: "新規判断・材料不足",
 };
 
 /** 判定を持つ最小限の形。画面側の型に依存させない */
