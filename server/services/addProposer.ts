@@ -253,7 +253,16 @@ const SCHEMA = {
     },
     invalidation: { type: ["string", "null"], description: "結論を覆す条件" },
   },
-  required: ["stance", "conclusion", "rationale"],
+  // OpenAI strict mode requires every property to appear in `required`.
+  // Optional business fields remain optional semantically by allowing null.
+  required: [
+    "stance",
+    "conclusion",
+    "rationale",
+    "amountJpy",
+    "limitPrice",
+    "invalidation",
+  ],
   additionalProperties: false,
 } as const;
 

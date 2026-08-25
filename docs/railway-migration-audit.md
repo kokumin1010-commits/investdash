@@ -92,3 +92,11 @@ Suggested Variables 表单已完成并点击 Add。Railway 现明确显示 **8 S
 独立只读核验脚本随后连接 Railway MySQL，对 users、holdings、watchlist、monthlyHoldings、monthlySnapshots、newsItems、passcodeAuth、portfolioSnapshots、interestAssets、brokerBalances 共 10 张关键表逐项执行 COUNT；全部与导出预期一致并返回 OK。
 
 SalesDash 主分支已推送私网代理提交 `1b5b37b5`。公开健康端点 [https://salesdash.buzzdrop.co.jp/investdash/healthz](https://salesdash.buzzdrop.co.jp/investdash/healthz) 返回 `application/json` 与 `{"ok":true,"service":"investdash","version":"386cabce7e417fb72a839bc444be6659d5a332c6"}`，证明 HTTPS → SalesDash → `investdash.railway.internal:8080` 链路已接通。公开首页标题为 `InvestDash — 個人投資ダッシュボード`，脚本资源 `/investdash/assets/index-DZyplF-o.js` 返回 HTTP/2 200 和 JavaScript content-type。浏览器已显示独立 InvestDash 1010 パスコード页，不受 SalesDash 现有页面或登录流程影响。
+
+认证诊断确定公开代理与 Railway 直连均能收到 Authorization，JWT 也有效；最初失败点是 Railway `users` 表缺少 owner 行，而 `passcodeAuth.ownerUserId=1` 已存在。依据受控导出原文恢复 users.id=1 后，直连和公开代理的 `tokenValid`、`userResolved` 均为 true，`portfolio.overview` 返回 HTTP 200 与真实 Toyota 等持仓。
+
+调度器自动启用版本 `d1dd25ff5a3b36911a36569cd17ce3a12dbe53b4` 已上线 [Railway 直连健康端点](https://investdash-production.up.railway.app/healthz)。重部署后 users=1、holdings=156 持久存在；公开 [InvestDash](https://salesdash.buzzdrop.co.jp/investdash/) 的组合概览返回 HTTP 200。Railway 环境现在不再依赖手机端变量页面，价格任务按工作日 UTC 06:30/21:30、新闻 31 批按每日 UTC 22:00–00:30 自动运行。
+
+生产手动任务实测：`portfolio.syncPrices` 返回 HTTP 200，更新 167 条记录、失败 0，汇率为 USD/JPY 159.298、SGD/JPY 125.372、HKD/JPY 20.3231。`news.syncOne(7203.T)` 返回 HTTP 200，新抓取 2 条、成功分析 14 条，`analysisUnavailable=false`、失败标的为空，证明 Railway 的 OpenAI 回退与新闻分析链路可用。
+
+SalesDash 的独立 `salesdash` database 已在同一 Railway MySQL 实例创建，专用用户仅获 `salesdash.*` 权限，对 InvestDash 的 `railway` database 可见表数量为 0。数据库包含 326 张 SalesDash 表；两个 Drizzle 历史迁移已建立基线，users.role 已补齐为 `user/admin/master/member`。

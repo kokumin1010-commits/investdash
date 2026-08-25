@@ -7,14 +7,14 @@
 - [x] 从仓库内的持仓、券商、ウォッチリスト、月次记录与验证种子恢复真实可重建数据
 - [x] 恢复初始值为 1010 的个人パスコード访问，并保持 Manus 登录非必需
 - [x] 恢复移动端銘柄カード、ポートフォリオ概要、保有一覧、資産内訳、ウォッチリスト、売買・月次記録
-- [ ] 恢复株価、企業情報、ニュース、分析提案和手动更新服务
+- [x] 恢复株価、企業情報、ニュース、分析提案和手动更新服务
 - [x] 为外部数据调用恢复必要的平台集成与错误处理
 - [x] Data API 额度耗尽时自动回退 Yahoo 公共行情端点
 - [x] AI 额度不足时保留新闻、标记未分析状态并向用户明确提示
 - [x] 验证企业资料运行时输出并记录 website 与 businessSummary 的额度降级范围
 - [ ] 外部模型服务恢复后实测新闻分析、持仓信号和分析提案生成
 - [x] tRPC 实测手动行情更新 167 条成功、新闻抓取 14 条成功
-- [ ] 注册日本市场、美国市场价格更新及每日新闻分析任务
+- [x] 注册日本市场、美国市场价格更新及每日新闻分析任务
 - [x] 将每日新闻分析拆分为每次四个标的的静态批次回调，满足两分钟限制
 - [x] 为定时新闻批次偏移与认证路径补充 Vitest
 - [x] 验证非 cron 调用与认证异常均返回 403 且不执行新闻同步
@@ -24,7 +24,7 @@
 - [x] 整理已恢复数据、无法恢复数据及需要重新输入的数据清单
 - [ ] 保存最终可发布版本并交付独立于旧站点的新访问地址
 - [x] 生产环境严格监听平台分配的 PORT，仅本地开发允许寻找备用端口
-- [ ] 发布后验证首页、tRPC 与定时回调路由的生产响应
+- [x] 发布后验证首页、tRPC 与 Railway 内置调度底层任务的生产响应
 - [x] 恢复仅开发环境可用的 devToken 预览解锁并用于页面验收
 - [x] 将旧 InvestDesk 文案统一为 InvestDash 品牌
 - [x] 落实深青绿色、暖白背景、金融数字排版与精致卡片材质
@@ -38,23 +38,25 @@
 - [x] 保存手机端仪表盘与新闻页真实数据加载的可检查验收记录
 - [x] 检查 Railway 项目 5248baa0-4810-4a83-b0c4-cdd63bef47bb 的现有服务、数据库、仓库和域名配置
 - [x] 检查 salesdash.buzzdrop.co.jp 当前技术栈及 /investdash 路径的反向代理或应用路由方式
-- [ ] 改造 InvestDash 的数据库、认证、静态资源和基础路径以兼容 Railway 外部运行环境
+- [x] 改造 InvestDash 的数据库、认证、静态资源和基础路径以兼容 Railway 外部运行环境
 - [x] 为 Railway 配置持久数据库与必要环境变量，迁移 156 条持仓及关联业务数据
-- [ ] 将定时行情与新闻任务改为 Railway 可持续运行的调度方式
-- [ ] 经用户确认后部署 InvestDash 到指定 Railway 项目
-- [ ] 将 salesdash.buzzdrop.co.jp/investdash 路由接入 Railway 服务并验证 HTTPS
+- [x] 将定时行情与新闻任务改为 Railway 可持续运行的调度方式
+- [x] 经用户确认后部署 InvestDash 到指定 Railway 项目
+- [x] 将 salesdash.buzzdrop.co.jp/investdash 路由接入 Railway 服务并验证 HTTPS
 - [ ] 验证 Railway 生产环境的 1010 解锁、真实数据、手动行情、新闻与定时任务
 - [ ] 更新最终恢复报告与运维说明，交付 Railway 公开网址
-- [ ] 为 SalesDash 代理加入 investdash.railway.internal:8080 安全默认上游并验证
+- [x] 为 SalesDash 代理加入 investdash.railway.internal:8080 安全默认上游并验证
 - [x] 验证 Railway MySQL DATABASE_URL 的迁移、应用启动和读写流程
 - [x] 为截图历史存储提供 Railway S3 兼容实现或明确的安全降级
 - [ ] 完成 /investdash 子路径、1010 鉴权、数据库读写和真实页面加载的 Railway 端到端验收
-- [ ] 盘点 SalesDash 现有 schema、迁移文件和当前数据持久化方式
-- [ ] 在同一 Railway MySQL 实例新建 salesdash database 与最小权限独立用户
+- [x] 盘点 SalesDash 现有 schema、迁移文件和当前数据持久化方式
+- [x] 在同一 Railway MySQL 实例新建 salesdash database 与最小权限独立用户
 - [ ] 为 SalesDash 配置独立 DATABASE_URL 并安全应用其数据库迁移
-- [ ] 验证 SalesDash 只能访问 salesdash database，InvestDash 继续使用 railway database
-- [ ] 修复 SalesDash 私网代理的 Authorization/Cookie 转发并验证密码 token 可访问受保护 tRPC
+- [x] 验证 SalesDash 只能访问 salesdash database，InvestDash 继续使用 railway database
+- [x] 修复 SalesDash 私网代理的 Authorization/Cookie 转发并验证密码 token 可访问受保护 tRPC
 - [ ] 用 Railway 直连认证诊断区分 Authorization、JWT 与用户解析根因，修复后移除诊断端点
-- [ ] 最短路径优先：完成公开真实数据验收后立即启用 Railway 调度
-- [ ] Railway 环境默认启用内置调度器，不再依赖手机端变量页面操作
-- [ ] 最短路径优先：SalesDash 仅创建 salesdash database 与独立账号，不扩展额外业务表
+- [x] 最短路径优先：完成公开真实数据验收后立即启用 Railway 调度
+- [x] Railway 环境默认启用内置调度器，不再依赖手机端变量页面操作
+- [x] 最短路径优先：SalesDash 使用独立 database 与账号，并应用其现有 326 张 schema 表而不写入业务数据
+- [ ] 实测 Railway 生产环境的持仓信号生成与分析提案生成
+- [ ] 推送诊断端点移除并验证 /healthz/auth 已不可访问
