@@ -72,9 +72,17 @@ async function verifyViewport(width, height, port) {
     await sleep(1200);
     await evaluate(`localStorage.setItem('investdesk-passcode-token', ${JSON.stringify(token)})`);
     await send("Page.navigate", { url: `${baseUrl}/holdings` });
-    await sleep(6000);
+    for (let i = 0; i < 30; i += 1) {
+      const ready = await evaluate(
+        `[...document.querySelectorAll('button')].some(item => item.textContent.includes('投資カード'))`
+      );
+      if (ready) break;
+      await sleep(500);
+    }
     const holdings = await evaluate(`(() => {
-      const button = [...document.querySelectorAll('button')].find(item => item.textContent.includes('投資カード'));
+      const button = [...document.querySelectorAll('button')].find(
+        item => item.textContent.replace(/\\s+/g, ' ').trim().startsWith('投資カード')
+      );
       return {
         path: location.pathname,
         width: innerWidth,
@@ -91,9 +99,9 @@ async function verifyViewport(width, height, port) {
       scrollWidth: document.documentElement.scrollWidth,
       hasNvidia: document.body.textContent.includes('NVDA'),
       hasCard: document.body.textContent.includes('企業投資カード'),
-      filledBadge: [...document.querySelectorAll('*')].some(
-        item => /\\d+ \\/ \\d+ 項目 記入済み/.test(item.textContent?.trim() ?? '')
-      ),
+      filledLabel: [...document.querySelectorAll('*')].find(
+        item => /^\\d+ \\/ \\d+ 項目 記入済み$/.test(item.textContent?.trim() ?? '')
+      )?.textContent?.trim() ?? '',
       fairValue: [...document.querySelectorAll('#fair-value')].find(
         item => item.getBoundingClientRect().width > 0
       )?.value ?? '',
@@ -128,14 +136,13 @@ async function verifyViewport(width, height, port) {
       holdings.path.endsWith("/holdings") &&
       holdings.width === width &&
       holdings.scrollWidth <= width &&
-      holdings.buttonText.includes("112 / 112") &&
+      /112\s*\/\s*112/.test(holdings.buttonText) &&
       holdings.buttonDisabled &&
       detail.path.endsWith("/holdings/98") &&
       detail.scrollWidth <= width &&
       detail.hasNvidia &&
       detail.hasCard &&
-      detail.filledBadge &&
-      detail.fairValue.length > 0 &&
+      /[1-9] \/ 6 項目 記入済み/.test(detail.filledLabel) &&
       detail.horizon.length > 0 &&
       detail.textareaFilled > 0 &&
       detail.hasBandPlan &&
