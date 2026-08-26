@@ -1467,6 +1467,14 @@ export async function enrichProfiles(userId: number, force = false): Promise<num
 
 type NewsTarget = { symbol: string; name: string; tickerCode: string; market: Market };
 
+function latestNewsActivity(publishedAt: Date | string | null, createdAt: Date | string | null): Date | null {
+  const timestamps = [publishedAt, createdAt]
+    .filter((value): value is Date | string => value !== null)
+    .map(value => new Date(value).getTime())
+    .filter(Number.isFinite);
+  return timestamps.length > 0 ? new Date(Math.max(...timestamps)) : null;
+}
+
 /**
  * 指定銘柄のニュースを取得し、AI 判定して保存する。
  */
@@ -1479,6 +1487,7 @@ export async function syncNewsForTargets(
   analyzed: number;
   analysisUnavailable: boolean;
   failedSymbols: string[];
+  processedSymbols: string[];
 }> {
   let fetched = 0;
   let analyzed = 0;
@@ -1551,7 +1560,7 @@ export async function syncNewsForTargets(
   }
 
   await db.updateSettings(userId, { lastNewsSyncAt: new Date() });
-  return { fetched, analyzed, analysisUnavailable, failedSymbols };
+  return { fetched, analyzed, analysisUnavailable, failedSymbols, processedSymbols: targets.map(target => target.symbol) };
 }
 
 /**
@@ -1569,6 +1578,7 @@ export async function syncNewsForUser(
   analyzed: number;
   analysisUnavailable: boolean;
   failedSymbols: string[];
+  processedSymbols: string[];
   total: number;
   processed: number;
   nextOffset: number | null;
@@ -1593,7 +1603,7 @@ export async function syncNewsForUser(
   const coverage = new Map(
     coverageRows.map(row => [
       row.symbol,
-      { count: Number(row.count), latest: row.latestPublishedAt ? new Date(row.latestPublishedAt) : null },
+      { count: Number(row.count), latest: latestNewsActivity(row.latestPublishedAt, row.latestCreatedAt) },
     ])
   );
   const staleBefore = Date.now() - 14 * 24 * 60 * 60 * 1000;
@@ -1621,7 +1631,7 @@ export async function syncNewsForUser(
   const refreshedCoverage = new Map(
     (await db.listNewsCoverage(userId)).map(row => [
       row.symbol,
-      { count: Number(row.count), latest: row.latestPublishedAt ? new Date(row.latestPublishedAt) : null },
+      { count: Number(row.count), latest: latestNewsActivity(row.latestPublishedAt, row.latestCreatedAt) },
     ])
   );
   const remainingBacklog = targets.filter(target => isBacklog(refreshedCoverage.get(target.symbol))).length;

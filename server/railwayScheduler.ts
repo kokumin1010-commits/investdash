@@ -331,6 +331,7 @@ export async function runRailwayDataBackfill() {
             remaining: value.remainingBacklog,
             detail: {
               backlogBefore: value.backlogBefore,
+              processedSymbols: value.processedSymbols,
               fetched: value.fetched,
               analyzed: value.analyzed,
               failedSymbols: value.failedSymbols,
