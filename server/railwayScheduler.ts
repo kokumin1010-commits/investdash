@@ -319,6 +319,25 @@ export async function runRailwayDataBackfill() {
                   },
                 }),
               });
+        const newsCoverage = await withSchedulerRunLog({
+          userId,
+          kind: "news_coverage_backfill",
+          trigger: "SCHEDULED",
+          run: () => syncNewsForUser(userId, { offset: 0, batchSize: 1 }),
+          summarize: value => ({
+            processed: value.processed,
+            succeeded: Math.max(0, value.processed - value.failedSymbols.length),
+            failed: value.failedSymbols.length,
+            remaining: value.remainingBacklog,
+            detail: {
+              backlogBefore: value.backlogBefore,
+              fetched: value.fetched,
+              analyzed: value.analyzed,
+              failedSymbols: value.failedSymbols,
+              analysisUnavailable: value.analysisUnavailable,
+            },
+          }),
+        });
         const bandRechecks =
           signals.quotaExhausted || plans?.quotaExhausted || cards?.quotaExhausted || bandChecks?.quotaExhausted
             ? null
@@ -341,7 +360,7 @@ export async function runRailwayDataBackfill() {
               });
 
         console.log(
-          `[Railway scheduler] backfill user=${userId} profiles=${profiles.updated}/${profiles.processed} profileFailed=${profiles.failed.length} signals=${signals.generated}/${signals.processed} signalRemaining=${signals.remaining} plans=${plans ? `${plans.generated}/${plans.processed}` : "quota-skipped"} planRemaining=${plans?.remaining ?? "unknown"} cards=${cards ? `${cards.created}/${cards.processed}` : "quota-skipped"} cardRemaining=${cards?.remaining ?? "unknown"} bandChecks=${bandChecks ? `${bandChecks.checked}/${bandChecks.processed}` : "quota-skipped"} bandCheckRemaining=${bandChecks?.remaining ?? "unknown"} bandRechecks=${bandRechecks ? `${bandRechecks.checked}/${bandRechecks.processed}` : "quota-skipped"}`
+          `[Railway scheduler] backfill user=${userId} profiles=${profiles.updated}/${profiles.processed} profileFailed=${profiles.failed.length} signals=${signals.generated}/${signals.processed} signalRemaining=${signals.remaining} plans=${plans ? `${plans.generated}/${plans.processed}` : "quota-skipped"} planRemaining=${plans?.remaining ?? "unknown"} cards=${cards ? `${cards.created}/${cards.processed}` : "quota-skipped"} cardRemaining=${cards?.remaining ?? "unknown"} bandChecks=${bandChecks ? `${bandChecks.checked}/${bandChecks.processed}` : "quota-skipped"} bandCheckRemaining=${bandChecks?.remaining ?? "unknown"} newsCoverage=${newsCoverage.fetched}/${newsCoverage.processed} newsBacklog=${newsCoverage.remainingBacklog} bandRechecks=${bandRechecks ? `${bandRechecks.checked}/${bandRechecks.processed}` : "quota-skipped"}`
         );
         summaries.push({
           userId,

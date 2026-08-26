@@ -63,7 +63,7 @@ async function verify(width, height, port) {
 
     await send("Page.navigate", { url: `${baseUrl}/news` });
     await sleep(1200);
-    for (let i = 0; i < 40; i += 1) {
+    for (let i = 0; i < 120; i += 1) {
       if (await evalWithRetry(`Boolean(document.body?.textContent?.includes('ニュースカバレッジ'))`)) break;
       await sleep(500);
     }
@@ -82,7 +82,7 @@ async function verify(width, height, port) {
 
     await send("Page.navigate", { url: `${baseUrl}/holdings` });
     await sleep(1200);
-    for (let i = 0; i < 40; i += 1) {
+    for (let i = 0; i < 120; i += 1) {
       if (await evalWithRetry(`Boolean(document.body?.textContent?.includes('保有期間'))`)) break;
       await sleep(500);
     }

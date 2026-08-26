@@ -31,6 +31,7 @@ const KIND_LABELS: Record<string, string> = {
   investment_card_backfill: "投資カード補完",
   band_check_backfill: "価格帯確認",
   band_check_news_refresh: "新ニュース再照合",
+  news_coverage_backfill: "ニュースカバレッジ補完",
   monthly_snapshot: "月次記録",
 };
 
@@ -62,6 +63,7 @@ const DETAIL_LABELS: Record<string, string> = {
   notes: "メモ追加",
   monthlyPeriod: "月次記録",
   itemsChecked: "照合項目",
+  backlogBefore: "更新待ち",
 };
 
 type Status = keyof typeof STATUS_LABELS;

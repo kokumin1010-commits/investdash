@@ -1572,6 +1572,8 @@ export async function syncNewsForUser(
   total: number;
   processed: number;
   nextOffset: number | null;
+  backlogBefore: number;
+  remainingBacklog: number;
 }> {
   const [hs, ws] = await Promise.all([db.listHoldings(userId), db.listWatchlist(userId)]);
   /**
@@ -1595,6 +1597,9 @@ export async function syncNewsForUser(
     ])
   );
   const staleBefore = Date.now() - 14 * 24 * 60 * 60 * 1000;
+  const isBacklog = (entry: { count: number; latest: Date | null } | undefined) =>
+    !entry || entry.count === 0 || !entry.latest || entry.latest.getTime() < staleBefore;
+  const backlogBefore = targets.filter(target => isBacklog(coverage.get(target.symbol))).length;
   targets.sort((a, b) => {
     const ca = coverage.get(a.symbol);
     const cb = coverage.get(b.symbol);
@@ -1613,12 +1618,21 @@ export async function syncNewsForUser(
 
   const result = await syncNewsForTargets(userId, batch);
   const processed = offset + batch.length;
+  const refreshedCoverage = new Map(
+    (await db.listNewsCoverage(userId)).map(row => [
+      row.symbol,
+      { count: Number(row.count), latest: row.latestPublishedAt ? new Date(row.latestPublishedAt) : null },
+    ])
+  );
+  const remainingBacklog = targets.filter(target => isBacklog(refreshedCoverage.get(target.symbol))).length;
 
   return {
     ...result,
     total,
     processed,
     nextOffset: processed >= total ? null : processed,
+    backlogBefore,
+    remainingBacklog,
   };
 }
 
