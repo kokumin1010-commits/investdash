@@ -99,6 +99,13 @@ function holdingDurationBasis(confidence: "EXACT" | "AT_LEAST" | "TRACKED_SINCE"
   return confidence === "EXACT" ? "正確" : confidence === "AT_LEAST" ? "少なくとも" : "記録開始から";
 }
 
+function holdingDurationSource(source: string): string {
+  if (source === "USER_CONFIRMED") return "本人確認";
+  if (source === "BROKER_TRADE") return "取引記録";
+  if (source === "MONTHLY_SNAPSHOT") return "月次記録";
+  return "システム記録";
+}
+
 /**
  * 並び替えの軸。長期保有が前提のため「前日比順」は置かない
  * （日々の変動は判断材料にならず、長期の損益や配当のほうが役に立つ）。
@@ -679,6 +686,7 @@ export default function Holdings() {
                       </div>
                       <p className="text-[10px] text-muted-foreground">
                         保有 {holdingDurationBasis(p.holdingDuration.confidence)} {holdingDurationText(p.holdingDuration.days)}
+                        {` ・ ${new Date(p.holdingDuration.startDate).toLocaleDateString("ja-JP")}（${holdingDurationSource(p.holdingDuration.source)}）`}
                       </p>
                     </Link>
                     <div className="flex shrink-0 flex-col items-end gap-1">
@@ -1012,7 +1020,7 @@ export default function Holdings() {
                         </div>
                         <p className="text-[10px] text-muted-foreground">
                           保有 {holdingDurationBasis(p.holdingDuration.confidence)} {holdingDurationText(p.holdingDuration.days)}
-                          {` ・ ${new Date(p.holdingDuration.startDate).toLocaleDateString("ja-JP")}`}
+                          {` ・ ${new Date(p.holdingDuration.startDate).toLocaleDateString("ja-JP")}（${holdingDurationSource(p.holdingDuration.source)}）`}
                         </p>
                       </Link>
                     </TableCell>
