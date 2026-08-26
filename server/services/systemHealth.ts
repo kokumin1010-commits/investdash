@@ -1,4 +1,6 @@
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
+import path from "node:path";
 import * as db from "../db";
 
 export type RuntimeEvent = {
@@ -11,6 +13,37 @@ const MAX_RUNTIME_EVENTS = 12;
 const runtimeEvents: RuntimeEvent[] = [];
 let memoryMonitorStarted = false;
 let memoryLevel: "NORMAL" | "WARNING" | "CRITICAL" = "NORMAL";
+let lastPersistentRuntimeEvent: Record<string, unknown> | null = null;
+
+function runtimeEventPath() {
+  const root = process.env.STORAGE_LOCAL_DIR?.trim() || (process.env.RAILWAY_ENVIRONMENT ? "/data/investdash-files" : ".runtime");
+  return path.join(root, "last-runtime-event.json");
+}
+
+function persistRuntimeEvent(kind: string, detail: unknown) {
+  try {
+    const file = runtimeEventPath();
+    mkdirSync(path.dirname(file), { recursive: true });
+    const raw = detail instanceof Error ? `${detail.message}\n${detail.stack ?? ""}` : String(detail);
+    const event = { at: new Date().toISOString(), kind: kind.slice(0, 64), pid: process.pid,
+      version: process.env.RAILWAY_GIT_COMMIT_SHA ?? "local", detail: raw.replace(/Bearer\s+\S+/gi, "Bearer [redacted]").slice(0, 4000) };
+    writeFileSync(file, JSON.stringify(event), { encoding: "utf8", mode: 0o600 });
+    lastPersistentRuntimeEvent = event;
+  } catch (error) {
+    console.error("[SystemHealth] failed to persist runtime event", error);
+  }
+}
+
+export function registerRuntimeExitCapture() {
+  try {
+    lastPersistentRuntimeEvent = JSON.parse(readFileSync(runtimeEventPath(), "utf8"));
+  } catch {}
+  process.once("uncaughtExceptionMonitor", error => persistRuntimeEvent("UNCAUGHT_EXCEPTION", error));
+  process.on("unhandledRejection", reason => persistRuntimeEvent("UNHANDLED_REJECTION", reason));
+  process.once("SIGTERM", () => persistRuntimeEvent("SIGNAL", "SIGTERM"));
+  process.once("SIGINT", () => persistRuntimeEvent("SIGNAL", "SIGINT"));
+  process.once("exit", code => persistRuntimeEvent("EXIT", `code=${code}`));
+}
 
 export function recordRuntimeEvent(kind: string, error: unknown): void {
   const raw = error instanceof Error ? error.message : String(error);
@@ -56,6 +89,7 @@ export async function getSystemHealthSnapshot() {
       cgroupUsagePct: usagePct === null ? null : Number(usagePct.toFixed(2)),
     },
     recentRuntimeEvents: runtimeEvents.slice(0, 5),
+    lastPersistentRuntimeEvent,
   };
 }
 

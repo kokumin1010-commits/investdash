@@ -16,7 +16,9 @@ import { createContext } from "./context";
 import { serveStatic, setupVite } from "./vite";
 import { registerRailwayFileStorage } from "../railwayFileStorage";
 import { startRailwayScheduler } from "../railwayScheduler";
-import { getSystemHealthSnapshot, startSystemHealthMonitor } from "../services/systemHealth";
+import { getSystemHealthSnapshot, registerRuntimeExitCapture, startSystemHealthMonitor } from "../services/systemHealth";
+
+registerRuntimeExitCapture();
 
 function isPortAvailable(port: number): Promise<boolean> {
   return new Promise(resolve => {
