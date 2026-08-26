@@ -118,6 +118,8 @@ jobs:
               --transfers 1 --checkers 2
           fi
 
+          rclone mkdir "${DAILY_REMOTE}" --config "${CONFIG_PATH}"
+          rclone mkdir "${MONTHLY_REMOTE}" --config "${CONFIG_PATH}"
           rclone delete "${DAILY_REMOTE}" --config "${CONFIG_PATH}" \
             --min-age 30d --include '*.gpg' --include '*.sha256' --rmdirs
           rclone delete "${MONTHLY_REMOTE}" --config "${CONFIG_PATH}" \
