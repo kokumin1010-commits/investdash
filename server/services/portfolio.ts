@@ -1572,7 +1572,7 @@ export async function syncNewsForTargets(
  */
 export async function syncNewsForUser(
   userId: number,
-  options?: { offset?: number; batchSize?: number }
+  options?: { offset?: number; batchSize?: number; backlogOnly?: boolean }
 ): Promise<{
   fetched: number;
   analyzed: number;
@@ -1618,13 +1618,16 @@ export async function syncNewsForUser(
     return rank(ca) - rank(cb) || a.symbol.localeCompare(b.symbol);
   });
 
-  const total = targets.length;
+  const eligibleTargets = options?.backlogOnly
+    ? targets.filter(target => isBacklog(coverage.get(target.symbol)))
+    : targets;
+  const total = eligibleTargets.length;
   const offset = options?.offset ?? 0;
   // batchSize 未指定なら全件（定期実行 Heartbeat はタイムアウト制約が緩いため）
   const batch =
     options?.batchSize === undefined
-      ? targets.slice(offset)
-      : targets.slice(offset, offset + options.batchSize);
+      ? eligibleTargets.slice(offset)
+      : eligibleTargets.slice(offset, offset + options.batchSize);
 
   const result = await syncNewsForTargets(userId, batch);
   const processed = offset + batch.length;

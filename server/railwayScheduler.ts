@@ -323,7 +323,7 @@ export async function runRailwayDataBackfill() {
           userId,
           kind: "news_coverage_backfill",
           trigger: "SCHEDULED",
-          run: () => syncNewsForUser(userId, { offset: 0, batchSize: 1 }),
+          run: () => syncNewsForUser(userId, { offset: 0, batchSize: 1, backlogOnly: true }),
           summarize: value => ({
             processed: value.processed,
             succeeded: Math.max(0, value.processed - value.failedSymbols.length),
