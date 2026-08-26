@@ -50,6 +50,22 @@ let lastBackfillRun:
     }
   | null = null;
 
+/**
+ * node-cron 不会等待异步回调。任务若在自身 try/catch 之前失败，裸 `void task()`
+ * 会留下未捕获 rejection。所有 cron 入口统一在这里吞住异常并记录日志，让 HTTP
+ * 服务继续运行并等待下一轮，而不是因一次数据库或外部 API 瞬时故障退出。
+ */
+export async function runRailwayScheduledTaskSafely(
+  label: string,
+  task: () => Promise<unknown>
+): Promise<void> {
+  try {
+    await task();
+  } catch (error) {
+    console.error(`[Railway scheduler] ${label} failed outside task boundary:`, error);
+  }
+}
+
 export function getRailwayDataBackfillStatus() {
   return {
     cron: RAILWAY_DATA_BACKFILL_CRON,
@@ -352,7 +368,11 @@ function scheduleNewsBatchWindow(expression: string) {
     expression,
     () => {
       const batch = getNewsBatchForUtcDate(new Date());
-      if (batch !== null) void runRailwayNewsBatch(batch);
+      if (batch !== null) {
+        void runRailwayScheduledTaskSafely(`news batch ${batch}`, () =>
+          runRailwayNewsBatch(batch)
+        );
+      }
     },
     { timezone: "UTC", noOverlap: true }
   );
@@ -373,20 +393,32 @@ export function startRailwayScheduler(): boolean {
     return false;
   }
 
-  cron.schedule("30 6 * * 1-5", () => void runRailwayPriceSync("jp-close"), {
-    timezone: "UTC",
-    noOverlap: true,
-  });
-  cron.schedule("30 21 * * 1-5", () => void runRailwayPriceSync("us-close"), {
-    timezone: "UTC",
-    noOverlap: true,
-  });
+  cron.schedule(
+    "30 6 * * 1-5",
+    () =>
+      void runRailwayScheduledTaskSafely("price sync jp-close", () =>
+        runRailwayPriceSync("jp-close")
+      ),
+    { timezone: "UTC", noOverlap: true }
+  );
+  cron.schedule(
+    "30 21 * * 1-5",
+    () =>
+      void runRailwayScheduledTaskSafely("price sync us-close", () =>
+        runRailwayPriceSync("us-close")
+      ),
+    { timezone: "UTC", noOverlap: true }
+  );
   scheduleNewsBatchWindow("*/5 22-23 * * *");
   scheduleNewsBatchWindow("0-30/5 0 * * *");
-  cron.schedule(RAILWAY_DATA_BACKFILL_CRON, () => void runRailwayDataBackfill(), {
-    timezone: "UTC",
-    noOverlap: true,
-  });
+  cron.schedule(
+    RAILWAY_DATA_BACKFILL_CRON,
+    () =>
+      void runRailwayScheduledTaskSafely("data backfill", () =>
+        runRailwayDataBackfill()
+      ),
+    { timezone: "UTC", noOverlap: true }
+  );
 
   console.log(
     "[Railway scheduler] enabled: prices 06:30/21:30 UTC weekdays; news 22:00-00:30 UTC daily; data backfill every 20m 01:00-21:40 UTC"

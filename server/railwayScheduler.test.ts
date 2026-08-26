@@ -1,8 +1,9 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   getNewsBatchForUtcDate,
   RAILWAY_NEWS_SCHEDULE,
   RAILWAY_DATA_BACKFILL_CRON,
+  runRailwayScheduledTaskSafely,
   shouldStartRailwayScheduler,
 } from "./railwayScheduler";
 
@@ -43,5 +44,21 @@ describe("Railway news schedule", () => {
 
   it("runs data completeness checks every 20 minutes outside the news window", () => {
     expect(RAILWAY_DATA_BACKFILL_CRON).toBe("0,20,40 1-21 * * *");
+  });
+
+  it("contains rejected cron tasks so the HTTP process can keep running", async () => {
+    const error = new Error("temporary database disconnect");
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
+
+    await expect(
+      runRailwayScheduledTaskSafely("data backfill", async () => {
+        throw error;
+      })
+    ).resolves.toBeUndefined();
+    expect(consoleError).toHaveBeenCalledWith(
+      "[Railway scheduler] data backfill failed outside task boundary:",
+      error
+    );
+    consoleError.mockRestore();
   });
 });
