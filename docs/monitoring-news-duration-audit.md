@@ -80,6 +80,36 @@ InvestDash `/healthz` 增加 uptime、版本、Node RSS/heap、cgroup current/ma
 
 390×844 生产新闻页无横向溢出，实际文案为 `112/112 銘柄にニュースあり`、`最新 106`、`14日超 6`、`0件 0`，并明确说明全部保有标的至少已有 1 条新闻。390px 持仓页同样无横向溢出，已显示 `保有 少なくとも 1日`；首次截图发现手机卡缺少起算日和依据，因此追加为 `2026/8/26（月次記録）`，桌面与手机采用相同口径。
 
+## Railway 生产实施结果（2026-08-27 JST）
+
+| 项目 | 生产结果 | 证据 |
+|---|---:|---|
+| 新闻覆盖 | **112/112** | 0 条缺失、106 个 14 日内、6 个 14 日超、合计 1,367 条关联新闻 |
+| 零新闻回填 | 11/11 | HK/SG/US 多查询回填；ALAB 的客户端请求超时后服务端仍完成保存，最终 missing=0 |
+| 新新闻价格带复核 | remaining 0 | 27 条持久运行记录、processed 54、succeeded 54、failed 0 |
+| 保有期间 | 112/112 | 全部为 AT_LEAST，起点为现有 2026-08 月月次记录；没有冒充首次买入日 |
+| 外部健康探测 | 每 60 秒 | SalesDash 私网探测状态 UP、HTTP 200、连续失败 0、记录版本和延迟 |
+| 内存 | NORMAL | cgroup current/max 与使用率每分钟采样；80% WARNING、90% CRITICAL、70% 以下恢复 |
+| critical 邮件 | **成功，3 recipients** | `InvestDash 緊急経路テスト通知`，success=1、error=null |
+| DOWN→RECOVERED 演练 | **两封均成功，3 recipients** | 模拟连续 3 次失败触发 critical，再模拟恢复触发 warning；实际服务始终保持 UP |
+| UI | 桌面/390px 通过 | 新闻和持仓页无横向溢出；覆盖、fresh/stale、起算日与月次依据均可见 |
+
+InvestDash 版本先部署 `d267bcc`（新闻、保有期间、系统事件），随后部署 `fb72d66`/`c445e96`/`c75d6be`/`0bf395f` 完成移动端依据显示、运行事件捕获和每 20 分钟新闻 coverage 补全。SalesDash 生产状态端点为 `/api/investdash-monitor/status`，记录最近健康、内存、事件和已发送的 InvestDash 告警邮件结果。
+
+Railway Project Webhook 接收端已经部署为 `/api/investdash-monitor/railway/:token`，但仍需在 Railway Project Settings 配置高熵 token 和 webhook URL 才能取得平台原生 deployment exit code。当前即使未配置原生 Webhook，SalesDash 外部探测也会在连续 3 次失败（约 3 分钟）后发送 critical 邮件，并在恢复后发送一次恢复邮件。
+
+19:00:00 UTC 的 Railway 自动补全任务实际写入 `band_check_news_refresh`、trigger `SCHEDULED`、status `SKIPPED`、remaining 0；当前没有晚于最后核验的新新闻，因此正确跳过。巡检后 InvestDash 继续返回 200，cgroup 使用率 0.75%。
+
+来源证据抽样选择 KO：复核结果为 `CONCERN`，checkedAt `2026-08-26T17:41:09Z`，保存了 Yahoo Finance 标题 `Coca Cola (KO) Stock Looks Cheap On Cash Flow But Pricey On Earnings`、Google News URL、来源和发布时间，match 为 MATCHED。价格带详情 UI 可显示该来源链接与 JST 核验时间。
+
+SalesDash 又执行了一次非破坏性 DOWN→RECOVERED 演练：状态机严格在第 3 次模拟失败进入 DOWN，向既有 3 位收件人发送 critical 测试邮件；随后一次模拟成功进入 UP 并向同 3 位收件人发送恢复测试邮件。事件 `HEALTH_DOWN_RECOVERY_DRILL` 持久保存 `critical 3 / recovery 3 recipients`，实际 InvestDash 没有停机。
+
+应用已尝试在 `uncaughtExceptionMonitor`、`unhandledRejection`、SIGTERM/SIGINT 和普通 exit 时把最后事件写入 Volume；但 Railway 替换部署后 `lastPersistentRuntimeEvent` 仍为 null，说明平台没有向旧容器提供可观察的应用层退出事件，不能把该字段冒充为已取得 exit code。真实 OOM/SIGKILL/平台 exit code 仍以 Railway Deploy Logs 或 Project Webhook 为准。
+
+新闻 coverage 自动续跑经过三轮生产验证。19:20 UTC 首轮为 SCHEDULED/SUCCESS，自动处理 1 个 stale 标的，抓取 7 条、分析 6 条、失败 0；19:40 UTC 轮转到 `0005.HK`，抓取/分析各 7 条并将 remaining 降至 0；修复 backlogOnly 后，20:00 UTC 自动任务为 SCHEDULED/SKIPPED、processed 0、remaining 0、processedSymbols 空数组，没有重复抓 fresh 标的。三轮后服务继续返回 200，cgroup 使用率约 0.71%。
+
+最终 InvestDash 生产提交为 `83fb7d3`，SalesDash 告警演练提交为 `d5dcf00f`。InvestDash 全量验证为 106 个测试文件、977 项测试全部通过，TypeScript 与生产构建通过；SalesDash 监控/代理定向 8 项测试通过。
+
 ## References
 
 [1]: https://docs.railway.com/observability/webhooks "Railway Docs — Webhooks"
