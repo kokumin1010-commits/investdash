@@ -1,0 +1,135 @@
+name: Encrypted Google Drive Backup
+
+on:
+  schedule:
+    - cron: "17 18 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: google-drive-backup-${{ github.repository }}
+  cancel-in-progress: false
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      RCLONE_CONFIG_B64: ${{ secrets.DRIVE_RCLONE_CONFIG_B64 }}
+      BACKUP_PASSPHRASE: ${{ secrets.BACKUP_PASSPHRASE }}
+      GH_TOKEN: ${{ github.token }}
+
+    steps:
+      - name: Validate required secrets
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "${RCLONE_CONFIG_B64:-}" || { echo "DRIVE_RCLONE_CONFIG_B64 is missing" >&2; exit 1; }
+          test -n "${BACKUP_PASSPHRASE:-}" || { echo "BACKUP_PASSPHRASE is missing" >&2; exit 1; }
+
+      - name: Install backup tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq rclone git-lfs
+          git lfs install --skip-repo
+
+      - name: Create a complete encrypted repository backup
+        id: create
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+
+          WORK_DIR="${RUNNER_TEMP}/github-drive-backup"
+          REPO_NAME="${GITHUB_REPOSITORY#*/}"
+          MIRROR_DIR="${WORK_DIR}/${REPO_NAME}.git"
+          CREATED_AT="$(date -u +%Y%m%dT%H%M%SZ)"
+          ARCHIVE_NAME="${GITHUB_REPOSITORY_OWNER}-${REPO_NAME}-${CREATED_AT}.tar.gz"
+          ARCHIVE_PATH="${WORK_DIR}/${ARCHIVE_NAME}"
+          ENCRYPTED_PATH="${ARCHIVE_PATH}.gpg"
+          UPLOAD_DIR="${WORK_DIR}/upload"
+
+          mkdir -p "${WORK_DIR}" "${UPLOAD_DIR}"
+
+          AUTH_HEADER="AUTHORIZATION: basic $(printf 'x-access-token:%s' "${GH_TOKEN}" | base64 -w0)"
+          git -c http.extraheader="${AUTH_HEADER}" clone --mirror \
+            "https://github.com/${GITHUB_REPOSITORY}.git" "${MIRROR_DIR}"
+          git -c http.extraheader="${AUTH_HEADER}" -C "${MIRROR_DIR}" lfs fetch --all origin
+          git -C "${MIRROR_DIR}" fsck --full
+
+          git -C "${MIRROR_DIR}" show-ref > "${WORK_DIR}/refs.txt"
+          gh api "repos/${GITHUB_REPOSITORY}" > "${WORK_DIR}/repository.json"
+          {
+            printf 'repository=%s\n' "${GITHUB_REPOSITORY}"
+            printf 'created_at_utc=%s\n' "${CREATED_AT}"
+            printf 'workflow_run_id=%s\n' "${GITHUB_RUN_ID}"
+            printf 'workflow_run_attempt=%s\n' "${GITHUB_RUN_ATTEMPT}"
+            git --version
+            git lfs version
+          } > "${WORK_DIR}/manifest.txt"
+
+          tar -C "${WORK_DIR}" -czf "${ARCHIVE_PATH}" \
+            "${REPO_NAME}.git" refs.txt repository.json manifest.txt
+
+          printf '%s' "${BACKUP_PASSPHRASE}" | gpg \
+            --batch --yes --pinentry-mode loopback --passphrase-fd 0 \
+            --symmetric --cipher-algo AES256 --compress-algo none \
+            --output "${ENCRYPTED_PATH}" "${ARCHIVE_PATH}"
+
+          sha256sum "${ENCRYPTED_PATH}" > "${ENCRYPTED_PATH}.sha256"
+          mv "${ENCRYPTED_PATH}" "${ENCRYPTED_PATH}.sha256" "${UPLOAD_DIR}/"
+          rm -f "${ARCHIVE_PATH}"
+
+          printf 'upload_dir=%s\n' "${UPLOAD_DIR}" >> "${GITHUB_OUTPUT}"
+          printf 'encrypted_name=%s\n' "$(basename "${ENCRYPTED_PATH}")" >> "${GITHUB_OUTPUT}"
+          printf 'created_at=%s\n' "${CREATED_AT}" >> "${GITHUB_OUTPUT}"
+
+      - name: Upload and verify Google Drive backup
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+
+          CONFIG_PATH="${RUNNER_TEMP}/rclone.conf"
+          printf '%s' "${RCLONE_CONFIG_B64}" | base64 --decode > "${CONFIG_PATH}"
+          chmod 600 "${CONFIG_PATH}"
+
+          DAILY_REMOTE="github_drive:daily/${GITHUB_REPOSITORY}"
+          MONTHLY_REMOTE="github_drive:monthly/${GITHUB_REPOSITORY}"
+          UPLOAD_DIR="${{ steps.create.outputs.upload_dir }}"
+          ENCRYPTED_NAME="${{ steps.create.outputs.encrypted_name }}"
+
+          rclone copy "${UPLOAD_DIR}" "${DAILY_REMOTE}" \
+            --config "${CONFIG_PATH}" --drive-chunk-size 64M \
+            --transfers 1 --checkers 2
+
+          rclone check "${UPLOAD_DIR}" "${DAILY_REMOTE}" \
+            --config "${CONFIG_PATH}" --one-way \
+            --include "${ENCRYPTED_NAME}" \
+            --include "${ENCRYPTED_NAME}.sha256"
+
+          if [ "$(date -u +%d)" = "01" ]; then
+            rclone copy "${UPLOAD_DIR}" "${MONTHLY_REMOTE}" \
+              --config "${CONFIG_PATH}" --drive-chunk-size 64M \
+              --transfers 1 --checkers 2
+          fi
+
+          rclone delete "${DAILY_REMOTE}" --config "${CONFIG_PATH}" \
+            --min-age 30d --include '*.gpg' --include '*.sha256' --rmdirs
+          rclone delete "${MONTHLY_REMOTE}" --config "${CONFIG_PATH}" \
+            --min-age 370d --include '*.gpg' --include '*.sha256' --rmdirs
+
+          REMOTE_SIZE="$(rclone size "${DAILY_REMOTE}/${ENCRYPTED_NAME}" --config "${CONFIG_PATH}" --json)"
+          {
+            echo '### Encrypted Google Drive backup completed'
+            echo
+            echo "- Repository: ${GITHUB_REPOSITORY}"
+            echo "- Created (UTC): ${{ steps.create.outputs.created_at }}"
+            echo "- File: ${ENCRYPTED_NAME}"
+            echo "- Remote verification: passed"
+            echo "- Remote object: ${REMOTE_SIZE}"
+          } >> "${GITHUB_STEP_SUMMARY}"
