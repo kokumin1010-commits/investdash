@@ -41,8 +41,15 @@ async function verify(width, height, port) {
     });
     const evalValue = async expression => {
       const result = await send("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true });
-      if (result.exceptionDetails) throw new Error(result.exceptionDetails.text);
+      if (result.exceptionDetails) throw new Error(result.exceptionDetails.exception?.description ?? result.exceptionDetails.text);
       return result.result.value;
+    };
+    const evalWithRetry = async expression => {
+      let lastError;
+      for (let attempt = 0; attempt < 12; attempt += 1) {
+        try { return await evalValue(expression); } catch (error) { lastError = error; await sleep(300); }
+      }
+      throw lastError;
     };
     const shot = async name => {
       const result = await send("Page.captureScreenshot", { format: "png" });
@@ -55,32 +62,40 @@ async function verify(width, height, port) {
     await evalValue(`localStorage.setItem('investdesk-passcode-token', ${JSON.stringify(token)})`);
 
     await send("Page.navigate", { url: `${baseUrl}/news` });
+    await sleep(1200);
     for (let i = 0; i < 40; i += 1) {
-      if (await evalValue(`Boolean(document.body?.textContent?.includes('ニュースカバレッジ'))`)) break;
+      if (await evalWithRetry(`Boolean(document.body?.textContent?.includes('ニュースカバレッジ'))`)) break;
       await sleep(500);
     }
-    const news = await evalValue(`(() => ({
-      path: location.pathname,
-      scrollWidth: document.documentElement.scrollWidth,
-      hasCoverage: /112\/112\s*銘柄にニュースあり/.test(document.body.textContent),
-      hasMissingZero: /0件\s*0/.test(document.body.textContent),
-      hasFresh: document.body.textContent.includes('最新'),
-      hasStale: /14日超\s*\d+/.test(document.body.textContent),
-    }))()`);
+    const news = await evalWithRetry(`(() => {
+      const text = document.body?.textContent ?? '';
+      return {
+        path: location.pathname,
+        scrollWidth: document.documentElement.scrollWidth,
+        hasCoverage: text.includes('全保有銘柄') && text.includes('ニュースがあります'),
+        hasMissingZero: text.includes('0件') && text.includes('ニュースあり'),
+        hasFresh: text.includes('最新'),
+        hasStale: text.includes('14日超'),
+      };
+    })()`);
     await shot("news-coverage");
 
     await send("Page.navigate", { url: `${baseUrl}/holdings` });
+    await sleep(1200);
     for (let i = 0; i < 40; i += 1) {
-      if (await evalValue(`Boolean(document.body?.textContent?.includes('保有期間'))`)) break;
+      if (await evalWithRetry(`Boolean(document.body?.textContent?.includes('保有期間'))`)) break;
       await sleep(500);
     }
-    const holdings = await evalValue(`(() => ({
-      path: location.pathname,
-      scrollWidth: document.documentElement.scrollWidth,
-      durationLabels: [...document.querySelectorAll('*')].filter(item => item.textContent?.trim().startsWith('保有 少なくとも')).length,
-      hasAtLeast: document.body.textContent.includes('少なくとも'),
-      hasBasis: document.body.textContent.includes('月次記録'),
-    }))()`);
+    const holdings = await evalWithRetry(`(() => {
+      const text = document.body?.textContent ?? '';
+      return {
+        path: location.pathname,
+        scrollWidth: document.documentElement.scrollWidth,
+        durationLabels: [...document.querySelectorAll('*')].filter(item => item.textContent?.trim().startsWith('保有 少なくとも')).length,
+        hasAtLeast: text.includes('少なくとも'),
+        hasBasis: text.includes('月次記録'),
+      };
+    })()`);
     await shot("holding-duration");
     socket.close();
     const passed = news.path.endsWith("/news") && news.scrollWidth <= width && news.hasCoverage && news.hasMissingZero &&

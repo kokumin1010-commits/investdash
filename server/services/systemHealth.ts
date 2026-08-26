@@ -34,15 +34,25 @@ function persistRuntimeEvent(kind: string, detail: unknown) {
   }
 }
 
-export function registerRuntimeExitCapture() {
+function refreshPersistentRuntimeEvent() {
   try {
     lastPersistentRuntimeEvent = JSON.parse(readFileSync(runtimeEventPath(), "utf8"));
   } catch {}
+}
+
+export function registerRuntimeExitCapture() {
+  refreshPersistentRuntimeEvent();
   process.once("uncaughtExceptionMonitor", error => persistRuntimeEvent("UNCAUGHT_EXCEPTION", error));
   process.on("unhandledRejection", reason => persistRuntimeEvent("UNHANDLED_REJECTION", reason));
-  process.once("SIGTERM", () => persistRuntimeEvent("SIGNAL", "SIGTERM"));
-  process.once("SIGINT", () => persistRuntimeEvent("SIGNAL", "SIGINT"));
-  process.once("exit", code => persistRuntimeEvent("EXIT", `code=${code}`));
+  const terminate = (signal: string) => {
+    persistRuntimeEvent("SIGNAL", `${signal}; exitCode=0`);
+    process.exit(0);
+  };
+  process.once("SIGTERM", () => terminate("SIGTERM"));
+  process.once("SIGINT", () => terminate("SIGINT"));
+  process.once("exit", code => {
+    if (lastPersistentRuntimeEvent?.kind !== "SIGNAL") persistRuntimeEvent("EXIT", `code=${code}`);
+  });
 }
 
 export function recordRuntimeEvent(kind: string, error: unknown): void {
@@ -67,6 +77,7 @@ async function readCgroupNumber(path: string): Promise<number | null> {
 }
 
 export async function getSystemHealthSnapshot() {
+  refreshPersistentRuntimeEvent();
   const memory = process.memoryUsage();
   const [cgroupCurrent, cgroupMax] = await Promise.all([
     readCgroupNumber("/sys/fs/cgroup/memory.current"),
