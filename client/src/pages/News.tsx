@@ -22,6 +22,7 @@ import { Link } from "wouter";
 export default function News() {
   const utils = trpc.useUtils();
   const news = trpc.news.list.useQuery({ limit: 150 });
+  const coverage = trpc.news.coverage.useQuery();
   const overview = trpc.portfolio.overview.useQuery();
   const [query, setQuery] = useState("");
   const [sentimentFilter, setSentimentFilter] = useState<"ALL" | Sentiment>("ALL");
@@ -30,10 +31,12 @@ export default function News() {
 
   // 本番の 180 秒制限を超えるため、nextOffset を辿って小分けに実行する
   const syncBatch = trpc.news.syncAll.useMutation();
+  const recheckBands = trpc.portfolio.runNewsTriggeredBandChecks.useMutation();
   const syncRun = useBatchRun({
     runBatch: offset => syncBatch.mutateAsync({ offset, batchSize: 4 }),
     shouldStop: res => res.analysisUnavailable,
     onDone: async results => {
+      const recheck = await recheckBands.mutateAsync({ batchSize: 2 }).catch(() => null);
       await utils.invalidate();
       const fetched = results.reduce((a, r) => a + r.fetched, 0);
       const analyzed = results.reduce((a, r) => a + r.analyzed, 0);
@@ -46,6 +49,9 @@ export default function News() {
             ? `${fetched} 件を取得し、${analyzed} 件を分析しました`
             : "新しいニュースはありませんでした"
         );
+      }
+      if (recheck && recheck.checked > 0) {
+        toast.info(`${recheck.checked} 銘柄の価格帯を新しいニュースで再照合しました`);
       }
     },
     onError: e => toast.error(e instanceof Error ? e.message : "ニュースを取得できませんでした"),
@@ -128,6 +134,33 @@ export default function News() {
             : "ニュースを取得・分析"}
         </Button>
       </header>
+
+      {coverage.data ? (
+        <Card className="border-border/70 bg-card/80">
+          <CardContent className="space-y-3 p-4">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <p className="text-sm font-medium">保有銘柄ニュース覆盖</p>
+                <p className="text-xs text-muted-foreground">
+                  {coverage.data.covered}/{coverage.data.total} 銘柄に実ニュースあり
+                </p>
+              </div>
+              <div className="flex flex-wrap gap-2 text-xs">
+                <Badge variant="outline">最新 {coverage.data.fresh}</Badge>
+                <Badge variant="outline">14日超 {coverage.data.stale}</Badge>
+                <Badge variant="destructive">0件 {coverage.data.missing}</Badge>
+              </div>
+            </div>
+            {coverage.data.missing > 0 ? (
+              <p className="text-xs leading-relaxed text-muted-foreground">
+                検索済み・該当なし: {coverage.data.items.filter(item => item.status === "MISSING").map(item => `${item.name} (${item.symbol})`).join("、")}
+              </p>
+            ) : (
+              <p className="text-xs text-gain">全保有銘柄に少なくとも 1 件のニュースがあります。</p>
+            )}
+          </CardContent>
+        </Card>
+      ) : null}
 
       {items.length > 0 ? (
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">

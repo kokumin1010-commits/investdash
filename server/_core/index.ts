@@ -16,6 +16,7 @@ import { createContext } from "./context";
 import { serveStatic, setupVite } from "./vite";
 import { registerRailwayFileStorage } from "../railwayFileStorage";
 import { startRailwayScheduler } from "../railwayScheduler";
+import { getSystemHealthSnapshot, startSystemHealthMonitor } from "../services/systemHealth";
 
 function isPortAvailable(port: number): Promise<boolean> {
   return new Promise(resolve => {
@@ -39,8 +40,13 @@ async function findAvailablePort(startPort: number = 3000): Promise<number> {
 async function startServer() {
   const app = express();
   const server = createServer(app);
-  app.get("/healthz", (_req, res) => {
-    res.json({ ok: true, service: "investdash", version: process.env.RAILWAY_GIT_COMMIT_SHA ?? "local" });
+  app.get("/healthz", async (_req, res) => {
+    res.json({
+      ok: true,
+      service: "investdash",
+      version: process.env.RAILWAY_GIT_COMMIT_SHA ?? "local",
+      ...(await getSystemHealthSnapshot()),
+    });
   });
   // Configure body parser with larger size limit for file uploads
   app.use(express.json({ limit: "50mb" }));
@@ -77,6 +83,7 @@ async function startServer() {
   if (port !== preferredPort) {
     console.log(`Port ${preferredPort} is busy, using port ${port} instead`);
   }
+  startSystemHealthMonitor();
 
   server.listen(port, () => {
     console.log(`Server running on http://localhost:${port}/`);

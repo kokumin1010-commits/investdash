@@ -108,6 +108,10 @@ export const holdings = mysqlTable(
     lastDividendDate: timestamp("lastDividendDate"),
     /** 最後の 1 回あたりの配当額（現地通貨） */
     lastDividendAmount: decimal("lastDividendAmount", { precision: 20, scale: 6 }),
+    /** ユーザー確認または証券会社の約定履歴に基づく実際の取得開始日 */
+    acquiredAt: timestamp("acquiredAt"),
+    /** acquiredAt の根拠。推定日や取込日はここへ保存しない */
+    acquiredAtSource: mysqlEnum("acquiredAtSource", ["USER_CONFIRMED", "BROKER_TRADE"]),
     dividendUpdatedAt: timestamp("dividendUpdatedAt"),
     priceUpdatedAt: timestamp("priceUpdatedAt"),
     profileUpdatedAt: timestamp("profileUpdatedAt"),
@@ -271,7 +275,7 @@ export const newsItems = mysqlTable(
   },
   table => ({
     userSymbolIdx: index("news_user_symbol_idx").on(table.userId, table.symbol),
-    hashIdx: index("news_hash_idx").on(table.userId, table.urlHash),
+    hashIdx: uniqueIndex("news_symbol_hash_unique").on(table.userId, table.symbol, table.urlHash),
   })
 );
 
@@ -999,6 +1003,37 @@ export const schedulerRunLogs = mysqlTable(
 
 export type SchedulerRunLog = typeof schedulerRunLogs.$inferSelect;
 export type InsertSchedulerRunLog = typeof schedulerRunLogs.$inferInsert;
+
+/**
+ * Railway のメモリ閾値、外部ヘルスチェック、deployment webhook、復旧を
+ * 同じ時系列で確認するためのシステムイベント。長いログ本文は持たず、
+ * 最後の構造化エラーと参照 ID だけを残す。
+ */
+export const systemEvents = mysqlTable(
+  "systemEvents",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    userId: int("userId").notNull(),
+    source: mysqlEnum("source", ["APP", "EXTERNAL_HEALTH", "RAILWAY_WEBHOOK"]).notNull(),
+    kind: varchar("kind", { length: 64 }).notNull(),
+    severity: mysqlEnum("severity", ["INFO", "WARNING", "CRITICAL", "RECOVERED"])
+      .notNull(),
+    eventKey: varchar("eventKey", { length: 191 }),
+    title: varchar("title", { length: 255 }).notNull(),
+    message: text("message"),
+    details: json("details").$type<Record<string, unknown>>(),
+    occurredAt: timestamp("occurredAt").defaultNow().notNull(),
+    createdAt: timestamp("createdAt").defaultNow().notNull(),
+  },
+  table => ({
+    userOccurredIdx: index("system_events_user_occurred_idx").on(table.userId, table.occurredAt),
+    kindOccurredIdx: index("system_events_kind_occurred_idx").on(table.kind, table.occurredAt),
+    eventKeyUnique: uniqueIndex("system_events_event_key_unique").on(table.userId, table.eventKey),
+  })
+);
+
+export type SystemEvent = typeof systemEvents.$inferSelect;
+export type InsertSystemEvent = typeof systemEvents.$inferInsert;
 
 /**
  * 簡易パスコード認証。

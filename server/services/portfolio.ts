@@ -28,7 +28,7 @@ import {
   yieldOnCost,
   type DividendFrequency,
 } from "./dividend";
-import { buildNewsQuery, filterNoise, searchNews } from "./news";
+import { buildNewsQueries, filterNoise, searchNews } from "./news";
 import { calcPnlPct } from "../../shared/pnlLabel";
 import {
   buildInterestAssetViews,
@@ -36,6 +36,7 @@ import {
   type InterestAssetView,
 } from "./interestAssets";
 import { groupPositionsBySymbol, type GroupedPosition } from "./groupPositions";
+import { buildHoldingDuration, type HoldingDurationView } from "../../shared/holdingDuration";
 import { buildAddReason } from "../../shared/addReason";
 import { fillMissingSectors } from "./sectorFill";
 import { buildMarketSlices, type MarketSlice } from "./marketSlices";
@@ -104,6 +105,7 @@ export type PositionView = {
   costValueBase: number;
   weightPct: number | null;
   priceUpdatedAt: Date | null;
+  holdingDuration: HoldingDurationView;
   hasCard: boolean;
   signal: {
     action: "ADD" | "HOLD" | "WATCH" | "REDUCE" | "EXIT";
@@ -425,6 +427,7 @@ export async function buildPortfolio(userId: number): Promise<{
     snapshots,
     brokerBalances,
     interestAssetRows,
+    earliestMonthlyDates,
   ] = await Promise.all([
     db.listHoldings(userId),
     db.getSettings(userId),
@@ -437,6 +440,7 @@ export async function buildPortfolio(userId: number): Promise<{
     db.listBrokerBalances(userId),
     // 利息で増える現金性資産（貨幣市場基金）。株式とは別枠で純資産に加える
     db.listInterestAssets(userId),
+    db.earliestMonthlyHoldingDates(userId),
   ]);
 
   const rates: FxRates = {
@@ -555,6 +559,12 @@ export async function buildPortfolio(userId: number): Promise<{
       costValueBase: toBase(costValue, h.currency) ?? costValue,
       weightPct: null as number | null,
       priceUpdatedAt: h.priceUpdatedAt,
+      holdingDuration: buildHoldingDuration({
+        acquiredAt: h.acquiredAt,
+        acquiredAtSource: h.acquiredAtSource,
+        earliestSnapshotAt: earliestMonthlyDates.get(h.symbol),
+        trackedAt: h.createdAt,
+      }),
       hasCard: cardSymbols.has(h.symbol),
       signal: sig
         ? {
@@ -1477,12 +1487,20 @@ export async function syncNewsForTargets(
 
   for (const t of targets) {
     try {
-      const query = buildNewsQuery(t);
-      const raw = filterNoise(
-        await searchNews(query, { market: t.market, windowDays: opts.windowDays ?? 30, limit: 14 })
-      );
+      const merged = [];
+      for (const query of buildNewsQueries(t)) {
+        const found = await searchNews(query, {
+          market: t.market,
+          windowDays: opts.windowDays ?? 30,
+          limit: 14,
+        });
+        merged.push(...found);
+        if (filterNoise(merged).length >= 10) break;
+      }
+      const raw = filterNoise(merged).slice(0, 14);
       const existing = await db.existingNewsHashes(
         userId,
+        t.symbol,
         raw.map(r => r.urlHash)
       );
       const fresh = raw.filter(r => !existing.has(r.urlHash));
@@ -1510,7 +1528,7 @@ export async function syncNewsForTargets(
       try {
         const verdicts = await analyzeNewsBatch(t.name, pending);
         for (const v of verdicts) {
-          await db.updateNewsVerdict(userId, v.urlHash, {
+          await db.updateNewsVerdict(userId, t.symbol, v.urlHash, {
             sentiment: v.sentiment,
             impactScore: v.impactScore,
             summary: v.summary,
@@ -1568,6 +1586,22 @@ export async function syncNewsForUser(
     seen.add(x.symbol);
     targets.push({ symbol: x.symbol, name: x.name, tickerCode: x.tickerCode, market: x.market });
   }
+
+  const coverageRows = await db.listNewsCoverage(userId);
+  const coverage = new Map(
+    coverageRows.map(row => [
+      row.symbol,
+      { count: Number(row.count), latest: row.latestPublishedAt ? new Date(row.latestPublishedAt) : null },
+    ])
+  );
+  const staleBefore = Date.now() - 14 * 24 * 60 * 60 * 1000;
+  targets.sort((a, b) => {
+    const ca = coverage.get(a.symbol);
+    const cb = coverage.get(b.symbol);
+    const rank = (entry: { count: number; latest: Date | null } | undefined) =>
+      !entry || entry.count === 0 ? 0 : !entry.latest || entry.latest.getTime() < staleBefore ? 1 : 2;
+    return rank(ca) - rank(cb) || a.symbol.localeCompare(b.symbol);
+  });
 
   const total = targets.length;
   const offset = options?.offset ?? 0;

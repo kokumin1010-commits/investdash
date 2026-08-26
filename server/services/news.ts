@@ -52,7 +52,11 @@ export async function searchNews(
   const locale =
     market === "JP"
       ? { hl: "ja", gl: "JP", ceid: "JP:ja" }
-      : { hl: "en-US", gl: "US", ceid: "US:en" };
+      : market === "HK"
+        ? { hl: "en-HK", gl: "HK", ceid: "HK:en" }
+        : market === "SG"
+          ? { hl: "en-SG", gl: "SG", ceid: "SG:en" }
+          : { hl: "en-US", gl: "US", ceid: "US:en" };
 
   const q = encodeURIComponent(`${query} when:${windowDays}d`);
   const url = `https://news.google.com/rss/search?q=${q}&hl=${locale.hl}&gl=${locale.gl}&ceid=${locale.ceid}`;
@@ -111,6 +115,31 @@ export function buildNewsQuery(params: {
     return `${cleanName} ${tickerCode}`;
   }
   return `${cleanName} ${tickerCode} stock`;
+}
+
+/** ticker を先頭に置き、翻訳された会社名でも取りこぼしにくい fallback 群。 */
+export function buildNewsQueries(params: {
+  name: string;
+  tickerCode: string;
+  market: Market;
+}): string[] {
+  const cleanName = params.name.replace(/[（(].*?[）)]/g, "").trim();
+  const ticker = params.tickerCode.trim();
+  const marketWord =
+    params.market === "JP"
+      ? "株"
+      : params.market === "HK"
+        ? "Hong Kong stock"
+        : params.market === "SG"
+          ? "Singapore stock"
+          : "stock";
+  return Array.from(
+    new Set([
+      `${ticker} ${cleanName} ${marketWord}`.trim(),
+      `${ticker} ${marketWord}`.trim(),
+      `${cleanName} ${marketWord}`.trim(),
+    ])
+  ).filter(Boolean);
 }
 
 /** ノイズ記事（掲示板・時系列データ等）を除外する */

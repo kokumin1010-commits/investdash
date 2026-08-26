@@ -30,6 +30,7 @@ const KIND_LABELS: Record<string, string> = {
   price_band_plan_backfill: "価格帯プラン補完",
   investment_card_backfill: "投資カード補完",
   band_check_backfill: "価格帯確認",
+  band_check_news_refresh: "新ニュース再照合",
   monthly_snapshot: "月次記録",
 };
 
@@ -126,12 +127,14 @@ export default function Operations() {
   const query = trpc.portfolio.schedulerRuns.useQuery(input, {
     refetchInterval: data => (data.state.data?.stats.running ? 5000 : false),
   });
+  const events = trpc.portfolio.systemEvents.useQuery({ limit: 20 });
   const rows = query.data?.rows ?? [];
   const stats = query.data?.stats;
 
   const refresh = () => {
     setAnchor(Date.now());
     void query.refetch();
+    void events.refetch();
   };
 
   return (
@@ -170,6 +173,28 @@ export default function Operations() {
           </Card>
         ))}
       </section>
+
+      {events.data && events.data.length > 0 ? (
+        <Card className="mb-6 border-border/70 shadow-sm">
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base">システムイベント</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-2">
+            {events.data.slice(0, 8).map(event => (
+              <div key={event.id} className="flex flex-col gap-1 rounded-lg border p-3 sm:flex-row sm:items-center sm:justify-between">
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2">
+                    <Badge variant={event.severity === "CRITICAL" ? "destructive" : "outline"}>{event.severity}</Badge>
+                    <span className="truncate text-sm font-medium">{event.title}</span>
+                  </div>
+                  {event.message ? <p className="mt-1 text-xs text-muted-foreground">{event.message}</p> : null}
+                </div>
+                <time className="shrink-0 text-xs text-muted-foreground">{formatDate(event.occurredAt)}</time>
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+      ) : null}
 
       <Card className="mb-6 border-border/70 shadow-sm">
         <CardContent className="grid gap-3 p-4 sm:grid-cols-2 lg:grid-cols-4">

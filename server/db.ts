@@ -13,6 +13,9 @@ import {
   brokerBalances,
   interestAssets,
   candidateSuggestions,
+  monthlyHoldings,
+  monthlySnapshots,
+  systemEvents,
   type Holding,
   type InsertHolding,
   type InsertImportJob,
@@ -24,6 +27,7 @@ import {
   type InsertBrokerBalance,
   type InsertInterestAsset,
   type InsertCandidateSuggestion,
+  type InsertSystemEvent,
 } from "../drizzle/schema";
 import { ENV } from "./_core/env";
 import { jstDayBounds } from "../shared/jstDate";
@@ -46,6 +50,39 @@ async function requireDb() {
   const db = await getDb();
   if (!db) throw new Error("データベースに接続できません");
   return db;
+}
+
+/** symbol ごとに、保有が確認できる最古の月次スナップショット日時を返す。 */
+export async function earliestMonthlyHoldingDates(userId: number): Promise<Map<string, Date>> {
+  const db = await requireDb();
+  const rows = await db
+    .select({
+      symbol: monthlyHoldings.symbol,
+      earliest: sql<Date>`MIN(${monthlySnapshots.capturedAt})`,
+    })
+    .from(monthlyHoldings)
+    .innerJoin(monthlySnapshots, eq(monthlyHoldings.snapshotId, monthlySnapshots.id))
+    .where(eq(monthlyHoldings.userId, userId))
+    .groupBy(monthlyHoldings.symbol);
+  return new Map(
+    rows.flatMap(row => (row.earliest ? [[row.symbol, new Date(row.earliest)] as const] : []))
+  );
+}
+
+export async function insertSystemEvent(event: InsertSystemEvent): Promise<number | null> {
+  const db = await requireDb();
+  const result = await db.insert(systemEvents).values(event).$returningId();
+  return result[0]?.id ?? null;
+}
+
+export async function listSystemEvents(userId: number, limit = 100) {
+  const db = await requireDb();
+  return db
+    .select()
+    .from(systemEvents)
+    .where(eq(systemEvents.userId, userId))
+    .orderBy(desc(systemEvents.occurredAt))
+    .limit(limit);
 }
 
 /**
@@ -464,13 +501,27 @@ export async function listNews(userId: number, opts: { symbol?: string; limit?: 
     .limit(limit);
 }
 
-export async function existingNewsHashes(userId: number, hashes: string[]) {
+export async function listNewsCoverage(userId: number) {
+  const db = await requireDb();
+  return db
+    .select({
+      symbol: newsItems.symbol,
+      count: sql<number>`COUNT(*)`,
+      latestPublishedAt: sql<Date | null>`MAX(${newsItems.publishedAt})`,
+      latestCreatedAt: sql<Date | null>`MAX(${newsItems.createdAt})`,
+    })
+    .from(newsItems)
+    .where(eq(newsItems.userId, userId))
+    .groupBy(newsItems.symbol);
+}
+
+export async function existingNewsHashes(userId: number, symbol: string, hashes: string[]) {
   if (hashes.length === 0) return new Set<string>();
   const db = await requireDb();
   const rows = await db
     .select({ urlHash: newsItems.urlHash })
     .from(newsItems)
-    .where(and(eq(newsItems.userId, userId), inArray(newsItems.urlHash, hashes)));
+    .where(and(eq(newsItems.userId, userId), eq(newsItems.symbol, symbol), inArray(newsItems.urlHash, hashes)));
   return new Set(rows.map(r => r.urlHash));
 }
 
@@ -483,6 +534,7 @@ export async function insertNews(values: InsertNewsItem[]) {
 
 export async function updateNewsVerdict(
   userId: number,
+  symbol: string,
   urlHash: string,
   patch: {
     sentiment: "POSITIVE" | "NEGATIVE" | "NEUTRAL";
@@ -495,7 +547,7 @@ export async function updateNewsVerdict(
   await db
     .update(newsItems)
     .set({ ...patch, analyzedAt: new Date() })
-    .where(and(eq(newsItems.userId, userId), eq(newsItems.urlHash, urlHash)));
+    .where(and(eq(newsItems.userId, userId), eq(newsItems.symbol, symbol), eq(newsItems.urlHash, urlHash)));
 }
 
 export async function deleteNewsForSymbol(userId: number, symbol: string) {

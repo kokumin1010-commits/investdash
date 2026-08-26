@@ -19,6 +19,7 @@ import {
   computeOverviewStats,
   runChecksForBand,
   runMissingBandChecksBatch,
+  runNewsTriggeredBandChecksBatch,
   updateBand,
 } from "../services/priceBandService";
 import {
@@ -112,6 +113,10 @@ export const portfolioRouter = router({
         },
       } as const;
     }),
+
+  systemEvents: protectedProcedure
+    .input(z.object({ limit: z.number().int().min(1).max(200).default(50) }).default({ limit: 50 }))
+    .query(async ({ ctx, input }) => db.listSystemEvents(ctx.user.id, input.limit)),
 
   updateSettings: protectedProcedure
     .input(
@@ -354,6 +359,7 @@ export const portfolioRouter = router({
         // BROKERS から生成し、対応プラットフォームを追加したときの漏れを防ぐ
         broker: z.enum(BROKERS).optional(),
         notes: z.string().max(2000).optional(),
+        acquiredAt: z.coerce.date().optional(),
       })
     )
     .mutation(async ({ ctx, input }) => {
@@ -402,6 +408,8 @@ export const portfolioRouter = router({
         website: profile?.website ?? undefined,
         businessSummary: profile?.businessSummary ?? undefined,
         notes: input.notes,
+        acquiredAt: input.acquiredAt,
+        acquiredAtSource: input.acquiredAt ? "USER_CONFIRMED" : undefined,
         priceUpdatedAt: quote ? new Date() : undefined,
         profileUpdatedAt: profile ? new Date() : undefined,
       });
@@ -418,6 +426,7 @@ export const portfolioRouter = router({
         avgCost: z.number().min(0).optional(),
         broker: z.enum(BROKERS).optional(),
         notes: z.string().max(2000).optional(),
+        acquiredAt: z.coerce.date().nullable().optional(),
       })
     )
     .mutation(async ({ ctx, input }) => {
@@ -430,6 +439,13 @@ export const portfolioRouter = router({
         avgCost: input.avgCost !== undefined ? String(input.avgCost) : undefined,
         broker: input.broker,
         notes: input.notes,
+        acquiredAt: input.acquiredAt,
+        acquiredAtSource:
+          input.acquiredAt === undefined
+            ? undefined
+            : input.acquiredAt === null
+              ? null
+              : "USER_CONFIRMED",
       });
       return { success: true } as const;
     }),
@@ -870,6 +886,24 @@ export const portfolioRouter = router({
             deferredSymbols: value.deferred,
             quotaExhausted: value.quotaExhausted,
           },
+        }),
+      })
+    ),
+
+  runNewsTriggeredBandChecks: protectedProcedure
+    .input(z.object({ batchSize: z.number().int().min(1).max(3).default(2) }).default({ batchSize: 2 }))
+    .mutation(async ({ ctx, input }) =>
+      withSchedulerRunLog({
+        userId: ctx.user.id,
+        kind: "band_check_news_refresh",
+        trigger: "MANUAL",
+        run: () => runNewsTriggeredBandChecksBatch(ctx.user.id, input),
+        summarize: value => ({
+          processed: value.processed,
+          succeeded: value.checked,
+          failed: value.failed.length,
+          remaining: value.remaining,
+          detail: { itemsChecked: value.itemsChecked, failedSymbols: value.failed, quotaExhausted: value.quotaExhausted },
         }),
       })
     ),

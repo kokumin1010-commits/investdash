@@ -5,6 +5,7 @@ import { saveMonthlySnapshot } from "./services/monthlySnapshotService";
 import {
   generateMissingHoldingPlans,
   runMissingBandChecksBatch,
+  runNewsTriggeredBandChecksBatch,
 } from "./services/priceBandService";
 import { draftMissingCards } from "./services/cardService";
 import { withSchedulerRunLog } from "./services/schedulerRunLog";
@@ -318,9 +319,29 @@ export async function runRailwayDataBackfill() {
                   },
                 }),
               });
+        const bandRechecks =
+          signals.quotaExhausted || plans?.quotaExhausted || cards?.quotaExhausted || bandChecks?.quotaExhausted
+            ? null
+            : await withSchedulerRunLog({
+                userId,
+                kind: "band_check_news_refresh",
+                trigger: "SCHEDULED",
+                run: () => runNewsTriggeredBandChecksBatch(userId, { batchSize: 2 }),
+                summarize: value => ({
+                  processed: value.processed,
+                  succeeded: value.checked,
+                  failed: value.failed.length,
+                  remaining: value.remaining,
+                  detail: {
+                    itemsChecked: value.itemsChecked,
+                    failedSymbols: value.failed,
+                    quotaExhausted: value.quotaExhausted,
+                  },
+                }),
+              });
 
         console.log(
-          `[Railway scheduler] backfill user=${userId} profiles=${profiles.updated}/${profiles.processed} profileFailed=${profiles.failed.length} signals=${signals.generated}/${signals.processed} signalRemaining=${signals.remaining} plans=${plans ? `${plans.generated}/${plans.processed}` : "quota-skipped"} planRemaining=${plans?.remaining ?? "unknown"} cards=${cards ? `${cards.created}/${cards.processed}` : "quota-skipped"} cardRemaining=${cards?.remaining ?? "unknown"} bandChecks=${bandChecks ? `${bandChecks.checked}/${bandChecks.processed}` : "quota-skipped"} bandCheckRemaining=${bandChecks?.remaining ?? "unknown"}`
+          `[Railway scheduler] backfill user=${userId} profiles=${profiles.updated}/${profiles.processed} profileFailed=${profiles.failed.length} signals=${signals.generated}/${signals.processed} signalRemaining=${signals.remaining} plans=${plans ? `${plans.generated}/${plans.processed}` : "quota-skipped"} planRemaining=${plans?.remaining ?? "unknown"} cards=${cards ? `${cards.created}/${cards.processed}` : "quota-skipped"} cardRemaining=${cards?.remaining ?? "unknown"} bandChecks=${bandChecks ? `${bandChecks.checked}/${bandChecks.processed}` : "quota-skipped"} bandCheckRemaining=${bandChecks?.remaining ?? "unknown"} bandRechecks=${bandRechecks ? `${bandRechecks.checked}/${bandRechecks.processed}` : "quota-skipped"}`
         );
         summaries.push({
           userId,

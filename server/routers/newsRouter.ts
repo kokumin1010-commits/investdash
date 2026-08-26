@@ -5,6 +5,32 @@ import { protectedProcedure, router } from "../_core/trpc";
 import { syncNewsForTargets, syncNewsForUser } from "../services/portfolio";
 
 export const newsRouter = router({
+  /** 112 個の去重持仓に対する正確なニュース件数・最新日・鮮度。 */
+  coverage: protectedProcedure.query(async ({ ctx }) => {
+    const [holdings, rows] = await Promise.all([
+      db.listHoldings(ctx.user.id),
+      db.listNewsCoverage(ctx.user.id),
+    ]);
+    const rowMap = new Map(rows.map(row => [row.symbol, row]));
+    const unique = new Map(holdings.map(h => [h.symbol, h]));
+    const staleBefore = Date.now() - 14 * 24 * 60 * 60 * 1000;
+    const items = Array.from(unique.values()).map(holding => {
+      const row = rowMap.get(holding.symbol);
+      const latestPublishedAt = row?.latestPublishedAt ? new Date(row.latestPublishedAt) : null;
+      const count = Number(row?.count ?? 0);
+      const status = count === 0 ? "MISSING" : !latestPublishedAt || latestPublishedAt.getTime() < staleBefore ? "STALE" : "FRESH";
+      return { symbol: holding.symbol, name: holding.name, market: holding.market, count, latestPublishedAt, status };
+    });
+    return {
+      total: items.length,
+      covered: items.filter(item => item.count > 0).length,
+      missing: items.filter(item => item.status === "MISSING").length,
+      stale: items.filter(item => item.status === "STALE").length,
+      fresh: items.filter(item => item.status === "FRESH").length,
+      items,
+    } as const;
+  }),
+
   /** ニュース一覧（全銘柄 or 特定銘柄） */
   list: protectedProcedure
     .input(

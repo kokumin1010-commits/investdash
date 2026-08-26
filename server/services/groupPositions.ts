@@ -3,6 +3,7 @@ import { calcPnlPct } from "../../shared/pnlLabel";
 import { computeAddSizing } from "../../shared/addSizing";
 import { actualAmount, sharesForAmount } from "../../shared/addShares";
 import { buildAddReason, type AddReason } from "../../shared/addReason";
+import { aggregateHoldingDurations, type HoldingDurationView } from "../../shared/holdingDuration";
 
 /**
  * 同一銘柄を複数の証券口座で保有している場合の合算ビュー。
@@ -62,6 +63,7 @@ export type GroupedPosition = {
   newsCount: number;
   negativeNewsCount: number;
   priceUpdatedAt: Date | null;
+  holdingDuration: HoldingDurationView;
   /**
    * 配当の合算。1 株あたりの配当額は銘柄共通だが、
    * 受取額は保有株数に比例するため口座をまたいで合計する。
@@ -275,6 +277,7 @@ export function groupPositionsBySymbol(
       newsCount: Math.max(...entries.map(e => e.newsCount)),
       negativeNewsCount: Math.max(...entries.map(e => e.negativeNewsCount)),
       priceUpdatedAt,
+      holdingDuration: aggregateHoldingDurations(entries.map(entry => entry.holdingDuration)),
       dividend,
       addPlan: null as GroupedAddPlan | null,
     } satisfies GroupedPosition;

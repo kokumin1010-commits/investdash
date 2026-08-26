@@ -40,6 +40,12 @@ function pos(over: Partial<PositionView> & { symbol: string }): PositionView {
     costValueBase: costValue,
     weightPct: null,
     priceUpdatedAt: over.priceUpdatedAt ?? null,
+    holdingDuration: over.holdingDuration ?? {
+      startDate: new Date("2026-08-25T00:00:00+09:00"),
+      days: 2,
+      confidence: "AT_LEAST",
+      source: "MONTHLY_SNAPSHOT",
+    },
     hasCard: over.hasCard ?? false,
     signal: over.signal ?? null,
     newsCount: over.newsCount ?? 0,

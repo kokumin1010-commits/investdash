@@ -1211,6 +1211,64 @@ export async function runMissingBandChecksBatch(
   };
 }
 
+/** 新しいニュースが現在帯の UNKNOWN 判定より後に保存された銘柄だけを再照合する。 */
+export async function runNewsTriggeredBandChecksBatch(
+  userId: number,
+  options: { batchSize?: number } = {}
+): Promise<MissingBandCheckBatchResult> {
+  const batchSize = Math.min(3, Math.max(1, options.batchSize ?? 2));
+  const d = await requireDb();
+  const [rows, coverageRows, unknownRows] = await Promise.all([
+    listPlanOverview(userId),
+    db.listNewsCoverage(userId),
+    d
+      .select({ symbol: priceBandPlans.symbol, bandId: bandCheckResults.bandId, checkedAt: bandCheckResults.createdAt })
+      .from(bandCheckResults)
+      .innerJoin(priceBands, eq(bandCheckResults.bandId, priceBands.id))
+      .innerJoin(priceBandPlans, eq(priceBands.planId, priceBandPlans.id))
+      .where(and(eq(bandCheckResults.userId, userId), eq(bandCheckResults.status, "UNKNOWN")))
+      .orderBy(desc(bandCheckResults.createdAt)),
+  ]);
+  const latestNews = new Map(coverageRows.map(row => [row.symbol, row.latestCreatedAt ? new Date(row.latestCreatedAt) : null]));
+  const latestUnknown = new Map<string, Date>();
+  for (const row of unknownRows) {
+    const key = `${row.symbol}:${row.bandId}`;
+    if (!latestUnknown.has(key)) latestUnknown.set(key, new Date(row.checkedAt));
+  }
+  const candidates = rows
+    .filter(row => row.held && row.currentBandId !== null)
+    .filter(row => {
+      const newsAt = latestNews.get(row.symbol);
+      const checkedAt = latestUnknown.get(`${row.symbol}:${row.currentBandId}`);
+      return Boolean(newsAt && checkedAt && newsAt.getTime() > checkedAt.getTime());
+    })
+    .sort((a, b) => (b.holdingValueJpy ?? 0) - (a.holdingValueJpy ?? 0));
+
+  let processed = 0;
+  let checked = 0;
+  let itemsChecked = 0;
+  let quotaExhausted = false;
+  const failed: string[] = [];
+  const errors: Array<{ symbol: string; message: string }> = [];
+  for (const target of candidates.slice(0, batchSize)) {
+    processed += 1;
+    try {
+      const plan = await runChecksForBand(userId, target.currentBandId as number, { missingOnly: false });
+      checked += 1;
+      itemsChecked += (plan.bands.find(band => band.id === target.currentBandId)?.checkItems?.length ?? 0);
+    } catch (error) {
+      failed.push(target.symbol);
+      errors.push({ symbol: target.symbol, message: error instanceof Error ? error.message : String(error) });
+      if (isQuotaError(error)) {
+        quotaExhausted = true;
+        break;
+      }
+    }
+  }
+  return { total: candidates.length, processed, checked, itemsChecked, failed, errors, deferred: [],
+    remaining: Math.max(0, candidates.length - checked), quotaExhausted };
+}
+
 /**
  * 未保有銘柄（ウォッチリスト）の情報を組み立てる。
  *

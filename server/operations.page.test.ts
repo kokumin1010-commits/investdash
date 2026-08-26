@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   useSchedulerRuns: vi.fn(),
+  useSystemEvents: vi.fn(),
   refetch: vi.fn(),
 }));
 
@@ -13,6 +14,7 @@ vi.mock("@/lib/trpc", () => ({
   trpc: {
     portfolio: {
       schedulerRuns: { useQuery: mocks.useSchedulerRuns },
+      systemEvents: { useQuery: mocks.useSystemEvents },
     },
   },
 }));
@@ -67,6 +69,23 @@ beforeEach(() => {
     error: null,
     refetch: mocks.refetch,
   });
+  mocks.useSystemEvents.mockReturnValue({
+    data: [{
+      id: 1,
+      userId: 1,
+      source: "APP",
+      kind: "MEMORY_THRESHOLD",
+      severity: "WARNING",
+      eventKey: "memory:warning:1",
+      title: "メモリ使用率 WARNING",
+      message: "cgroup 82% / RSS 1024",
+      details: null,
+      occurredAt: new Date("2026-08-27T08:00:00Z"),
+      resolvedAt: null,
+      createdAt: new Date("2026-08-27T08:00:00Z"),
+    }],
+    refetch: mocks.refetch,
+  });
 });
 
 afterEach(() => cleanup());
@@ -78,6 +97,7 @@ describe("运用履历页面", () => {
     expect(screen.getAllByText("投資カード補完").length).toBeGreaterThan(0);
     expect(screen.getAllByText("価格帯確認").length).toBeGreaterThan(0);
     expect(screen.getAllByText("429 quota exhausted").length).toBeGreaterThan(0);
+    expect(screen.getByText("メモリ使用率 WARNING")).toBeTruthy();
     expect(screen.getAllByRole("combobox")).toHaveLength(4);
     expect(screen.getByRole("button", { name: /更新/ })).toBeTruthy();
   });

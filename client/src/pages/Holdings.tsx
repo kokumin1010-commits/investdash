@@ -87,6 +87,18 @@ import { Fragment, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { Link, useLocation, useSearch } from "wouter";
 
+function holdingDurationText(days: number): string {
+  const years = Math.floor(days / 365);
+  const months = Math.floor((days % 365) / 30);
+  if (years > 0) return `${years}年${months > 0 ? `${months}か月` : ""}`;
+  if (months > 0) return `${months}か月`;
+  return `${days}日`;
+}
+
+function holdingDurationBasis(confidence: "EXACT" | "AT_LEAST" | "TRACKED_SINCE"): string {
+  return confidence === "EXACT" ? "正確" : confidence === "AT_LEAST" ? "少なくとも" : "記録開始から";
+}
+
 /**
  * 並び替えの軸。長期保有が前提のため「前日比順」は置かない
  * （日々の変動は判断材料にならず、長期の損益や配当のほうが役に立つ）。
@@ -665,6 +677,9 @@ export default function Holdings() {
                           </>
                         ) : null}
                       </div>
+                      <p className="text-[10px] text-muted-foreground">
+                        保有 {holdingDurationBasis(p.holdingDuration.confidence)} {holdingDurationText(p.holdingDuration.days)}
+                      </p>
                     </Link>
                     <div className="flex shrink-0 flex-col items-end gap-1">
                       {p.signal ? <SignalBadge action={p.signal.action} /> : <SignalPlaceholder />}
@@ -995,6 +1010,10 @@ export default function Holdings() {
                             </>
                           ) : null}
                         </div>
+                        <p className="text-[10px] text-muted-foreground">
+                          保有 {holdingDurationBasis(p.holdingDuration.confidence)} {holdingDurationText(p.holdingDuration.days)}
+                          {` ・ ${new Date(p.holdingDuration.startDate).toLocaleDateString("ja-JP")}`}
+                        </p>
                       </Link>
                     </TableCell>
                     <TableCell>
@@ -1585,6 +1604,11 @@ function EditHoldingForm({
     currency: string;
     symbol: string;
     broker: Broker;
+    holdingDuration: {
+      startDate: Date | string;
+      confidence: "EXACT" | "AT_LEAST" | "TRACKED_SINCE";
+      days: number;
+    };
   };
   onDone: () => void;
 }) {
@@ -1593,6 +1617,11 @@ function EditHoldingForm({
   const [quantity, setQuantity] = useState(String(holding.quantity));
   const [avgCost, setAvgCost] = useState(String(holding.avgCost));
   const [broker, setBroker] = useState<Broker>(holding.broker);
+  const [acquiredAt, setAcquiredAt] = useState(
+    holding.holdingDuration.confidence === "EXACT"
+      ? new Date(holding.holdingDuration.startDate).toISOString().slice(0, 10)
+      : ""
+  );
 
   const update = trpc.portfolio.updateHolding.useMutation({
     onSuccess: async () => {
@@ -1651,6 +1680,19 @@ function EditHoldingForm({
             </SelectContent>
           </Select>
         </div>
+        <div className="space-y-2">
+          <Label htmlFor="edit-acquired-at">最初に買った日（分かる場合）</Label>
+          <Input
+            id="edit-acquired-at"
+            type="date"
+            value={acquiredAt}
+            max={new Date().toISOString().slice(0, 10)}
+            onChange={e => setAcquiredAt(e.target.value)}
+          />
+          <p className="text-xs text-muted-foreground">
+            未入力では「{holdingDurationBasis(holding.holdingDuration.confidence)}」の記録日を表示します。推定日を正確な買入日として保存しません。
+          </p>
+        </div>
       </div>
       <DialogFooter>
         <Button variant="outline" onClick={onDone}>
@@ -1665,6 +1707,7 @@ function EditHoldingForm({
               quantity: Number(quantity),
               avgCost: Number(avgCost),
               broker,
+              acquiredAt: acquiredAt ? `${acquiredAt}T00:00:00+09:00` : null,
             })
           }
         >

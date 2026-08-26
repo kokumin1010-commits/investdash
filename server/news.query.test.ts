@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildNewsQuery, filterNoise, hashUrl, type RawNews } from "./services/news";
+import { buildNewsQueries, buildNewsQuery, filterNoise, hashUrl, type RawNews } from "./services/news";
 
 function makeNews(partial: Partial<RawNews>): RawNews {
   return {
@@ -27,6 +27,14 @@ describe("hashUrl", () => {
 });
 
 describe("buildNewsQuery", () => {
+  it("ティッカーを先頭に置き、市場別 fallback を返す", () => {
+    expect(buildNewsQueries({ name: "中国平安保険", tickerCode: "2318", market: "HK" })).toEqual([
+      "2318 中国平安保険 Hong Kong stock",
+      "2318 Hong Kong stock",
+      "中国平安保険 Hong Kong stock",
+    ]);
+  });
+
   it("日本株は銘柄名とコードを含む検索クエリを生成する", () => {
     const q = buildNewsQuery({ name: "SUBARU", tickerCode: "7270", market: "JP" });
     expect(q).toContain("SUBARU");
@@ -76,4 +84,3 @@ describe("filterNoise", () => {
     expect(filterNoise([])).toEqual([]);
   });
 });
-
