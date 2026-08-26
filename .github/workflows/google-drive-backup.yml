@@ -112,7 +112,7 @@ jobs:
             --include "${ENCRYPTED_NAME}" \
             --include "${ENCRYPTED_NAME}.sha256"
 
-          if [ "$(date -u +%d)" = "01" ]; then
+          if [ "$(TZ=Asia/Tokyo date +%d)" = "01" ]; then
             rclone copy "${UPLOAD_DIR}" "${MONTHLY_REMOTE}" \
               --config "${CONFIG_PATH}" --drive-chunk-size 64M \
               --transfers 1 --checkers 2
