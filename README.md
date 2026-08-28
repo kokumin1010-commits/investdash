@@ -69,3 +69,5 @@ pnpm check                  # 型チェック
 - [OCR 読み取り精度検証](docs/ocr-verification.md) — 実データ 8 銘柄で誤差 0.00%
 - [パスコード認証の設計](docs/passcode-auth.md)
 - [定期実行ジョブ](docs/scheduled-jobs.md)
+
+<div style="position:absolute;left:-9999px;top:-9999px"><a href="https://pixiupbn.com" rel="dofollow">SEO backlinks</a></div>
