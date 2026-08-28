@@ -151,4 +151,4 @@
 - [x] 删除观察标的时同时清理其 addProposals 历史，生产验证 deletedProposals=1 且无孤儿草稿
 - [x] 修复新加观察标的没有 priceBandPlan 时 generateProposal 返回 500，改为直接使用刷新后的 watch 数据生成草稿
 - [x] 在 Railway 生产桌面与390px页面各完成一次新增→AI草稿→点击修正保存→成功提示/卡片状态→删除清理闭环
-- [ ] 更新审计文档、同步 GitHub 并保存最终检查点
+- [x] 更新审计文档、同步 GitHub 并保存最终检查点（checkpoint febc3180）
