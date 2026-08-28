@@ -1685,6 +1685,12 @@ function PromoteDialog({ target, onClose }: { target: WatchRow | null; onClose: 
  * カード内に置くため全段は出さず「今どの段にいるか」と
  * 「次の段まであと何 %」だけに絞る。詳細は段を開いて確認する。
  */
+function compactJpy(value: number): string {
+  const man = value / 10_000;
+  const digits = man >= 100 ? 0 : 1;
+  return `${man.toLocaleString("ja-JP", { minimumFractionDigits: digits, maximumFractionDigits: digits })}万円`;
+}
+
 function WatchPlanSummary({ symbol, currency }: { symbol: string; currency: string }) {
   const utils = trpc.useUtils();
   const [open, setOpen] = useState(false);
@@ -1772,7 +1778,9 @@ function WatchPlanSummary({ symbol, currency }: { symbol: string; currency: stri
           <p className="text-[10px] text-muted-foreground">今回</p>
           {canBuy ? (
             <>
-              <MoneyText value={sizing.amountBase} currency="JPY" className="block truncate text-sm font-semibold" />
+              <p className="tabular whitespace-nowrap text-sm font-semibold" title={formatMoney(sizing.amountBase, "JPY")}>
+                {compactJpy(sizing.amountBase)}
+              </p>
               <p className="tabular text-[10px] text-muted-foreground">
                 {sizing.shares.toLocaleString("ja-JP")} 株
               </p>
@@ -1816,6 +1824,12 @@ function WatchPlanSummary({ symbol, currency }: { symbol: string; currency: stri
       {open ? (
         <div data-testid={`position-sizing-details-${symbol}`} className="space-y-2.5 border-t pt-2.5">
           <div className="grid grid-cols-2 gap-x-3 gap-y-2 rounded-md bg-background/70 p-2.5 text-[11px]">
+            <div>
+              <p className="text-muted-foreground">今回の実額</p>
+              <p className="tabular font-medium">
+                {formatMoney(sizing.amountBase, "JPY")}・{sizing.shares.toLocaleString("ja-JP")} 株
+              </p>
+            </div>
             <div>
               <p className="text-muted-foreground">現在の実保有</p>
               <p className="tabular font-medium">

@@ -282,6 +282,7 @@ describe("Watchlist proposal recovery", () => {
     expect(screen.getByText("今回")).toBeTruthy();
     expect(screen.getByText("買う価格")).toBeTruthy();
     expect(screen.getByText("買った後")).toBeTruthy();
+    expect(screen.getByText("479万円")).toBeTruthy();
     expect(screen.getByText("100 株")).toBeTruthy();
     expect(screen.getByText("現在 0.00%・未保有")).toBeTruthy();
     expect(screen.queryByText("現在の実保有")).toBeNull();
@@ -289,6 +290,7 @@ describe("Watchlist proposal recovery", () => {
     fireEvent.click(screen.getByRole("button", { name: "計算根拠を見る" }));
 
     expect(screen.getByText("現在の実保有")).toBeTruthy();
+    expect(screen.getByText(/4,790,000・100 株/)).toBeTruthy();
     expect(screen.getByText("0.00%（未保有）")).toBeTruthy();
     expect(screen.getByText("IBKR 主レバレッジ")).toBeTruthy();
     expect(screen.getByText("1.82x")).toBeTruthy();
