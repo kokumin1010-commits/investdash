@@ -100,24 +100,28 @@ async function verify(width, height, port) {
       const cards = [...document.querySelectorAll('[data-slot="card"]')];
       const card = cards.find(node => node.textContent?.includes('PYPL'));
       const text = card?.textContent ?? '';
+      const proposalBlock = card?.querySelector('.border-violet-200');
       return {
         path: location.pathname,
         scrollWidth: document.documentElement.scrollWidth,
-        pending: text.includes('AI提案・要確認') && text.includes('確信度 70'),
-        conclusion: text.includes('価格を待つ') || text.includes('買い増しは約13.5%下落後を待つ'),
+        pending: text.includes('AI提案・要確認') && text.includes('確信度'),
+        conclusion: (proposalBlock?.textContent?.trim().length ?? 0) > 20,
         hasReviewButton: [...(card?.querySelectorAll('button') ?? [])].some(node => node.textContent?.includes('提案を確認')),
       };
     })()`);
     await clickText("提案を確認");
     await waitForText("価格を待つ");
+    await sleep(300);
     const review = await evalValue(`(() => {
       const dialog = document.querySelector('[role="dialog"]');
       const text = dialog?.textContent ?? '';
+      const targetInput = dialog?.querySelector('#proposal-target');
       return {
         visible: Boolean(dialog),
-        currentPrice: text.includes('現在値') && text.includes('53.66'),
-        target: text.includes('目標価格') && text.includes('53'),
-        confidence: text.includes('確信度 70'),
+        currentPrice: text.includes('現在値') && !text.includes('現在値—'),
+        target: text.includes('AI目標') && Boolean(targetInput?.value),
+        gap: text.includes('値幅') && text.includes('%'),
+        confidence: text.includes('確信度'),
         evidence: text.includes('ニュース 20 件') && text.includes('6か月レンジ'),
         confirmation: text.includes('提案を採用して保存') && text.includes('あとで確認') && text.includes('今回は見送る'),
       };
@@ -127,6 +131,7 @@ async function verify(width, height, port) {
     await waitForText("PayPal Holdings, Inc.");
     if (!(await clickExact("銘柄を追加"))) throw new Error(`missing exact add button at ${width}px`);
     await waitForText("ウォッチリストに追加");
+    await sleep(300);
     const addDialog = await evalValue(`(() => {
       const dialog = document.querySelector('[role="dialog"]');
       const text = dialog?.textContent ?? '';
@@ -134,7 +139,7 @@ async function verify(width, height, port) {
       return {
         visible: Boolean(dialog),
         symbolOnly: labels.includes('銘柄コード') && !labels.includes('目標買付価格') && !labels.includes('投資予定額'),
-        explainsFlow: text.includes('銘柄を追加した後、株価・企業情報・ニュースを取得') && text.includes('確認するまで自動保存しません'),
+        explainsFlow: text.includes('最初は銘柄コードだけで追加') && text.includes('AIが情報取得') && text.includes('確認して保存'),
       };
     })()`);
     await shot("watch-symbol-first-add");

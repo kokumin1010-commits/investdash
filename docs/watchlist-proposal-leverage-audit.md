@@ -77,3 +77,20 @@ PYPL 真实提案在 16 秒内生成，stance WAIT、confidence 70、目标价 $
 提案确认截图发现一个需修复的数据一致性问题：卡片当前价约 $53.71、evidence.price $53.66，但确认框显示 `提案時 61.47`。确认页也没有独立醒目的“現在値”行，用户无法快速比较现在是否应该买。必须让草稿的 priceAtProposal 使用生成前刚刷新后的 watch 当前价，并在确认页并列显示当前价、AI 目标价和差值。
 
 新增对话框已只保留銘柄コード，没有目标价与预算输入；但 390px 截图的流程说明与背景卡片层级较拥挤。需要加强 dialog 实色背景、可读间距和分步说明，确保 underlying card 不干扰输入。
+
+## 最终 Railway 生产结果（aa8f97d）
+
+| 验收项 | 生产结果 |
+|---|---|
+| 0030 迁移 | addProposals 的 watchItemId、reviewStatus、confidence、buyConditions、evidence、confirmedAt 已上线 |
+| PYPL 真实提案 | 16 秒生成；WAIT、confidence 75、当前价 $53.66、AI目标 $48、价差 −10.5% |
+| 价格一致性 | priceAtProposal 53.66 = evidence.price 53.66 = watch 当前价 53.66 |
+| 确认前数据保护 | targetPrice、plannedAmount、watchReason、buyConditions 全部保持 null |
+| 真实依据 | 20 条新闻、6 个月区间、Financial Services/Credit Services、配当与株价取得时间 |
+| IBKR 主风险 | 1.82 倍、借入 ¥229,223,831、追証余地 −34.2%、年间利息 −¥3,961,737 |
+| 全体参考 | 1.18 倍，明确标记为 `全体レバレッジ（参考）` |
+| 自动化验证 | 119 个测试文件、1003 项测试，类型检查与生产构建通过 |
+
+390×844 与 1280×900 生产回归均通过。Dashboard 在 390px 显示 `借入（IBKR シンガポールのみ）` 和橙色 CAUTION，不再用全体 1.18 倍作为主风险；document scrollWidth 为 390。PYPL 确认框并列显示 `現在値 53.66 / AI目標 48 / 値幅 −10.5%`、株价取得时间、结论、理由、依据和采用/修改/稍后/见送操作。
+
+新增对话框使用实色背景并以三步显示 `銘柄を追加 → AIが情報取得 → 確認して保存`；只出现銘柄コード，不出现目标价与预算字段。真实 PENDING 提案保留给用户确认，没有替用户执行接受或修改。

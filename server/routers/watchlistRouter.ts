@@ -248,7 +248,7 @@ export const watchlistRouter = router({
     .mutation(async ({ ctx, input }) => {
       const removed = await db.deleteWatchItem(ctx.user.id, input.id);
       if (!removed) throw new TRPCError({ code: "NOT_FOUND", message: "銘柄が見つかりません" });
-      return { success: true } as const;
+      return { success: true, deletedProposals: removed.deletedProposals } as const;
     }),
 
   /**

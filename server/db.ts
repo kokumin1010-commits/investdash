@@ -1,6 +1,7 @@
 import { and, desc, eq, gte, inArray, lt, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
 import {
+  addProposals,
   holdings,
   importJobs,
   investmentCards,
@@ -656,8 +657,16 @@ export async function updateWatchItem(
 export async function deleteWatchItem(userId: number, id: number) {
   const db = await requireDb();
   const target = await getWatchItem(userId, id);
-  await db.delete(watchlist).where(and(eq(watchlist.userId, userId), eq(watchlist.id, id)));
-  return target;
+  if (!target) return null;
+  const deletedProposals = await db.transaction(async tx => {
+    const result = await tx
+      .delete(addProposals)
+      .where(and(eq(addProposals.userId, userId), eq(addProposals.watchItemId, id)));
+    await tx.delete(watchlist).where(and(eq(watchlist.userId, userId), eq(watchlist.id, id)));
+    const header = Array.isArray(result) ? result[0] : result;
+    return Number((header as { affectedRows?: number })?.affectedRows ?? 0);
+  });
+  return { target, deletedProposals };
 }
 
 /* ------------------------------- import jobs ------------------------------ */
