@@ -59,6 +59,7 @@ import {
   enrichProfileBatch,
   enrichProfiles,
   generateMissingSignalsBatch,
+  refreshStaleSignalsBatch,
   syncDividends,
   regenerateSignal,
   syncFxRate,
@@ -848,6 +849,17 @@ export const portfolioRouter = router({
         .default({ batchSize: 4, retryFailed: false })
     )
     .mutation(async ({ ctx, input }) => generateMissingSignalsBatch(ctx.user.id, input)),
+
+  refreshStaleSignals: protectedProcedure
+    .input(
+      z
+        .object({
+          batchSize: z.number().int().min(1).max(6).default(2),
+          retryFailed: z.boolean().default(false),
+        })
+        .default({ batchSize: 2, retryFailed: false })
+    )
+    .mutation(async ({ ctx, input }) => refreshStaleSignalsBatch(ctx.user.id, input)),
 
   generateMissingPriceBandPlans: protectedProcedure
     .input(

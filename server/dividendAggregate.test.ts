@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { buildMarketSlices } from "./services/marketSlices";
 import { isImplausibleYield, IMPLAUSIBLE_YIELD_PCT } from "./services/dividend";
+import { convertToJpy } from "./services/fx";
 
 /**
  * 配当の集計が「全体 = 市場別の合計」になることを検証する。
@@ -91,5 +92,19 @@ describe("isImplausibleYield", () => {
 
   it("利回りが未取得なら警告しない", () => {
     expect(isImplausibleYield(null)).toBe(false);
+  });
+});
+
+describe("年間配当の多通貨 JPY 換算", () => {
+  it("JPY/USD/SGD/HKD の税前年間受取額を同じ基準で合算する", () => {
+    const rates = { usdJpy: 150, sgdJpy: 110, hkdJpy: 19 };
+    const total = [
+      convertToJpy(1_000, "JPY", rates),
+      convertToJpy(10, "USD", rates),
+      convertToJpy(20, "SGD", rates),
+      convertToJpy(100, "HKD", rates),
+    ].reduce<number>((sum, value) => sum + (value ?? 0), 0);
+    expect(total).toBe(6_600);
+    expect(convertToJpy(10, "EUR", rates)).toBeNull();
   });
 });

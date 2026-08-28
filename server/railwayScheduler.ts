@@ -12,6 +12,8 @@ import { withSchedulerRunLog } from "./services/schedulerRunLog";
 import {
   enrichProfileBatch,
   generateMissingSignalsBatch,
+  refreshStaleSignalsBatch,
+  syncDividends,
   syncNewsForUser,
   syncPrices,
 } from "./services/portfolio";
@@ -27,11 +29,87 @@ let newsRunActive = false;
 let backfillRunActive = false;
 const profileOffsets = new Map<number, number>();
 export const RAILWAY_DATA_BACKFILL_CRON = "0,20,40 1-21 * * *";
+export const DATA_BACKFILL_STAGE_ORDER = [
+  "profile_backfill",
+  "dividend_backfill",
+  "signal_backfill",
+  "signal_refresh",
+  "price_band_plan_backfill",
+  "investment_card_backfill",
+  "band_check_backfill",
+  "news_coverage_backfill",
+  "band_check_news_refresh",
+] as const;
+
+export function summarizeDividendBackfill(value: {
+  processed: number;
+  updatedSymbols: string[];
+  failed: string[];
+  remaining: number;
+  processedSymbols: string[];
+  failureDetails: Array<{ symbol: string; reason: string }>;
+}) {
+  return {
+    processed: value.processed,
+    succeeded: value.updatedSymbols.length,
+    failed: value.failed.length,
+    remaining: value.remaining,
+    detail: {
+      processedSymbols: value.processedSymbols,
+      updatedSymbols: value.updatedSymbols,
+      failureDetails: value.failureDetails,
+    },
+  };
+}
+
+export function canRunStaleSignalRefresh(value: { quotaExhausted: boolean }): boolean {
+  return !value.quotaExhausted;
+}
+
+export function summarizeStaleSignalRefresh(value: {
+  processed: number;
+  refreshed: number;
+  failed: Array<{ symbol: string; reason: string }>;
+  remaining: number;
+  processedSymbols: string[];
+  staleReasons: Record<string, string[]>;
+  quotaExhausted: boolean;
+}) {
+  return {
+    processed: value.processed,
+    succeeded: value.refreshed,
+    failed: value.failed.length,
+    remaining: value.remaining,
+    detail: {
+      processedSymbols: value.processedSymbols,
+      failedSymbols: value.failed,
+      staleReasons: value.staleReasons,
+      quotaExhausted: value.quotaExhausted,
+    },
+  };
+}
+
+export async function runDividendAndSignalStages<
+  TDividend,
+  TSignals extends { quotaExhausted: boolean },
+  TStale,
+>(runners: {
+  dividend: () => Promise<TDividend>;
+  missingSignals: () => Promise<TSignals>;
+  staleSignals: () => Promise<TStale>;
+}): Promise<{ dividends: TDividend; signals: TSignals; staleSignals: TStale | null }> {
+  const dividends = await runners.dividend();
+  const signals = await runners.missingSignals();
+  const staleSignals = canRunStaleSignalRefresh(signals) ? await runners.staleSignals() : null;
+  return { dividends, signals, staleSignals };
+}
 
 type RailwayBackfillUserSummary = {
   userId: number;
   profilesUpdated: number;
   profileFailed: number;
+  dividendsUpdated: number;
+  dividendRemaining: number;
   signalsGenerated: number;
   signalRemaining: number;
   plansGenerated: number | null;
@@ -235,25 +313,48 @@ export async function runRailwayDataBackfill() {
         });
         profileOffsets.set(userId, profiles.nextOffset ?? 0);
 
-        const signals = await withSchedulerRunLog({
-          userId,
-          kind: "signal_backfill",
-          trigger: "SCHEDULED",
-          run: () =>
-            generateMissingSignalsBatch(userId, {
-              batchSize: 4,
-              retryFailed: false,
+        const { dividends, signals, staleSignals } = await runDividendAndSignalStages({
+          dividend: () =>
+            withSchedulerRunLog({
+              userId,
+              kind: "dividend_backfill",
+              trigger: "SCHEDULED",
+              run: () => syncDividends(userId, { offset: 0, batchSize: 1 }),
+              summarize: summarizeDividendBackfill,
             }),
-          summarize: value => ({
-            processed: value.processed,
-            succeeded: value.generated,
-            failed: value.failed.length,
-            remaining: value.remaining,
-            detail: {
-              failedSymbols: value.failed,
-              quotaExhausted: value.quotaExhausted,
-            },
-          }),
+          missingSignals: () =>
+            withSchedulerRunLog({
+              userId,
+              kind: "signal_backfill",
+              trigger: "SCHEDULED",
+              run: () =>
+                generateMissingSignalsBatch(userId, {
+                  batchSize: 4,
+                  retryFailed: false,
+                }),
+              summarize: value => ({
+                processed: value.processed,
+                succeeded: value.generated,
+                failed: value.failed.length,
+                remaining: value.remaining,
+                detail: {
+                  failedSymbols: value.failed,
+                  quotaExhausted: value.quotaExhausted,
+                },
+              }),
+            }),
+          staleSignals: () =>
+            withSchedulerRunLog({
+              userId,
+              kind: "signal_refresh",
+              trigger: "SCHEDULED",
+              run: () =>
+                refreshStaleSignalsBatch(userId, {
+                  batchSize: 1,
+                  retryFailed: false,
+                }),
+              summarize: summarizeStaleSignalRefresh,
+            }),
         });
         const plans = signals.quotaExhausted
           ? null
@@ -361,12 +462,14 @@ export async function runRailwayDataBackfill() {
               });
 
         console.log(
-          `[Railway scheduler] backfill user=${userId} profiles=${profiles.updated}/${profiles.processed} profileFailed=${profiles.failed.length} signals=${signals.generated}/${signals.processed} signalRemaining=${signals.remaining} plans=${plans ? `${plans.generated}/${plans.processed}` : "quota-skipped"} planRemaining=${plans?.remaining ?? "unknown"} cards=${cards ? `${cards.created}/${cards.processed}` : "quota-skipped"} cardRemaining=${cards?.remaining ?? "unknown"} bandChecks=${bandChecks ? `${bandChecks.checked}/${bandChecks.processed}` : "quota-skipped"} bandCheckRemaining=${bandChecks?.remaining ?? "unknown"} newsCoverage=${newsCoverage.fetched}/${newsCoverage.processed} newsBacklog=${newsCoverage.remainingBacklog} bandRechecks=${bandRechecks ? `${bandRechecks.checked}/${bandRechecks.processed}` : "quota-skipped"}`
+          `[Railway scheduler] backfill user=${userId} profiles=${profiles.updated}/${profiles.processed} profileFailed=${profiles.failed.length} dividends=${dividends.updatedSymbols.length}/${dividends.processed} dividendRemaining=${dividends.remaining} signals=${signals.generated}/${signals.processed} signalRemaining=${signals.remaining} signalRefresh=${staleSignals ? `${staleSignals.refreshed}/${staleSignals.processed}` : "quota-skipped"} signalRefreshRemaining=${staleSignals?.remaining ?? "unknown"} plans=${plans ? `${plans.generated}/${plans.processed}` : "quota-skipped"} planRemaining=${plans?.remaining ?? "unknown"} cards=${cards ? `${cards.created}/${cards.processed}` : "quota-skipped"} cardRemaining=${cards?.remaining ?? "unknown"} bandChecks=${bandChecks ? `${bandChecks.checked}/${bandChecks.processed}` : "quota-skipped"} bandCheckRemaining=${bandChecks?.remaining ?? "unknown"} newsCoverage=${newsCoverage.fetched}/${newsCoverage.processed} newsBacklog=${newsCoverage.remainingBacklog} bandRechecks=${bandRechecks ? `${bandRechecks.checked}/${bandRechecks.processed}` : "quota-skipped"}`
         );
         summaries.push({
           userId,
           profilesUpdated: profiles.updated,
           profileFailed: profiles.failed.length,
+          dividendsUpdated: dividends.updatedSymbols.length,
+          dividendRemaining: dividends.remaining,
           signalsGenerated: signals.generated,
           signalRemaining: signals.remaining,
           plansGenerated: plans?.generated ?? null,
@@ -382,6 +485,8 @@ export async function runRailwayDataBackfill() {
           userId,
           profilesUpdated: 0,
           profileFailed: 0,
+          dividendsUpdated: 0,
+          dividendRemaining: -1,
           signalsGenerated: 0,
           signalRemaining: -1,
           plansGenerated: null,

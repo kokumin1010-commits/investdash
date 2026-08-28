@@ -3,6 +3,11 @@ import {
   getNewsBatchForUtcDate,
   RAILWAY_NEWS_SCHEDULE,
   RAILWAY_DATA_BACKFILL_CRON,
+  DATA_BACKFILL_STAGE_ORDER,
+  canRunStaleSignalRefresh,
+  summarizeDividendBackfill,
+  summarizeStaleSignalRefresh,
+  runDividendAndSignalStages,
   runRailwayScheduledTaskSafely,
   shouldStartRailwayScheduler,
 } from "./railwayScheduler";
@@ -60,5 +65,57 @@ describe("Railway news schedule", () => {
       error
     );
     consoleError.mockRestore();
+  });
+
+  it("runs dividend before missing/stale signals and skips stale refresh after quota exhaustion", () => {
+    expect(DATA_BACKFILL_STAGE_ORDER.indexOf("dividend_backfill")).toBeLessThan(
+      DATA_BACKFILL_STAGE_ORDER.indexOf("signal_refresh")
+    );
+    expect(canRunStaleSignalRefresh({ quotaExhausted: false })).toBe(true);
+    expect(canRunStaleSignalRefresh({ quotaExhausted: true })).toBe(false);
+  });
+
+  it("summarizes dividend and stale signal runs for persistent operations logs", () => {
+    expect(
+      summarizeDividendBackfill({
+        processed: 2,
+        updatedSymbols: ["AAA"],
+        failed: ["BBB"],
+        remaining: 3,
+        processedSymbols: ["AAA", "BBB"],
+        failureDetails: [{ symbol: "BBB", reason: "currency mismatch" }],
+      })
+    ).toMatchObject({ processed: 2, succeeded: 1, failed: 1, remaining: 3 });
+    expect(
+      summarizeStaleSignalRefresh({
+        processed: 1,
+        refreshed: 1,
+        failed: [],
+        remaining: 4,
+        processedSymbols: ["AAA"],
+        staleReasons: { AAA: ["NEW_NEWS"] },
+        quotaExhausted: false,
+      })
+    ).toMatchObject({ processed: 1, succeeded: 1, failed: 0, remaining: 4 });
+  });
+
+  it("executes the real dividend/signal stage flow in order and skips stale refresh on quota", async () => {
+    const order: string[] = [];
+    const first = await runDividendAndSignalStages({
+      dividend: async () => { order.push("dividend"); return { updated: 1 }; },
+      missingSignals: async () => { order.push("missing"); return { quotaExhausted: false }; },
+      staleSignals: async () => { order.push("stale"); return { refreshed: 1 }; },
+    });
+    expect(order).toEqual(["dividend", "missing", "stale"]);
+    expect(first.staleSignals).toEqual({ refreshed: 1 });
+
+    order.length = 0;
+    const quota = await runDividendAndSignalStages({
+      dividend: async () => { order.push("dividend"); return { updated: 1 }; },
+      missingSignals: async () => { order.push("missing"); return { quotaExhausted: true }; },
+      staleSignals: async () => { order.push("stale"); return { refreshed: 1 }; },
+    });
+    expect(order).toEqual(["dividend", "missing"]);
+    expect(quota.staleSignals).toBeNull();
   });
 });

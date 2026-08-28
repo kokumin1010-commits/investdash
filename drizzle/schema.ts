@@ -321,6 +321,16 @@ export const signals = mysqlTable(
     ]),
     /** 上の判断の理由 */
     priceVsValueReason: text("priceVsValueReason"),
+    /** 判定材料の充足度。AI 自己申告ではなくサーバー側で算出する */
+    dataQuality: mysqlEnum("dataQuality", ["STRONG", "MODERATE", "LIMITED"]),
+    /** 次に判定を見直す具体条件（最大3件） */
+    reviewTriggers: json("reviewTriggers").$type<string[]>(),
+    /** 現在確認できる主要リスク（最大3件） */
+    riskFlags: json("riskFlags").$type<string[]>(),
+    /** 通常の再確認期限。ニュース・カード・価格変化ではこれより前にも stale になる */
+    validUntil: timestamp("validUntil"),
+    /** 古い出力契約を自動更新できるようにする schema version */
+    schemaVersion: int("schemaVersion").default(1).notNull(),
     /** 生成時点の価格・損益率スナップショット */
     priceAtSignal: decimal("priceAtSignal", { precision: 20, scale: 4 }),
     pnlPctAtSignal: decimal("pnlPctAtSignal", { precision: 10, scale: 4 }),

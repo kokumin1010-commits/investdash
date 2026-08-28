@@ -27,6 +27,8 @@ const KIND_LABELS: Record<string, string> = {
   news_sync: "ニュース同期",
   profile_backfill: "企業情報補完",
   signal_backfill: "保有判断補完",
+  signal_refresh: "期限切れシグナル再分析",
+  dividend_backfill: "年間配当更新",
   price_band_plan_backfill: "価格帯プラン補完",
   investment_card_backfill: "投資カード補完",
   band_check_backfill: "価格帯確認",
@@ -281,7 +283,7 @@ export default function Operations() {
         </>
       )}
 
-      <p className="mt-5 text-xs leading-5 text-muted-foreground">投資カードと価格帯確認は不足分だけを小分けで処理します。AI 利用枠に達した場合は既存データを残して中断し、冷却後に自動で再開します。</p>
+      <p className="mt-5 text-xs leading-5 text-muted-foreground">年間配当・投資カード・価格帯確認・期限切れシグナルは対象分だけを小分けで処理します。AI 利用枠や外部データ取得エラーに達した場合は既存データを残して中断し、冷却後に自動で再開します。</p>
     </main>
   );
 }

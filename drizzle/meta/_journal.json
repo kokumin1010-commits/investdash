@@ -204,6 +204,13 @@
       "when": 1787763538697,
       "tag": "0028_lively_earthquake",
       "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "5",
+      "when": 1787943065869,
+      "tag": "0029_chilly_ultimatum",
+      "breakpoints": true
     }
   ]
 }

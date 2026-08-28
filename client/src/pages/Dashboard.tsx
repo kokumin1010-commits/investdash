@@ -3,6 +3,11 @@ import { BrokerBadge } from "@/components/investing/BrokerBadge";
 import { CurrencyToggle } from "@/components/investing/CurrencyToggle";
 import { DisclaimerNote } from "@/components/investing/DisclaimerNote";
 import { SignalBadge } from "@/components/investing/SignalBadge";
+import {
+  DashboardDividendSummary,
+  DashboardSignalActionSelector,
+  DashboardSignalStatsStrip,
+} from "@/components/investing/DashboardDividendSignalSummary";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -12,7 +17,6 @@ import { trpc } from "@/lib/trpc";
 import { useBatchRun } from "@/hooks/useBatchRun";
 import {
   SECTOR_COLORS,
-  SIGNAL_ACTIONS,
   MARGIN_RISK_LABELS,
   MARGIN_RISK_STYLES,
   CARRY_VERDICT_LABELS,
@@ -260,6 +264,25 @@ export default function Dashboard() {
       if (p.signal) counts.set(p.signal.action, (counts.get(p.signal.action) ?? 0) + 1);
     });
     return counts;
+  }, [data]);
+
+  const signalStats = useMemo(() => {
+    const signals = (data?.groups ?? []).flatMap(group => (group.signal ? [group.signal] : []));
+    const confidenceValues = signals
+      .map(signal => signal.confidence)
+      .filter((value): value is number => value !== null);
+    return {
+      total: data?.groups.length ?? 0,
+      judged: signals.length,
+      stale: signals.filter(signal => signal.freshness.isStale).length,
+      averageConfidence:
+        confidenceValues.length > 0
+          ? confidenceValues.reduce((sum, value) => sum + value, 0) / confidenceValues.length
+          : null,
+      strong: signals.filter(signal => signal.dataQuality === "STRONG").length,
+      moderate: signals.filter(signal => signal.dataQuality === "MODERATE").length,
+      limited: signals.filter(signal => signal.dataQuality === "LIMITED").length,
+    };
   }, [data]);
 
   /**
@@ -789,14 +812,15 @@ export default function Dashboard() {
             <StatCard
               label="年間配当（税引前）"
               valueNode={
-                <span className="whitespace-nowrap text-2xl font-semibold text-gain">
-                  {dividends && dividends.annualIncomeBase > 0
-                    ? money(dividends.annualIncomeBase)
-                    : "—"}
-                </span>
+                <DashboardDividendSummary
+                  annualIncomeBase={dividends?.annualIncomeBase ?? 0}
+                  unknownCount={dividends?.unknownCount ?? (data?.groups.length ?? 0)}
+                  totalSymbols={data?.groups.length ?? 0}
+                  formatMoney={money}
+                />
               }
               sub={
-                dividends && dividends.annualIncomeBase > 0 ? (
+                dividends && dividends.unknownCount < (data?.groups.length ?? 0) ? (
                   <span className="block space-y-1">
                     <span className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
                       <span className="tabular font-medium">
@@ -892,7 +916,7 @@ export default function Dashboard() {
                   </span>
                 ) : (
                   <span className="text-[11px] text-muted-foreground">
-                    「配当更新」を実行すると年間の受取額を計算します
+                    「配当更新」を実行すると実際の配当履歴から年間受取額を計算します
                   </span>
                 )
               }
@@ -912,31 +936,17 @@ export default function Dashboard() {
                   </p>
                 ) : (
                   <div className="space-y-2">
+                    <DashboardSignalStatsStrip stats={signalStats} />
                     {/*
                       件数のバッジはタブとして機能させる。
                       以前は数字だけで押しても何も起きず、どの銘柄が ADD なのか
                       分からないまま保有一覧を開いて探す必要があった。
                     */}
-                    <div className="flex flex-wrap gap-1.5">
-                      {SIGNAL_ACTIONS.filter(a => (signalCounts.get(a) ?? 0) > 0).map(a => (
-                        <button
-                          key={a}
-                          type="button"
-                          onClick={() => setOpenSignal(a)}
-                          aria-pressed={activeSignal === a}
-                          className={`flex min-h-7 items-center gap-1 rounded-md px-1.5 py-0.5 transition-all duration-150 active:scale-[0.97] ${
-                            activeSignal === a
-                              ? "bg-accent ring-1 ring-border"
-                              : "hover:bg-accent/50"
-                          }`}
-                        >
-                          <SignalBadge action={a} />
-                          <span className="tabular text-sm font-medium">
-                            {signalCounts.get(a)}
-                          </span>
-                        </button>
-                      ))}
-                    </div>
+                    <DashboardSignalActionSelector
+                      counts={signalCounts}
+                      active={activeSignal}
+                      onSelect={setOpenSignal}
+                    />
 
                     {/* 選んだシグナルの銘柄。評価額の大きい順（検討の優先度が高い順） */}
                     {activeSignal ? (
@@ -947,9 +957,21 @@ export default function Dashboard() {
                             href={`/holdings?symbol=${encodeURIComponent(g.symbol)}`}
                             className="flex items-center justify-between gap-2 rounded px-1 py-1 transition-colors hover:bg-accent/50"
                           >
-                            <span className="truncate text-xs">{g.name}</span>
-                            <span className="tabular shrink-0 text-xs text-muted-foreground">
-                              {g.marketValueBase !== null ? money(g.marketValueBase) : "—"}
+                            <span className="min-w-0">
+                              <span className="block truncate text-xs">{g.name}</span>
+                              {g.signal?.reviewTriggers[0] ? (
+                                <span className="block truncate text-[10px] text-muted-foreground">
+                                  次の確認: {g.signal.reviewTriggers[0]}
+                                </span>
+                              ) : null}
+                            </span>
+                            <span className="shrink-0 text-right">
+                              <span className="block tabular text-xs text-muted-foreground">
+                                {g.marketValueBase !== null ? money(g.marketValueBase) : "—"}
+                              </span>
+                              <span className={`block text-[10px] ${g.signal?.freshness.isStale ? "text-amber-700" : "text-muted-foreground"}`}>
+                                確信 {g.signal?.confidence ?? "—"}{g.signal?.freshness.isStale ? "・再分析待ち" : ""}
+                              </span>
                             </span>
                           </Link>
                         ))}

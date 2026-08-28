@@ -106,7 +106,10 @@ describe("generateSignal", () => {
     const result = await generateSignal(baseContext({ news: [], card: null }));
 
     expect(result.action).toBe("HOLD");
-    expect(result.confidence).toBe(62);
+    expect(result.confidence).toBe(55);
+    expect(result.dataQuality).toBe("LIMITED");
+    expect(result.reviewTriggers).toEqual([]);
+    expect(result.riskFlags).toEqual([]);
     expect(invokeLLM).toHaveBeenCalledOnce();
 
     // ニュース 0 件でもプロンプトが渡っていること
@@ -114,9 +117,9 @@ describe("generateSignal", () => {
     expect(sent.messages[1].content).toContain("直近のニュースは取得されていません");
   });
 
-  it("confidence が範囲外でも 0〜100 に収める", async () => {
+  it("confidence が範囲外でも 0〜資料品質上限に収める", async () => {
     mockResponse({ action: "WATCH", confidence: 140, rationale: "テスト", factors: [] });
-    expect((await generateSignal(baseContext())).confidence).toBe(100);
+    expect((await generateSignal(baseContext())).confidence).toBe(55);
 
     mockResponse({ action: "WATCH", confidence: -20, rationale: "テスト", factors: [] });
     expect((await generateSignal(baseContext())).confidence).toBe(0);
@@ -142,7 +145,7 @@ describe("generateSignal", () => {
 
     const result = await generateSignal(baseContext());
     expect(result.action).toBe("REDUCE");
-    expect(result.confidence).toBe(70);
+    expect(result.confidence).toBe(55);
   });
 
   it("LLM 側の失敗はそのまま伝播する（上位でメッセージ変換する設計）", async () => {

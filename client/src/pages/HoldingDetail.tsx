@@ -10,6 +10,11 @@ import {
 } from "@/components/investing/WouldBuyNowBadge";
 import { AddAmountLine } from "@/components/investing/AddAmountLine";
 import { PriceBandPlanCard } from "@/components/investing/PriceBandPlanCard";
+import {
+  HoldingDurationSummary,
+  SignalDecisionMeta,
+  SignalQualityBadges,
+} from "@/components/investing/HoldingDecisionMeta";
 import { SymbolConsultList } from "@/components/investing/SymbolConsultList";
 import { AdviceRecordCard } from "@/components/investing/AdviceRecordCard";
 import { Badge } from "@/components/ui/badge";
@@ -64,6 +69,39 @@ import {
 } from "recharts";
 import { toast } from "sonner";
 import { Link, useLocation } from "wouter";
+
+function holdingDurationText(days: number): string {
+  if (days < 31) return `${days}日`;
+  if (days < 365) return `${Math.floor(days / 30)}か月`;
+  const years = Math.floor(days / 365);
+  const months = Math.floor((days % 365) / 30);
+  return months > 0 ? `${years}年${months}か月` : `${years}年`;
+}
+
+function holdingDurationBasis(confidence: "EXACT" | "AT_LEAST" | "TRACKED_SINCE"): string {
+  return confidence === "EXACT" ? "正確" : confidence === "AT_LEAST" ? "少なくとも" : "記録開始から";
+}
+
+function holdingDurationSource(source: string): string {
+  if (source === "USER_CONFIRMED") return "ユーザー確認";
+  if (source === "BROKER_TRADE") return "取引履歴";
+  if (source === "MONTHLY_SNAPSHOT") return "月次記録";
+  return "システム記録";
+}
+
+const DATA_QUALITY_LABELS = {
+  STRONG: "材料充足",
+  MODERATE: "材料あり",
+  LIMITED: "材料限定",
+} as const;
+
+const STALE_REASON_LABELS = {
+  SCHEMA: "新しい分析形式で再判定が必要",
+  EXPIRED: "通常の再確認期限を経過",
+  NEW_NEWS: "分析後に新しいニュースあり",
+  CARD_UPDATED: "分析後に投資カード更新あり",
+  PRICE_MOVE: "分析時から株価が10%以上変動",
+} as const;
 
 export default function HoldingDetail({ params }: { params: { id: string } }) {
   const id = Number(params.id);
@@ -282,7 +320,7 @@ export default function HoldingDetail({ params }: { params: { id: string } }) {
 
       {/* ポジションサマリー */}
       <Card>
-        <CardContent className="grid gap-x-6 gap-y-4 py-5 sm:grid-cols-3 lg:grid-cols-6">
+        <CardContent className="grid gap-x-6 gap-y-4 py-5 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-7">
           <Metric label="保有株数" value={`${formatNumber(Number(holding.quantity), 0)} 株`} />
           {/*
             単価は換算しない。板に出る値段と一致していないと
@@ -351,6 +389,10 @@ export default function HoldingDetail({ params }: { params: { id: string } }) {
                 : undefined
             }
           />
+          <Metric
+            label="保有期間"
+            node={<HoldingDurationSummary duration={view?.holdingDuration ?? null} />}
+          />
         </CardContent>
       </Card>
 
@@ -364,6 +406,7 @@ export default function HoldingDetail({ params }: { params: { id: string } }) {
                 AI 意思決定シグナル
               </CardTitle>
               <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                <SignalQualityBadges signal={view.signal} />
                 <span>確信度 {view.signal.confidence ?? "—"}</span>
                 <span>·</span>
                 <span>{new Date(view.signal.createdAt).toLocaleString("ja-JP")}</span>
@@ -375,6 +418,8 @@ export default function HoldingDetail({ params }: { params: { id: string } }) {
               <SignalBadge action={view.signal.action} showLabel className="mt-0.5 shrink-0" />
               <p className="text-sm leading-relaxed">{view.signal.rationale}</p>
             </div>
+
+            <SignalDecisionMeta signal={view.signal} />
 
             {/*
               「今この株を持っていなかったら買うか」と

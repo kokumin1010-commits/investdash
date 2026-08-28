@@ -220,6 +220,12 @@ export type SignalResult = {
   priceVsValue?: "PRICE_AHEAD" | "VALUE_AHEAD" | "IN_LINE" | "UNKNOWN";
   /** 上の判断の理由を 1〜2 文で */
   priceVsValueReason?: string;
+  /** サーバーが入力の充足度から算出する。モデルの自己申告にはしない */
+  dataQuality: "STRONG" | "MODERATE" | "LIMITED";
+  /** 次に判定を見直す具体条件（最大3件） */
+  reviewTriggers: string[];
+  /** 現在の材料から確認できる主要リスク（最大3件） */
+  riskFlags: string[];
   factors: {
     newsSentiment: string;
     priceAction: string;
@@ -287,6 +293,14 @@ const SIGNAL_SYSTEM = `あなたは長期投資を前提とする個人投資家
    - 投資カード記入済み + 影響度の高いニュースあり → 70〜90
    - 投資カード未記入だが影響度の高いニュースあり → 45〜65
    - 投資カード未記入・ニュースも乏しい → 40 未満
+12. WATCH は「具体的に未解決の確認事項」または「好悪材料が衝突している」ときだけ使う。
+   投資ロジックが維持され、材料が揃い、今すぐ行動する根拠が無い場合は HOLD とする。
+   単に一部データが無いことだけを理由に全銘柄を WATCH に寄せてはならない。
+13. reviewTriggers は、次回に確認できる具体条件を 1〜3 件書く。例: 決算で通期見通しが
+   下方修正された時、52週高値を更新した時、投資カードのエグジット条件に該当した時。
+   「注視する」「様子を見る」だけの抽象表現は禁止する。
+14. riskFlags は入力資料から確認できる現在の主要リスクを 0〜3 件書く。根拠が無いリスクを
+   一般論で追加しない。該当しない場合は空配列にする。
 
 rationale は日本語 3〜5 文。**冒頭で「今この株を持っていなかったらこの値段で
 買うか」への答えを述べ**、その後に理由と次に確認すべき点を書く。
@@ -316,6 +330,16 @@ const SIGNAL_SCHEMA = {
           enum: ["PRICE_AHEAD", "VALUE_AHEAD", "IN_LINE", "UNKNOWN"],
         },
         priceVsValueReason: { type: "string" },
+        reviewTriggers: {
+          type: "array",
+          maxItems: 3,
+          items: { type: "string" },
+        },
+        riskFlags: {
+          type: "array",
+          maxItems: 3,
+          items: { type: "string" },
+        },
         factors: {
           type: "object",
           properties: {
@@ -343,6 +367,8 @@ const SIGNAL_SCHEMA = {
         "wouldBuyNowReason",
         "priceVsValue",
         "priceVsValueReason",
+        "reviewTriggers",
+        "riskFlags",
         "factors",
       ],
       additionalProperties: false,
@@ -457,6 +483,52 @@ ${newsLines}
 以上の材料のみに基づいて、シグナルを判定してください。`;
 }
 
+export const SIGNAL_SCHEMA_VERSION = 2;
+
+/**
+ * モデルの confidence をそのまま信用しない。入力の実際の充足度をサーバー側で
+ * 判定し、材料が少ないときは上限を下げる。
+ */
+export function assessSignalDataQuality(
+  ctx: SignalContext
+): "STRONG" | "MODERATE" | "LIMITED" {
+  const cardValues = ctx.card
+    ? [
+        ctx.card.buyReason,
+        ctx.card.coreThesis,
+        ctx.card.valuationAssumption,
+        ctx.card.keyFinancials,
+        ctx.card.exitConditions,
+        ctx.card.risks,
+      ]
+    : [];
+  const cardFilled = cardValues.filter(value => typeof value === "string" && value.trim()).length;
+  const analyzedNews = ctx.news.filter(
+    item => item.sentiment !== null && item.impactScore !== null
+  ).length;
+  const hasPriceSet =
+    ctx.currentPrice !== null &&
+    ctx.fiftyTwoWeekHigh !== null &&
+    ctx.fiftyTwoWeekLow !== null &&
+    ctx.longTerm !== null &&
+    ctx.longTerm !== undefined;
+  const hasCompanyProfile = Boolean(ctx.businessSummary?.trim() && ctx.sector && ctx.industry);
+
+  if (cardFilled >= 4 && analyzedNews >= 1 && hasPriceSet && hasCompanyProfile) return "STRONG";
+  if (cardFilled >= 2 && ctx.currentPrice !== null && (analyzedNews >= 1 || hasCompanyProfile)) {
+    return "MODERATE";
+  }
+  return "LIMITED";
+}
+
+function normalizeSignalList(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .filter((item): item is string => typeof item === "string" && item.trim().length > 0)
+    .map(item => item.trim().slice(0, 240))
+    .slice(0, 3);
+}
+
 export async function generateSignal(ctx: SignalContext): Promise<SignalResult> {
   const res = await invokeLLM({
     model: ANALYSIS_MODEL,
@@ -469,10 +541,15 @@ export async function generateSignal(ctx: SignalContext): Promise<SignalResult> 
   });
 
   const text = res.choices?.[0]?.message?.content;
-  const parsed = parseLlmJson<SignalResult>(text, "シグナルの応答");
+  const parsed = parseLlmJson<Omit<SignalResult, "dataQuality">>(text, "シグナルの応答");
+  const dataQuality = assessSignalDataQuality(ctx);
+  const confidenceCap = dataQuality === "STRONG" ? 100 : dataQuality === "MODERATE" ? 75 : 55;
   return {
     ...parsed,
-    confidence: Math.max(0, Math.min(100, Math.round(parsed.confidence))),
+    confidence: Math.max(0, Math.min(confidenceCap, Math.round(parsed.confidence))),
+    dataQuality,
+    reviewTriggers: normalizeSignalList(parsed.reviewTriggers),
+    riskFlags: normalizeSignalList(parsed.riskFlags),
   };
 }
 
