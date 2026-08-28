@@ -201,6 +201,7 @@ export async function generateWatchProposalDraft(
       watchItemId: refreshed.id,
       reviewStatus: "PENDING",
       evidence,
+      priceAtProposal: evidence.price,
     });
     return {
       ...proposal,

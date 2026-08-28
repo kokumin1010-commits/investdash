@@ -1307,7 +1307,7 @@ export function WatchFormDialog({
         onOpenChange(o);
       }}
     >
-      <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-lg">
+      <DialogContent className="max-h-[90vh] overflow-y-auto border-slate-200 bg-white text-slate-950 shadow-2xl dark:border-slate-800 dark:bg-slate-950 dark:text-slate-50 sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>{isEdit ? "ウォッチ銘柄を編集" : "ウォッチリストに追加"}</DialogTitle>
           <DialogDescription>
@@ -1316,6 +1316,14 @@ export function WatchFormDialog({
               : "最初は銘柄コードだけで追加できます。追加後、AI の下書きを確認してから目標価格や買付条件を保存します。"}
           </DialogDescription>
         </DialogHeader>
+
+        {!isEdit ? (
+          <div className="grid grid-cols-3 gap-2 rounded-xl border bg-slate-50 p-3 text-center text-[11px] dark:bg-slate-900/70">
+            <span><b className="block text-sm text-primary">1</b>銘柄を追加</span>
+            <span><b className="block text-sm text-primary">2</b>AIが情報取得</span>
+            <span><b className="block text-sm text-primary">3</b>確認して保存</span>
+          </div>
+        ) : null}
 
         <div className="space-y-4">
           {!isEdit ? (

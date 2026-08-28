@@ -69,6 +69,12 @@ describe("WatchProposalReviewDialog", () => {
     expect(screen.getByText("AI提案・要確認")).toBeTruthy();
     expect(screen.getByText("価格を待つ")).toBeTruthy();
     expect(screen.getByText("確信度 72")).toBeTruthy();
+    expect(screen.getByText("現在値")).toBeTruthy();
+    expect(screen.getByText("AI目標")).toBeTruthy();
+    expect(screen.getByText("53.71")).toBeTruthy();
+    expect(screen.getAllByText("48").length).toBeGreaterThan(0);
+    expect(screen.getByText("-10.6%")).toBeTruthy();
+    expect(screen.getByText(/株価取得/)).toBeTruthy();
     expect(screen.getByText("ニュース 4 件")).toBeTruthy();
     expect(screen.getByRole("button", { name: "あとで確認" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "今回は見送る" })).toBeTruthy();

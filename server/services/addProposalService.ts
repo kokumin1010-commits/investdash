@@ -161,6 +161,7 @@ export async function generateProposal(
     watchItemId?: number;
     reviewStatus?: "PENDING";
     evidence?: unknown;
+    priceAtProposal?: number | null;
   } = {}
 ): Promise<{
   id: number;
@@ -170,6 +171,7 @@ export async function generateProposal(
   rationale: string;
   amountBase: number | null;
   limitPrice: number | null;
+  priceAtProposal: number | null;
   buyConditions: string;
   invalidation: string | null;
   confidence: number;
@@ -183,11 +185,14 @@ export async function generateProposal(
 
   const ctx = await buildConsultContext(userId, symbol);
 
+  const currentPrice = options.priceAtProposal !== undefined
+    ? options.priceAtProposal
+    : row.currentPrice;
   const target: ProposalTarget = {
     symbol: row.symbol,
     name: row.name,
     currency: row.currency,
-    currentPrice: row.currentPrice,
+    currentPrice,
     held: row.held,
     bandLabel: row.actionLabel,
     nextGapPct: row.nextGapPct,
@@ -221,7 +226,7 @@ export async function generateProposal(
     rationale: result.draft.rationale,
     amountBase: result.draft.amountBase !== null ? String(result.draft.amountBase) : null,
     limitPrice: result.draft.limitPrice !== null ? String(result.draft.limitPrice) : null,
-    priceAtProposal: row.currentPrice !== null ? String(row.currentPrice) : null,
+    priceAtProposal: currentPrice !== null ? String(currentPrice) : null,
     sharePctAtProposal:
       result.sizing !== null ? String(result.sizing.currentSharePct.toFixed(4)) : null,
     invalidation: result.draft.invalidation,
@@ -252,6 +257,7 @@ export async function generateProposal(
     rationale: result.draft.rationale,
     amountBase: result.draft.amountBase,
     limitPrice: result.draft.limitPrice,
+    priceAtProposal: currentPrice,
     buyConditions: result.draft.buyConditions,
     invalidation: result.draft.invalidation,
     confidence: result.draft.confidence,

@@ -36,6 +36,7 @@ describe("generateWatchProposalDraft", () => {
       rationale: "利益率改善を確認する。",
       amountBase: null,
       limitPrice: 48,
+      priceAtProposal: 53.8,
       buyConditions: "48ドル以下かつ利益率改善",
       invalidation: "次回決算で悪化",
       confidence: 72,
@@ -77,6 +78,7 @@ describe("generateWatchProposalDraft", () => {
     });
 
     expect(result.id).toBe(91);
+    expect(result.priceAtProposal).toBe(53.8);
     expect(result.evidence).toEqual(
       expect.objectContaining({
         price: 53.8,
@@ -104,6 +106,7 @@ describe("generateWatchProposalDraft", () => {
       expect.objectContaining({
         watchItemId: 7,
         reviewStatus: "PENDING",
+        priceAtProposal: 53.8,
         evidence: expect.objectContaining({ newsCount: 1 }),
       })
     );

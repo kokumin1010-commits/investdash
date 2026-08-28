@@ -118,14 +118,15 @@ export function WatchProposalReviewDialog({
 
   const currentTarget = asNumber(targetPrice);
   const currentAmount = asNumber(plannedAmount);
+  const currentPrice = proposal.evidence?.price ?? proposal.priceAtProposal;
   const edited =
     currentTarget !== proposal.limitPrice ||
     currentAmount !== proposal.amountBase ||
     watchReason.trim() !== proposal.rationale ||
     buyConditions.trim() !== defaultConditions;
   const gap =
-    proposal.priceAtProposal !== null && proposal.limitPrice !== null && proposal.priceAtProposal > 0
-      ? ((proposal.limitPrice - proposal.priceAtProposal) / proposal.priceAtProposal) * 100
+    currentPrice !== null && proposal.limitPrice !== null && currentPrice > 0
+      ? ((proposal.limitPrice - currentPrice) / currentPrice) * 100
       : null;
 
   return (
@@ -161,6 +162,32 @@ export function WatchProposalReviewDialog({
             <p className="mt-2 text-xs leading-relaxed text-muted-foreground">{proposal.rationale}</p>
           </div>
 
+          <div className="grid grid-cols-3 gap-2 rounded-xl border bg-background p-3 text-center">
+            <div>
+              <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">現在値</p>
+              <p className="mt-1 tabular text-sm font-semibold">
+                {currentPrice?.toLocaleString("ja-JP") ?? "—"}
+              </p>
+            </div>
+            <div className="border-x px-2">
+              <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">AI目標</p>
+              <p className="mt-1 tabular text-sm font-semibold">
+                {proposal.limitPrice?.toLocaleString("ja-JP") ?? "—"}
+              </p>
+            </div>
+            <div>
+              <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">値幅</p>
+              <p className={`mt-1 tabular text-sm font-semibold ${gap !== null && gap < 0 ? "text-amber-700 dark:text-amber-300" : "text-emerald-700 dark:text-emerald-300"}`}>
+                {gap === null ? "—" : `${gap >= 0 ? "+" : ""}${gap.toFixed(1)}%`}
+              </p>
+            </div>
+            <p className="col-span-3 border-t pt-2 text-[10px] text-muted-foreground">
+              株価取得 {proposal.evidence?.priceUpdatedAt
+                ? new Date(proposal.evidence.priceUpdatedAt).toLocaleString("ja-JP")
+                : "時刻未取得"}
+            </p>
+          </div>
+
           <div className="grid gap-3 sm:grid-cols-2">
             <div className="space-y-2">
               <Label htmlFor="proposal-target">目標買付価格（現地通貨）</Label>
@@ -172,8 +199,7 @@ export function WatchProposalReviewDialog({
                 onChange={event => setTargetPrice(event.target.value)}
               />
               <p className="text-[11px] text-muted-foreground">
-                提案時 {proposal.priceAtProposal?.toLocaleString("ja-JP") ?? "—"}
-                {gap === null ? "" : ` / 目標まで ${gap.toFixed(1)}%`}
+                現在値から {gap === null ? "比較できません" : `${Math.abs(gap).toFixed(1)}% ${gap < 0 ? "下" : "上"}`}
               </p>
             </div>
             <div className="space-y-2">

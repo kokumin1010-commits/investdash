@@ -67,3 +67,13 @@ Dashboard 顶部把借入风险拆成独立主卡 `借入リスク（IBKR）`。
 ## Sources
 
 数据来自 Railway 生产 `watchlist.list` 与 `portfolio.overview`，通过 1010 Bearer 会话读取。AI 提案与杠杆算法依据项目中的 `addProposer.ts`、`addProposalService.ts`、`portfolio.ts` 和 `leverage.ts`。
+
+## 首轮生产截图发现（ff518aa）
+
+390px Dashboard 的 IBKR 主风险断言全部通过：`IBKR シンガポール レバレッジ 1.82倍`、`借入（IBKR シンガポールのみ）`、追証まで 34.2%、年间利息和 `全体レバレッジ（参考）1.18倍` 均可见，document scrollWidth 为 390。
+
+PYPL 真实提案在 16 秒内生成，stance WAIT、confidence 70、目标价 $53、企业资料、20 条新闻和 6 个月价格范围均已保存；watchlist 的 targetPrice、plannedAmount、watchReason、buyConditions 仍全部为 null，证明确认前没有自动落计划。
+
+提案确认截图发现一个需修复的数据一致性问题：卡片当前价约 $53.71、evidence.price $53.66，但确认框显示 `提案時 61.47`。确认页也没有独立醒目的“現在値”行，用户无法快速比较现在是否应该买。必须让草稿的 priceAtProposal 使用生成前刚刷新后的 watch 当前价，并在确认页并列显示当前价、AI 目标价和差值。
+
+新增对话框已只保留銘柄コード，没有目标价与预算输入；但 390px 截图的流程说明与背景卡片层级较拥挤。需要加强 dialog 实色背景、可读间距和分步说明，确保 underlying card 不干扰输入。
