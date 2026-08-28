@@ -202,6 +202,19 @@ export async function generateWatchProposalDraft(
       reviewStatus: "PENDING",
       evidence,
       priceAtProposal: evidence.price,
+      targetOverride: {
+        symbol: refreshed.symbol,
+        name: refreshed.name,
+        currency: refreshed.currency,
+        currentPrice: evidence.price,
+        held: false,
+        bandLabel: null,
+        nextGapPct: null,
+        nextActionLabel: null,
+        watchTargetPrice: refreshed.targetPrice === null ? null : Number(refreshed.targetPrice),
+        concernCount: 0,
+      },
+      holdingValueJpy: 0,
     });
     return {
       ...proposal,

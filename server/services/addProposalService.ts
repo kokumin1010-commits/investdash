@@ -162,6 +162,8 @@ export async function generateProposal(
     reviewStatus?: "PENDING";
     evidence?: unknown;
     priceAtProposal?: number | null;
+    targetOverride?: ProposalTarget;
+    holdingValueJpy?: number;
   } = {}
 ): Promise<{
   id: number;
@@ -179,7 +181,7 @@ export async function generateProposal(
 }> {
   const rows = await listPlanOverview(userId);
   const row = rows.find(r => r.symbol === symbol);
-  if (!row) {
+  if (!row && !options.targetOverride) {
     throw new Error("この銘柄は保有もウォッチリストにも見つかりませんでした");
   }
 
@@ -187,19 +189,21 @@ export async function generateProposal(
 
   const currentPrice = options.priceAtProposal !== undefined
     ? options.priceAtProposal
-    : row.currentPrice;
-  const target: ProposalTarget = {
-    symbol: row.symbol,
-    name: row.name,
-    currency: row.currency,
-    currentPrice,
-    held: row.held,
-    bandLabel: row.actionLabel,
-    nextGapPct: row.nextGapPct,
-    nextActionLabel: row.nextActionLabel,
-    watchTargetPrice: row.watchTargetPrice,
-    concernCount: row.concernCount,
-  };
+    : options.targetOverride?.currentPrice ?? row?.currentPrice ?? null;
+  const target: ProposalTarget = options.targetOverride
+    ? { ...options.targetOverride, currentPrice }
+    : {
+        symbol: row!.symbol,
+        name: row!.name,
+        currency: row!.currency,
+        currentPrice,
+        held: row!.held,
+        bandLabel: row!.actionLabel,
+        nextGapPct: row!.nextGapPct,
+        nextActionLabel: row!.nextActionLabel,
+        watchTargetPrice: row!.watchTargetPrice,
+        concernCount: row!.concernCount,
+      };
 
   const result = await withAiRunLog(
     { userId, kind: "add_proposal", symbol },
@@ -210,17 +214,17 @@ export async function generateProposal(
         totalValueJpy: ctx.totalValueJpy,
         interestAssetsJpy: ctx.interestAssetsJpy,
         cashJpy: ctx.cashJpy,
-        holdingValueJpy: row.holdingValueJpy ?? 0,
+        holdingValueJpy: options.holdingValueJpy ?? row?.holdingValueJpy ?? 0,
       })
   );
 
   const d = await requireDb();
   const inserted = await d.insert(addProposals).values({
     userId,
-    symbol: row.symbol,
+    symbol: target.symbol,
     watchItemId: options.watchItemId,
     reviewStatus: options.reviewStatus,
-    held: row.held,
+    held: target.held,
     stance: result.draft.stance,
     conclusion: result.draft.conclusion,
     rationale: result.draft.rationale,
@@ -242,7 +246,7 @@ export async function generateProposal(
     const [latest] = await d
       .select({ id: addProposals.id })
       .from(addProposals)
-      .where(and(eq(addProposals.userId, userId), eq(addProposals.symbol, row.symbol)))
+      .where(and(eq(addProposals.userId, userId), eq(addProposals.symbol, target.symbol)))
       .orderBy(desc(addProposals.id))
       .limit(1);
     id = latest?.id ?? 0;
@@ -251,7 +255,7 @@ export async function generateProposal(
 
   return {
     id,
-    symbol: row.symbol,
+    symbol: target.symbol,
     stance: result.draft.stance,
     conclusion: result.draft.conclusion,
     rationale: result.draft.rationale,
