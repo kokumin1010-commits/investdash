@@ -846,7 +846,7 @@ export default function Dashboard() {
                     </span>
                     <span className="block border-t pt-1 text-[11px] text-muted-foreground">
                       配当あり {dividends.payingCount} 銘柄 / 無配 {dividends.nonPayingCount} 銘柄
-                      {dividends.unknownCount > 0 ? ` / 未取得 ${dividends.unknownCount} 銘柄` : ""}
+                      {` / 未取得 ${dividends.unknownCount} 銘柄`}
                     </span>
                     {/*
                       借入がある場合、配当をそのまま収入と見ると実態を見誤る。
