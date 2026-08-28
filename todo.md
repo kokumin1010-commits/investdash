@@ -146,8 +146,9 @@
 - [x] 修复 watch AI 草稿的 priceAtProposal 与刷新后当前价不一致，并加入服务测试
 - [x] 在提案确认页并列显示当前价、AI 目标价、差值/下落率与数据取得时间
 - [x] 提升 390px 新增对话框实色背景、字段间距与“追加→AI提案→确认”步骤可读性
-- [ ] 部署 Railway 并在桌面/390px验收新增→提案→确认及 IBKR 风险卡（待确认保存生产闭环）
-- [ ] 在 Railway 生产用临时真实标的执行新增→AI草稿→EDIT确认→字段/状态持久化→清理的可回滚闭环验收
-- [ ] 删除观察标的时同时清理其 addProposals 历史，避免临时验收或用户删除后留下孤儿提案
-- [ ] 修复新加观察标的没有 priceBandPlan 时 generateProposal 返回 500，改为直接使用刷新后的 watch 数据生成草稿
+- [x] 部署 Railway 并在桌面/390px验收新增→提案→确认及 IBKR 风险卡
+- [x] 在 Railway 生产用临时真实 MCD 执行新增→AI草稿→EDIT确认→字段/状态持久化→清理的可回滚闭环验收
+- [x] 删除观察标的时同时清理其 addProposals 历史，生产验证 deletedProposals=1 且无孤儿草稿
+- [x] 修复新加观察标的没有 priceBandPlan 时 generateProposal 返回 500，改为直接使用刷新后的 watch 数据生成草稿
+- [x] 在 Railway 生产桌面与390px页面各完成一次新增→AI草稿→点击修正保存→成功提示/卡片状态→删除清理闭环
 - [ ] 更新审计文档、同步 GitHub 并保存最终检查点

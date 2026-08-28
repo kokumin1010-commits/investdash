@@ -94,3 +94,15 @@ PYPL 真实提案在 16 秒内生成，stance WAIT、confidence 70、目标价 $
 390×844 与 1280×900 生产回归均通过。Dashboard 在 390px 显示 `借入（IBKR シンガポールのみ）` 和橙色 CAUTION，不再用全体 1.18 倍作为主风险；document scrollWidth 为 390。PYPL 确认框并列显示 `現在値 53.66 / AI目標 48 / 値幅 −10.5%`、株价取得时间、结论、理由、依据和采用/修改/稍后/见送操作。
 
 新增对话框使用实色背景并以三步显示 `銘柄を追加 → AIが情報取得 → 確認して保存`；只出现銘柄コード，不出现目标价与预算字段。真实 PENDING 提案保留给用户确认，没有替用户执行接受或修改。
+
+## 确认保存闭环与清理验证（2aac965）
+
+首次用临时 MCD 验收时发现新标的没有既有 priceBandPlan 会使 `generateProposal` 返回 500。根因是通用提案服务依赖 `listPlanOverview`，而该总览只遍历已有价格带计划。修复后，watch 草稿服务直接传入刚刷新完成的名称、币种、当前价、持有状态和目标价；无价格带计划时不再构造虚假 band，而是以 null 表示。
+
+生产重新执行完整可回滚闭环：原观察列表 15 条 → 新增真实 MCD（id 17）→ 生成 WAIT 草稿（当前价/证据价/目标价均为 $265，confidence 70）→ 以 EDIT 确认 → watchlist 持久化 targetPrice 265、plannedAmount ¥100,000、测试理由/条件和 latestStatus EDITED → 删除临时标的。删除事务同时清理 1 条关联 addProposal；最终观察列表恢复 15 条、MCD 不存在，`fullyCleaned=true`，未留下生产测试数据。
+
+随后在真实页面而非 API 中分别完成两次闭环。390×844 使用 MCD：输入 symbol、查询、点击 `この銘柄を追加`、等待 Gemini 草稿、把目标价 265 修改为 262.35、点击 `修正して保存`；页面显示成功 toast 与 `確認して修正済み`，数据库 reviewStatus=EDITED，删除后关联提案 1 条同时清理。1280×900 使用 LOW：目标价 208 修改为 205.92，完成相同按钮流程与状态验证并完全清理。两次 before/after 均为 15 条，MCD/LOW 均不存在；手机 scrollWidth 390、桌面 1265，无横向溢出。
+
+截图 `/tmp/investdash-watch-confirmation-closure-390.png` 与 `...-1280.png` 均直接显示 `修正した内容で保存しました`。截图时列表暂时显示 16 条是验收标的尚未清理的瞬间；脚本在截图后通过生产 remove API 删除标的和提案，并再次确认恢复 15 条。
+
+PYPL 的真实 PENDING 提案保持未确认，没有替用户保存目标价或预算。其最终确认页显示当前价 $53.66、AI目标 $48、值幅 −10.5%、confidence 75 和取得时间，priceAtProposal、evidence.price 与 watch 当前价三者一致。
