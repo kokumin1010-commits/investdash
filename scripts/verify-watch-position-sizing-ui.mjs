@@ -4,6 +4,11 @@ import { readFile, writeFile } from "node:fs/promises";
 const token = (await readFile(process.env.DEV_TOKEN_FILE ?? "/tmp/prod-watch-token", "utf8")).trim();
 const baseUrl = (process.env.BASE_URL ?? "https://salesdash.buzzdrop.co.jp/investdash").replace(/\/$/, "");
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+const compactJpy = value => {
+  const man = value / 10_000;
+  const digits = man >= 100 ? 0 : 1;
+  return `${man.toLocaleString("ja-JP", { minimumFractionDigits: digits, maximumFractionDigits: digits })}万円`;
+};
 
 async function trpcGet(path, input = null) {
   const encoded = encodeURIComponent(JSON.stringify({ json: input }));
@@ -114,6 +119,7 @@ async function verify(width, height, port, watch, plan) {
         return card?.textContent?.includes('ポートフォリオ連動の買付目安') &&
           card.textContent.includes('今回') && card.textContent.includes('買う価格') &&
           card.textContent.includes('買った後') &&
+          card.textContent.includes(${JSON.stringify(compactJpy(plan.sizing.amountBase))}) &&
           card.textContent.includes(${JSON.stringify(`${plan.sizing.shares.toLocaleString("ja-JP")} 株`)}) &&
           card.textContent.includes(${JSON.stringify(`現在 ${plan.sizing.currentWeightPct.toFixed(2)}%`)}) &&
           card.textContent.includes(${JSON.stringify(`${plan.sizing.afterWeightPct.toFixed(2)}%`)});
@@ -189,5 +195,5 @@ const [kioxiaPlan, pyplPlan] = await Promise.all([
 ]);
 const mobile = await verify(390, 844, 9290, kioxia, kioxiaPlan);
 const desktop = await verify(1280, 900, 9291, pypl, pyplPlan);
-console.log(JSON.stringify({ version: "81042a3", mobile, desktop }, null, 2));
+console.log(JSON.stringify({ version: "e5d7bee", mobile, desktop }, null, 2));
 if (!mobile.passed || !desktop.passed) process.exitCode = 1;
