@@ -1,10 +1,19 @@
 // @vitest-environment jsdom
 
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import * as React from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const mocks = vi.hoisted(() => ({ generateCalls: vi.fn(), generateAttempt: 0 }));
+const mocks = vi.hoisted(() => ({
+  generateCalls: vi.fn(),
+  generateAttempt: 0,
+}));
 
 const rejectedProposal = {
   id: 91,
@@ -32,7 +41,10 @@ vi.mock("@/lib/trpc", () => {
       useUtils: () => ({
         invalidate: vi.fn(),
         watchlist: { invalidate: vi.fn() },
-        portfolio: { invalidate: vi.fn(), savedCandidates: { invalidate: vi.fn() } },
+        portfolio: {
+          invalidate: vi.fn(),
+          savedCandidates: { invalidate: vi.fn() },
+        },
       }),
       watchlist: {
         list: {
@@ -80,9 +92,16 @@ vi.mock("@/lib/trpc", () => {
               mocks.generateCalls(input);
               mocks.generateAttempt += 1;
               if (mocks.generateAttempt === 1) {
-                options.onError?.(new Error("AI サービスが一時的に利用できません"), input);
+                options.onError?.(
+                  new Error("AI サービスが一時的に利用できません"),
+                  input
+                );
               } else {
-                options.onSuccess?.({ ...rejectedProposal, watchItemId: input.id, reviewStatus: "PENDING" });
+                options.onSuccess?.({
+                  ...rejectedProposal,
+                  watchItemId: input.id,
+                  reviewStatus: "PENDING",
+                });
               }
               options.onSettled?.();
             },
@@ -101,8 +120,98 @@ vi.mock("@/lib/trpc", () => {
         savedCandidates: { useQuery: () => ({ data: [], isLoading: false }) },
         dismissCandidate: { useMutation: idleMutation },
         addSuggestedToWatchlist: { useMutation: idleMutation },
-        lookup: { useMutation: () => ({ data: null, mutate: vi.fn(), reset: vi.fn(), isPending: false }) },
-        priceBandPlan: { useQuery: () => ({ data: null, isLoading: false }) },
+        lookup: {
+          useMutation: () => ({
+            data: null,
+            mutate: vi.fn(),
+            reset: vi.fn(),
+            isPending: false,
+          }),
+        },
+        priceBandPlan: {
+          useQuery: () => ({
+            data: {
+              id: 12,
+              symbol: "PYPL",
+              currency: "USD",
+              scope: "WATCHLIST",
+              strategy: "LONG_TERM",
+              rationale: "段階的に買う",
+              model: "gemini-3-flash-preview",
+              editedByUser: false,
+              generatedAt: "2026-08-29T00:00:00Z",
+              currentPrice: 53.71,
+              bands: [
+                {
+                  id: 1,
+                  lowerPrice: 48,
+                  upperPrice: 54,
+                  action: "ADD_SMALL",
+                  actionLabel: "打診買いを検討",
+                  reason: "目標帯に入った",
+                  checkItems: [],
+                  plannedAmount: null,
+                  sortOrder: 1,
+                  checks: [],
+                },
+              ],
+              evaluation: {
+                currentBand: {
+                  id: 1,
+                  lowerPrice: 48,
+                  upperPrice: 54,
+                  action: "ADD_SMALL",
+                  actionLabel: "打診買いを検討",
+                  reason: "目標帯に入った",
+                  checkItems: [],
+                  plannedAmount: null,
+                  sortOrder: 1,
+                  checks: [],
+                },
+                abovePlan: false,
+                belowPlan: false,
+                nextBand: null,
+                gapToNextPct: null,
+                nextBandPrice: null,
+              },
+              sizing: {
+                status: "BUY",
+                amountBase: 4_790_000,
+                amountLocal: 4_790_000,
+                shares: 100,
+                currentWeightPct: 0,
+                afterWeightPct: 0.652,
+                targetWeightPct: 1,
+                targetGapBase: 7_346_678,
+                tranchePct: 25,
+                liquidAssetsBase: 95_908_963,
+                deployableLiquidityBase: 23_977_241,
+                remainingLiquidBase: 91_118_963,
+                positionRoomBase: 36_733_391,
+                sectorCurrentPct: 22.73,
+                sectorAfterPct: 23.38,
+                sectorLimitPct: 30,
+                sectorRoomBase: 23_057_941,
+                marginFactor: 0.5,
+                ibkrLeverage: 1.825,
+                ibkrRiskLevel: "CAUTION",
+                ibkrDropToMarginCallPct: 33.88,
+                lotSize: 100,
+                lotAdjusted: true,
+                fundingMode: "CASH_ONLY",
+                reasons: [
+                  "IBKR が CAUTION のため通常額を 50% に抑えます",
+                  "借入は増やさず、現金性資産だけを原資にします",
+                  "最低売買単位に合わせて初回額を調整しました",
+                ],
+              },
+            },
+            isLoading: false,
+            isPending: false,
+            isError: false,
+            error: null,
+          }),
+        },
         generateWatchPricePlan: { useMutation: idleMutation },
       },
     },
@@ -128,12 +237,18 @@ describe("Watchlist proposal recovery", () => {
     expect(screen.getByText("今回は見送り済み")).toBeTruthy();
 
     fireEvent.click(screen.getByRole("button", { name: "もう一度提案" }));
-    expect(await screen.findByText("AI提案を作成できませんでした")).toBeTruthy();
-    expect(screen.getByText("AI サービスが一時的に利用できません")).toBeTruthy();
+    expect(
+      await screen.findByText("AI提案を作成できませんでした")
+    ).toBeTruthy();
+    expect(
+      screen.getByText("AI サービスが一時的に利用できません")
+    ).toBeTruthy();
     expect(screen.getByRole("button", { name: "もう一度試す" })).toBeTruthy();
 
     fireEvent.click(screen.getByRole("button", { name: "もう一度試す" }));
-    await waitFor(() => expect(screen.queryByText("AI提案を作成できませんでした")).toBeNull());
+    await waitFor(() =>
+      expect(screen.queryByText("AI提案を作成できませんでした")).toBeNull()
+    );
     expect(mocks.generateCalls).toHaveBeenCalledTimes(2);
     expect(mocks.generateCalls).toHaveBeenLastCalledWith({ id: 7 });
   });
@@ -151,10 +266,34 @@ describe("Watchlist proposal recovery", () => {
     const card = document.getElementById("watch-7");
     expect(card).toBeTruthy();
     await waitFor(() => {
-      expect(scrollIntoView).toHaveBeenCalledWith({ behavior: "smooth", block: "center" });
+      expect(scrollIntoView).toHaveBeenCalledWith({
+        behavior: "smooth",
+        block: "center",
+      });
       expect(card?.className).toContain("ring-sky-400/30");
     });
 
     window.history.replaceState({}, "", "/watchlist");
+  });
+
+  it("shows the simple three-number sizing first and reveals professional grounds on demand", () => {
+    render(React.createElement(Watchlist));
+
+    expect(screen.getByText("今回")).toBeTruthy();
+    expect(screen.getByText("買う価格")).toBeTruthy();
+    expect(screen.getByText("買った後")).toBeTruthy();
+    expect(screen.getByText("100 株")).toBeTruthy();
+    expect(screen.getByText("現在 0.00%・未保有")).toBeTruthy();
+    expect(screen.queryByText("現在の実保有")).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "計算根拠を見る" }));
+
+    expect(screen.getByText("現在の実保有")).toBeTruthy();
+    expect(screen.getByText("0.00%（未保有）")).toBeTruthy();
+    expect(screen.getByText("IBKR 主レバレッジ")).toBeTruthy();
+    expect(screen.getByText("1.82x")).toBeTruthy();
+    expect(
+      screen.getByText("・IBKR が CAUTION のため通常額を 50% に抑えます")
+    ).toBeTruthy();
   });
 });

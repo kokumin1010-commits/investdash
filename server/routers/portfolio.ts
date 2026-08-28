@@ -67,6 +67,8 @@ import {
 } from "../services/portfolio";
 import { BROKERS, normalizeSymbol } from "../../shared/investing";
 import { BAND_ACTIONS } from "../../shared/priceBands";
+import { computePortfolioPositionSizing } from "../../shared/portfolioPositionSizing";
+import { convertToJpy } from "../services/fx";
 import { getRailwayDataBackfillStatus } from "../railwayScheduler";
 import {
   listSchedulerRuns,
@@ -989,12 +991,40 @@ export const portfolioRouter = router({
        * その場合はウォッチリストに保存された現在値を使う。
        * ここで現在値を渡せないと「今どの段にいるか」の判定ができなくなる。
        */
+      const watch = await db.getWatchBySymbol(ctx.user.id, input.symbol);
       let currentPrice = view?.currentPrice ?? null;
-      if (currentPrice === null) {
-        const watch = await db.getWatchBySymbol(ctx.user.id, input.symbol);
-        if (watch?.currentPrice) currentPrice = Number(watch.currentPrice);
+      if (currentPrice === null && watch?.currentPrice) {
+        currentPrice = Number(watch.currentPrice);
       }
-      return await getPlan(ctx.user.id, input.symbol, currentPrice);
+      const plan = await getPlan(ctx.user.id, input.symbol, currentPrice);
+      if (!plan) return null;
+
+      const sector = view?.sector ?? watch?.sector ?? null;
+      const sectorValueBase = portfolio.sectors.find(item => item.key === sector)?.value ?? 0;
+      const ibkr = portfolio.brokers.find(item => item.key === "ibkr")?.leverage ?? null;
+      const rates = {
+        usdJpy: portfolio.summary.usdJpyRate,
+        sgdJpy: portfolio.summary.sgdJpyRate,
+        hkdJpy: portfolio.summary.hkdJpyRate,
+      };
+      const yenPerLocalUnit = convertToJpy(1, plan.currency, rates);
+      const sizing = computePortfolioPositionSizing({
+        action: plan.evaluation.currentBand?.action ?? "HOLD",
+        priority: watch?.priority ?? "MEDIUM",
+        market: normalizeSymbol(input.symbol).market,
+        localPrice: currentPrice,
+        yenPerLocalUnit,
+        netAssetsBase: portfolio.summary.netAssetsBase,
+        liquidAssetsBase: portfolio.summary.cashBalance + portfolio.summary.interestAssetsBase,
+        currentHoldingBase: view?.marketValueBase ?? 0,
+        sectorValueBase,
+        userSectorLimitPct: (await db.getSettings(ctx.user.id)).sectorConcentrationThreshold,
+        ibkrLeverage: ibkr?.leverage ?? null,
+        ibkrRiskLevel: ibkr?.riskLevel ?? null,
+        ibkrDropToMarginCallPct: ibkr?.dropToMarginCallPct ?? null,
+      });
+
+      return { ...plan, sizing };
     }),
 
   /** 買い増しプランを AI で生成する（1 銘柄） */

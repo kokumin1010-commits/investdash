@@ -1734,50 +1734,129 @@ function WatchPlanSummary({ symbol, currency }: { symbol: string; currency: stri
   const ev = plan.data.evaluation;
   const current = ev.currentBand;
   const bands = plan.data.bands;
+  const sizing = plan.data.sizing;
+  const canBuy = sizing.status === "BUY" && sizing.shares > 0;
+  const actionPrice = canBuy ? plan.data.currentPrice : (ev.nextBand?.upperPrice ?? plan.data.currentPrice);
+  const statusText = (() => {
+    if (canBuy) {
+      return sizing.lotAdjusted
+        ? "最低売買単位に合わせた打診額です"
+        : `${sizing.tranchePct}%ずつ段階的に入る初回額です`;
+    }
+    if (sizing.status === "BLOCKED_MARGIN") return "IBKR の借入リスクを下げるまで新規買付を止めます";
+    if (sizing.status === "BLOCKED_POSITION") return "この銘柄は上限に達しているため追加しません";
+    if (sizing.status === "BLOCKED_SECTOR") return "この業種は慎重上限に達しているため追加しません";
+    if (sizing.status === "TOO_SMALL") return "最低売買単位が今回のリスク予算を超えます";
+    if (sizing.status === "UNAVAILABLE") return "金額計算に必要なデータを確認できません";
+    return "現在の価格帯では買わず、次の条件を待ちます";
+  })();
 
   return (
-    <div className="space-y-2 rounded-lg border bg-muted/20 px-3 py-2.5">
+    <div className="space-y-2.5 rounded-lg border bg-muted/20 px-3 py-2.5">
       <div className="flex items-center justify-between gap-2">
-        <p className="text-[11px] font-medium text-muted-foreground">AI 提案の購入価格帯</p>
+        <p className="text-[11px] font-medium text-muted-foreground">ポートフォリオ連動の買付目安</p>
         <button
           type="button"
           className="text-[11px] text-muted-foreground underline-offset-2 hover:underline"
           onClick={() => setOpen(v => !v)}
         >
-          {open ? "閉じる" : `全 ${bands.length} 段を見る`}
+          {open ? "閉じる" : "計算根拠を見る"}
         </button>
       </div>
 
-      {current ? (
-        <div className="space-y-0.5">
-          <p className="text-sm font-semibold leading-snug">{current.actionLabel}</p>
-          <p className="tabular text-[11px] text-muted-foreground">
-            {current.lowerPrice === null ? "―" : formatMoney(current.lowerPrice, currency)}
-            {" 〜 "}
-            {current.upperPrice === null ? "―" : formatMoney(current.upperPrice, currency)}
-            {" の水準"}
+      <div
+        data-testid={`position-sizing-summary-${symbol}`}
+        className="grid grid-cols-3 gap-2 rounded-lg bg-background/80 p-2.5 shadow-sm"
+      >
+        <div className="min-w-0">
+          <p className="text-[10px] text-muted-foreground">今回</p>
+          {canBuy ? (
+            <>
+              <MoneyText value={sizing.amountBase} currency="JPY" className="block truncate text-sm font-semibold" />
+              <p className="tabular text-[10px] text-muted-foreground">
+                {sizing.shares.toLocaleString("ja-JP")} 株
+              </p>
+            </>
+          ) : (
+            <>
+              <p className="text-sm font-semibold">0 株</p>
+              <p className="text-[10px] text-muted-foreground">今は買わない</p>
+            </>
+          )}
+        </div>
+        <div className="min-w-0 border-l pl-2">
+          <p className="text-[10px] text-muted-foreground">買う価格</p>
+          <MoneyText value={actionPrice} currency={currency} className="block truncate text-sm font-semibold" />
+          <p className="truncate text-[10px] text-muted-foreground">
+            {canBuy ? "現在の水準" : "次の目安"}
           </p>
         </div>
-      ) : (
-        <p className="text-sm font-medium text-muted-foreground">
-          {ev.abovePlan
-            ? "登録した価格帯より上です（検討対象外）"
-            : ev.belowPlan
-              ? "登録した価格帯より下です"
-              : "現在値が取得できていません"}
-        </p>
-      )}
+        <div className="min-w-0 border-l pl-2">
+          <p className="text-[10px] text-muted-foreground">買った後</p>
+          <p className="tabular truncate text-sm font-semibold">{sizing.afterWeightPct.toFixed(2)}%</p>
+          <p className="tabular truncate text-[10px] text-muted-foreground">
+            現在 {sizing.currentWeightPct.toFixed(2)}%
+            {sizing.currentWeightPct === 0 ? "・未保有" : ""}
+          </p>
+        </div>
+      </div>
 
-      {ev.gapToNextPct !== null ? (
-        <p className="tabular text-[11px] text-muted-foreground">
-          次の段まで {ev.gapToNextPct > 0 ? "+" : ""}
-          {ev.gapToNextPct.toFixed(1)}%
-          {ev.nextBand ? `（${ev.nextBand.actionLabel}）` : ""}
-        </p>
-      ) : null}
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0">
+          <p className="text-xs font-semibold leading-snug">{current?.actionLabel ?? "価格帯を確認中"}</p>
+          <p className="mt-0.5 text-[11px] leading-relaxed text-muted-foreground">{statusText}</p>
+        </div>
+        {sizing.marginFactor === 0.5 ? (
+          <Badge variant="outline" className="shrink-0 border-amber-300 text-[10px]">
+            借入考慮 50%
+          </Badge>
+        ) : null}
+      </div>
 
       {open ? (
-        <div className="space-y-1.5 border-t pt-2">
+        <div data-testid={`position-sizing-details-${symbol}`} className="space-y-2.5 border-t pt-2.5">
+          <div className="grid grid-cols-2 gap-x-3 gap-y-2 rounded-md bg-background/70 p-2.5 text-[11px]">
+            <div>
+              <p className="text-muted-foreground">現在の実保有</p>
+              <p className="tabular font-medium">
+                {sizing.currentWeightPct.toFixed(2)}%{sizing.currentWeightPct === 0 ? "（未保有）" : ""}
+              </p>
+            </div>
+            <div>
+              <p className="text-muted-foreground">目標総ポジション</p>
+              <p className="tabular font-medium">{sizing.targetWeightPct.toFixed(2)}%</p>
+            </div>
+            <div>
+              <p className="text-muted-foreground">現金性資産・買付後</p>
+              <p className="tabular font-medium">{formatMoney(sizing.remainingLiquidBase, "JPY")}</p>
+            </div>
+            <div>
+              <p className="text-muted-foreground">業種比率・買付後</p>
+              <p className="tabular font-medium">
+                {sizing.sectorCurrentPct.toFixed(1)}% → {sizing.sectorAfterPct.toFixed(1)}%
+              </p>
+            </div>
+            <div>
+              <p className="text-muted-foreground">IBKR 主レバレッジ</p>
+              <p className="tabular font-medium">
+                {sizing.ibkrLeverage === null ? "―" : `${sizing.ibkrLeverage.toFixed(2)}x`}
+              </p>
+            </div>
+            <div>
+              <p className="text-muted-foreground">追証までの下落余地</p>
+              <p className="tabular font-medium">
+                {sizing.ibkrDropToMarginCallPct === null ? "―" : `${sizing.ibkrDropToMarginCallPct.toFixed(1)}%`}
+              </p>
+            </div>
+          </div>
+
+          <div className="space-y-1 rounded-md border border-dashed px-2.5 py-2 text-[11px] leading-relaxed text-muted-foreground">
+            {sizing.reasons.map(reason => <p key={reason}>・{reason}</p>)}
+            <p>・単一銘柄は最大 5%、業種は最大 {sizing.sectorLimitPct.toFixed(0)}%</p>
+            <p>・現金性資産の 75% は追証・追加機会のため残します</p>
+          </div>
+
+          <p className="text-[11px] font-medium text-muted-foreground">価格帯ごとの次の行動</p>
           {bands.map(b => {
             const isCurrent = current?.id === b.id;
             return (
