@@ -2,6 +2,10 @@ import { DisclaimerNote } from "@/components/investing/DisclaimerNote";
 import { ExpandableText } from "@/components/investing/ExpandableText";
 import { MoneyText, PctText } from "@/components/investing/Figures";
 import { SignalBadge, SignalPlaceholder } from "@/components/investing/SignalBadge";
+import {
+  WatchProposalReviewDialog,
+  type WatchProposalDraftView,
+} from "@/components/investing/WatchProposalReviewDialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -94,6 +98,10 @@ type WatchRow = {
   heldBrokers: string[];
   heldPnlPct: number | null;
   signal: { action: "ADD" | "HOLD" | "WATCH" | "REDUCE" | "EXIT"; confidence: number | null; rationale: string; createdAt: Date } | null;
+  pendingProposal: WatchProposalDraftView | null;
+  latestProposal: (WatchProposalDraftView & {
+    reviewStatus: "PENDING" | "ACCEPTED" | "EDITED" | "REJECTED";
+  }) | null;
 };
 
 /** AI が提案した候補（実在検証を通ったもの） */
@@ -196,6 +204,9 @@ export default function Watchlist() {
   const [promoteTarget, setPromoteTarget] = useState<WatchRow | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<WatchRow | null>(null);
   const [signalBusyId, setSignalBusyId] = useState<number | null>(null);
+  const [proposalBusyId, setProposalBusyId] = useState<number | null>(null);
+  const [proposalErrors, setProposalErrors] = useState<Record<number, string>>({});
+  const [proposalReview, setProposalReview] = useState<WatchProposalDraftView | null>(null);
   /** 作り直し中の銘柄。押した行だけ進行が分かるようにする */
   const [reviseBusyId, setReviseBusyId] = useState<number | null>(null);
   /**
@@ -222,6 +233,24 @@ export default function Watchlist() {
     },
     onError: e => toast.error(e.message),
     onSettled: () => setSignalBusyId(null),
+  });
+
+  const generateProposal = trpc.watchlist.generateProposal.useMutation({
+    onSuccess: async result => {
+      await utils.watchlist.invalidate();
+      setProposalErrors(current => {
+        const next = { ...current };
+        delete next[result.watchItemId];
+        return next;
+      });
+      setProposalReview(result as unknown as WatchProposalDraftView);
+      toast.success("価格・企業情報・ニュースから AI 提案を作りました");
+    },
+    onError: (error, variables) => {
+      setProposalErrors(current => ({ ...current, [variables.id]: error.message }));
+      toast.error(error.message);
+    },
+    onSettled: () => setProposalBusyId(null),
   });
 
   const remove = trpc.watchlist.remove.useMutation({
@@ -773,7 +802,7 @@ export default function Watchlist() {
             <div className="space-y-1.5">
               <h2 className="font-semibold">購入を検討している銘柄を登録しましょう</h2>
               <p className="mx-auto max-w-sm text-sm leading-relaxed text-muted-foreground">
-                目標買付価格と買付条件を記録しておくと、条件に近づいたときに気づけます。ニュースも自動で追跡されます。
+                まず銘柄コードだけ追加してください。価格・ニュース・企業情報を取得し、AI が目標価格と買付条件を下書きします。
               </p>
             </div>
             <Button onClick={() => setAddOpen(true)}>
@@ -944,6 +973,124 @@ export default function Watchlist() {
                   <ExpandableText label="買付条件" text={r.buyConditions} />
                 ) : null}
 
+                {proposalErrors[r.id] ? (
+                  <div className="rounded-lg border border-rose-200 bg-rose-50/70 p-3 dark:border-rose-900 dark:bg-rose-950/20">
+                    <div className="flex items-start gap-2">
+                      <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-loss" />
+                      <div className="min-w-0 flex-1">
+                        <p className="text-xs font-semibold">AI提案を作成できませんでした</p>
+                        <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground">
+                          {proposalErrors[r.id]}
+                        </p>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="mt-2 h-8 bg-background"
+                          disabled={proposalBusyId !== null}
+                          onClick={() => {
+                            setProposalErrors(current => {
+                              const next = { ...current };
+                              delete next[r.id];
+                              return next;
+                            });
+                            setProposalBusyId(r.id);
+                            generateProposal.mutate({ id: r.id });
+                          }}
+                        >
+                          <RefreshCw className={`mr-1.5 h-3.5 w-3.5 ${proposalBusyId === r.id ? "animate-spin" : ""}`} />
+                          {proposalBusyId === r.id ? "再取得中..." : "もう一度試す"}
+                        </Button>
+                      </div>
+                    </div>
+                  </div>
+                ) : null}
+
+                {r.pendingProposal ? (
+                  <div className="rounded-lg border border-violet-200 bg-violet-50/60 p-3 dark:border-violet-900 dark:bg-violet-950/20">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div className="flex items-center gap-2">
+                        <Badge variant="outline" className="border-violet-300 bg-white text-violet-700 dark:bg-violet-950 dark:text-violet-300">
+                          AI提案・要確認
+                        </Badge>
+                        <span className="text-[11px] text-muted-foreground">
+                          確信度 {r.pendingProposal.confidence}
+                        </span>
+                      </div>
+                      <Button size="sm" className="h-8" onClick={() => setProposalReview(r.pendingProposal)}>
+                        提案を確認
+                      </Button>
+                    </div>
+                    <p className="mt-2 text-xs font-medium leading-relaxed">{r.pendingProposal.conclusion}</p>
+                  </div>
+                ) : r.latestProposal && r.latestProposal.reviewStatus !== "PENDING" ? (
+                  <div className="rounded-lg border bg-muted/25 p-3">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Badge variant="outline" className="bg-background text-[10px]">
+                        {r.latestProposal.reviewStatus === "ACCEPTED"
+                          ? "AI提案を採用済み"
+                          : r.latestProposal.reviewStatus === "EDITED"
+                            ? "確認して修正済み"
+                            : "今回は見送り済み"}
+                      </Badge>
+                      <span className="text-[11px] text-muted-foreground">
+                        {r.latestProposal.stance === "BUY"
+                          ? "今買う"
+                          : r.latestProposal.stance === "WAIT"
+                            ? "価格を待つ"
+                            : "今回は見送る"}
+                      </span>
+                    </div>
+                    <p className="mt-2 text-xs leading-relaxed">{r.latestProposal.conclusion}</p>
+                    {r.latestProposal.reviewStatus === "REJECTED" ? (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="mt-2 h-8 bg-background"
+                        disabled={proposalBusyId !== null}
+                        onClick={() => {
+                          setProposalErrors(current => {
+                            const next = { ...current };
+                            delete next[r.id];
+                            return next;
+                          });
+                          setProposalBusyId(r.id);
+                          generateProposal.mutate({ id: r.id });
+                        }}
+                      >
+                        <Wand2 className={`mr-1.5 h-3.5 w-3.5 ${proposalBusyId === r.id ? "animate-pulse" : ""}`} />
+                        {proposalBusyId === r.id ? "AI が提案中..." : "もう一度提案"}
+                      </Button>
+                    ) : null}
+                  </div>
+                ) : r.targetPrice === null && !r.watchReason && !r.buyConditions ? (
+                  <div className="rounded-lg border border-dashed bg-muted/20 p-3">
+                    <p className="text-xs font-medium">
+                      {proposalBusyId === r.id ? "価格・ニュース・企業情報を取得中..." : "目標価格と買付条件はまだ未設定です"}
+                    </p>
+                    <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground">
+                      AI が「今買う・価格を待つ・見送る」を根拠付きで下書きします。確認するまで自動保存しません。
+                    </p>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="mt-2 h-8 bg-background"
+                      disabled={proposalBusyId !== null}
+                      onClick={() => {
+                        setProposalErrors(current => {
+                          const next = { ...current };
+                          delete next[r.id];
+                          return next;
+                        });
+                        setProposalBusyId(r.id);
+                        generateProposal.mutate({ id: r.id });
+                      }}
+                    >
+                      <Wand2 className={`mr-1.5 h-3.5 w-3.5 ${proposalBusyId === r.id ? "animate-pulse" : ""}`} />
+                      {proposalBusyId === r.id ? "AI が提案中..." : "AI 提案を作る"}
+                    </Button>
+                  </div>
+                ) : null}
+
                 <WatchPlanSummary symbol={r.symbol} currency={r.currency} />
 
                 <div className="flex items-center justify-between gap-2 border-t pt-3">
@@ -1035,13 +1182,26 @@ export default function Watchlist() {
 
       <DisclaimerNote />
 
-      <WatchFormDialog open={addOpen} onOpenChange={setAddOpen} />
+      <WatchFormDialog
+        open={addOpen}
+        onOpenChange={setAddOpen}
+        onAdded={item => {
+          setAddOpen(false);
+          setProposalBusyId(item.id);
+          generateProposal.mutate({ id: item.id });
+        }}
+      />
       <WatchFormDialog
         open={editTarget !== null}
         onOpenChange={o => !o && setEditTarget(null)}
         editing={editTarget}
       />
       <PromoteDialog target={promoteTarget} onClose={() => setPromoteTarget(null)} />
+      <WatchProposalReviewDialog
+        proposal={proposalReview}
+        open={proposalReview !== null}
+        onOpenChange={open => !open && setProposalReview(null)}
+      />
 
       <Dialog open={deleteTarget !== null} onOpenChange={o => !o && setDeleteTarget(null)}>
         <DialogContent className="sm:max-w-sm">
@@ -1071,14 +1231,16 @@ export default function Watchlist() {
 
 /* --------------------------- 追加・編集ダイアログ -------------------------- */
 
-function WatchFormDialog({
+export function WatchFormDialog({
   open,
   onOpenChange,
   editing,
+  onAdded,
 }: {
   open: boolean;
   onOpenChange: (o: boolean) => void;
   editing?: WatchRow | null;
+  onAdded?: (item: { id: number; symbol: string }) => void;
 }) {
   const utils = trpc.useUtils();
   const isEdit = !!editing;
@@ -1115,11 +1277,11 @@ function WatchFormDialog({
   const lookup = trpc.portfolio.lookup.useMutation({ onError: e => toast.error(e.message) });
 
   const add = trpc.watchlist.add.useMutation({
-    onSuccess: async () => {
+    onSuccess: async result => {
       await utils.watchlist.invalidate();
-      toast.success("ウォッチリストに追加しました");
+      toast.success("銘柄を追加しました。続けて AI 提案を作ります");
       reset();
-      onOpenChange(false);
+      onAdded?.(result);
     },
     onError: e => toast.error(e.message),
   });
@@ -1151,7 +1313,7 @@ function WatchFormDialog({
           <DialogDescription>
             {isEdit
               ? "目標価格や買付条件を更新できます。"
-              : "日本株は 4 桁コード（例: 7203）、米国株はティッカー（例: MSFT）を入力してください。"}
+              : "最初は銘柄コードだけで追加できます。追加後、AI の下書きを確認してから目標価格や買付条件を保存します。"}
           </DialogDescription>
         </DialogHeader>
 
@@ -1206,67 +1368,75 @@ function WatchFormDialog({
             </div>
           )}
 
-          <div className="grid gap-3 sm:grid-cols-3">
-            <div className="space-y-2">
-              <Label htmlFor="w-target">目標買付価格</Label>
-              <Input
-                id="w-target"
-                type="number"
-                inputMode="decimal"
-                value={targetPrice}
-                onChange={e => setTargetPrice(e.target.value)}
-                placeholder="2500"
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="w-amount">投資予定額</Label>
-              <Input
-                id="w-amount"
-                type="number"
-                inputMode="decimal"
-                value={plannedAmount}
-                onChange={e => setPlannedAmount(e.target.value)}
-                placeholder="500000"
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="w-priority">優先度</Label>
-              <Select value={priority} onValueChange={v => setPriority(v as WatchPriority)}>
-                <SelectTrigger id="w-priority">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {WATCH_PRIORITIES.map(p => (
-                    <SelectItem key={p} value={p}>
-                      {PRIORITY_LABELS[p]}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
+          {isEdit ? (
+            <>
+              <div className="grid gap-3 sm:grid-cols-3">
+                <div className="space-y-2">
+                  <Label htmlFor="w-target">目標買付価格</Label>
+                  <Input
+                    id="w-target"
+                    type="number"
+                    inputMode="decimal"
+                    value={targetPrice}
+                    onChange={e => setTargetPrice(e.target.value)}
+                    placeholder="2500"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="w-amount">投資予定額</Label>
+                  <Input
+                    id="w-amount"
+                    type="number"
+                    inputMode="decimal"
+                    value={plannedAmount}
+                    onChange={e => setPlannedAmount(e.target.value)}
+                    placeholder="500000"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="w-priority">優先度</Label>
+                  <Select value={priority} onValueChange={v => setPriority(v as WatchPriority)}>
+                    <SelectTrigger id="w-priority">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {WATCH_PRIORITIES.map(p => (
+                        <SelectItem key={p} value={p}>
+                          {PRIORITY_LABELS[p]}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
 
-          <div className="space-y-2">
-            <Label htmlFor="w-reason">注目理由</Label>
-            <Textarea
-              id="w-reason"
-              value={watchReason}
-              onChange={e => setWatchReason(e.target.value)}
-              placeholder="なぜこの銘柄に注目しているのか。事業の強み、成長ドライバーなど。"
-              rows={3}
-            />
-          </div>
+              <div className="space-y-2">
+                <Label htmlFor="w-reason">注目理由</Label>
+                <Textarea
+                  id="w-reason"
+                  value={watchReason}
+                  onChange={e => setWatchReason(e.target.value)}
+                  placeholder="なぜこの銘柄に注目しているのか。事業の強み、成長ドライバーなど。"
+                  rows={3}
+                />
+              </div>
 
-          <div className="space-y-2">
-            <Label htmlFor="w-cond">買付条件</Label>
-            <Textarea
-              id="w-cond"
-              value={buyConditions}
-              onChange={e => setBuyConditions(e.target.value)}
-              placeholder="どうなったら買うのか。株価水準、決算内容、事業進捗など。AI シグナルはこの条件を判断材料に使います。"
-              rows={3}
-            />
-          </div>
+              <div className="space-y-2">
+                <Label htmlFor="w-cond">買付条件</Label>
+                <Textarea
+                  id="w-cond"
+                  value={buyConditions}
+                  onChange={e => setBuyConditions(e.target.value)}
+                  placeholder="どうなったら買うのか。株価水準、決算内容、事業進捗など。AI シグナルはこの条件を判断材料に使います。"
+                  rows={3}
+                />
+              </div>
+            </>
+          ) : preview ? (
+            <div className="rounded-lg border border-sky-200 bg-sky-50/60 p-3 text-xs leading-relaxed text-sky-800 dark:border-sky-900 dark:bg-sky-950/20 dark:text-sky-200">
+              この銘柄だけ先に保存します。その後、現在値・6か月価格・配当・企業情報・ニュースを取得し、AI が「今買うか」を提案します。
+            </div>
+          ) : null}
         </div>
 
         <DialogFooter>
@@ -1274,7 +1444,7 @@ function WatchFormDialog({
             キャンセル
           </Button>
           <Button
-            disabled={pending || (!isEdit && !code.trim())}
+            disabled={pending || (!isEdit && (!code.trim() || !preview))}
             onClick={() => {
               const payload = {
                 targetPrice: targetPrice ? Number(targetPrice) : null,
@@ -1286,11 +1456,11 @@ function WatchFormDialog({
               if (isEdit) {
                 update.mutate({ id: editing!.id, ...payload });
               } else {
-                add.mutate({ code: code.trim(), name: preview?.name, ...payload });
+                add.mutate({ code: code.trim(), name: preview?.name });
               }
             }}
           >
-            {pending ? "保存中..." : isEdit ? "保存" : "追加する"}
+            {pending ? "保存中..." : isEdit ? "保存" : "この銘柄を追加"}
           </Button>
         </DialogFooter>
       </DialogContent>

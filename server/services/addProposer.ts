@@ -36,7 +36,11 @@ export type AddProposalDraft = {
   rationale: string;
   amountBase: number | null;
   limitPrice: number | null;
+  /** この価格・金額で実行してよいか確認する具体条件 */
+  buyConditions: string;
   invalidation: string | null;
+  /** 提案時点の確信度。目標価格の保証ではない */
+  confidence: number;
 };
 
 const SYSTEM = `あなたは長期保有を前提とする個人投資家の投資判断を代行する分析者です。
@@ -63,6 +67,8 @@ const SYSTEM = `あなたは長期保有を前提とする個人投資家の投�
 - 借入金利と現金利回りの関係に触れる。現金を株に替えると利息収入が減る。
 - 投資カードのエグジット条件が渡されている場合はそれに照らす。
 - 結論を覆す条件を 1 つ挙げる。
+- 買う/待つ判断を実行する前に確認すべき具体条件を 1〜2 文で示す。
+- 確信度を 0〜100 で示す。ニュースや企業情報が不足する場合は 60 以下にする。
 - 飾った表現を使わない。日本語で書く。
 - 結論は 1 文（80 字以内）。根拠は 200 字程度。`;
 
@@ -251,7 +257,12 @@ const SCHEMA = {
       type: ["number", "null"],
       description: "指値の目安（現地通貨）。BUY なら現在値付近、WAIT なら待つ価格",
     },
+    buyConditions: {
+      type: "string",
+      description: "発注前に確認する価格・決算・事業進捗などの具体条件",
+    },
     invalidation: { type: ["string", "null"], description: "結論を覆す条件" },
+    confidence: { type: "integer", minimum: 0, maximum: 100 },
   },
   // OpenAI strict mode requires every property to appear in `required`.
   // Optional business fields remain optional semantically by allowing null.
@@ -261,7 +272,9 @@ const SCHEMA = {
     "rationale",
     "amountJpy",
     "limitPrice",
+    "buyConditions",
     "invalidation",
+    "confidence",
   ],
   additionalProperties: false,
 } as const;
@@ -313,7 +326,9 @@ export async function proposeForSymbol(params: {
     rationale?: string;
     amountJpy?: number | null;
     limitPrice?: number | null;
+    buyConditions?: string;
     invalidation?: string | null;
+    confidence?: number;
   };
   try {
     parsed = JSON.parse(text);
@@ -330,8 +345,9 @@ export async function proposeForSymbol(params: {
 
   const conclusion = (parsed.conclusion ?? "").trim();
   const rationale = (parsed.rationale ?? "").trim();
-  if (!conclusion || !rationale) {
-    throw new Error("AI の提案に結論または根拠が含まれていませんでした");
+  const buyConditions = (parsed.buyConditions ?? "").trim();
+  if (!conclusion || !rationale || !buyConditions) {
+    throw new Error("AI の提案に結論・根拠・買付条件のいずれかが含まれていませんでした");
   }
 
   return {
@@ -344,7 +360,9 @@ export async function proposeForSymbol(params: {
         typeof parsed.limitPrice === "number" && Number.isFinite(parsed.limitPrice)
           ? parsed.limitPrice
           : null,
+      buyConditions,
       invalidation: parsed.invalidation?.trim() || null,
+      confidence: Math.min(100, Math.max(0, Math.round(parsed.confidence ?? 50))),
     },
     sizing,
     model: PROPOSAL_MODEL,

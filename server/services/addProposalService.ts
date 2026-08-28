@@ -156,8 +156,25 @@ export async function filterRecentlyProposed(
 /** 1 銘柄の提案を作って保存する */
 export async function generateProposal(
   userId: number,
-  symbol: string
-): Promise<{ symbol: string; stance: string; conclusion: string }> {
+  symbol: string,
+  options: {
+    watchItemId?: number;
+    reviewStatus?: "PENDING";
+    evidence?: unknown;
+  } = {}
+): Promise<{
+  id: number;
+  symbol: string;
+  stance: string;
+  conclusion: string;
+  rationale: string;
+  amountBase: number | null;
+  limitPrice: number | null;
+  buyConditions: string;
+  invalidation: string | null;
+  confidence: number;
+  model: string;
+}> {
   const rows = await listPlanOverview(userId);
   const row = rows.find(r => r.symbol === symbol);
   if (!row) {
@@ -193,9 +210,11 @@ export async function generateProposal(
   );
 
   const d = await requireDb();
-  await d.insert(addProposals).values({
+  const inserted = await d.insert(addProposals).values({
     userId,
     symbol: row.symbol,
+    watchItemId: options.watchItemId,
+    reviewStatus: options.reviewStatus,
     held: row.held,
     stance: result.draft.stance,
     conclusion: result.draft.conclusion,
@@ -206,13 +225,37 @@ export async function generateProposal(
     sharePctAtProposal:
       result.sizing !== null ? String(result.sizing.currentSharePct.toFixed(4)) : null,
     invalidation: result.draft.invalidation,
+    buyConditions: result.draft.buyConditions,
+    confidence: result.draft.confidence,
+    evidence: options.evidence,
     model: result.model,
   });
 
+  const header = Array.isArray(inserted) ? inserted[0] : inserted;
+  let id = Number((header as { insertId?: number })?.insertId ?? 0);
+  if (!Number.isFinite(id) || id <= 0) {
+    const [latest] = await d
+      .select({ id: addProposals.id })
+      .from(addProposals)
+      .where(and(eq(addProposals.userId, userId), eq(addProposals.symbol, row.symbol)))
+      .orderBy(desc(addProposals.id))
+      .limit(1);
+    id = latest?.id ?? 0;
+  }
+  if (id <= 0) throw new Error("AI 提案の保存結果を確認できませんでした");
+
   return {
+    id,
     symbol: row.symbol,
     stance: result.draft.stance,
     conclusion: result.draft.conclusion,
+    rationale: result.draft.rationale,
+    amountBase: result.draft.amountBase,
+    limitPrice: result.draft.limitPrice,
+    buyConditions: result.draft.buyConditions,
+    invalidation: result.draft.invalidation,
+    confidence: result.draft.confidence,
+    model: result.model,
   };
 }
 

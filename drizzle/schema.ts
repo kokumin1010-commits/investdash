@@ -1226,6 +1226,10 @@ export const addProposals = mysqlTable(
     id: int("id").autoincrement().primaryKey(),
     userId: int("userId").notNull(),
     symbol: varchar("symbol", { length: 24 }).notNull(),
+    /** 初回ウォッチ提案の場合に、確認対象の watchlist 行を紐付ける */
+    watchItemId: int("watchItemId"),
+    /** AI が生成しただけでは PENDING。ユーザー操作でのみ確定する */
+    reviewStatus: mysqlEnum("reviewStatus", ["PENDING", "ACCEPTED", "EDITED", "REJECTED"]),
     /** 提案時点で保有していたか。未保有なら新規購入の提案になる */
     held: boolean("held").notNull().default(true),
     /**
@@ -1247,12 +1251,25 @@ export const addProposals = mysqlTable(
     sharePctAtProposal: decimal("sharePctAtProposal", { precision: 10, scale: 4 }),
     /** 結論を覆す条件。何が起きたら考えを変えるか */
     invalidation: text("invalidation"),
+    /** AI が提案した具体的な買付条件。確認前は watchlist に書き込まない */
+    buyConditions: text("buyConditions"),
+    /** 提案の確信度（0〜100）。目標価格の保証ではない */
+    confidence: int("confidence"),
+    /** 現在値・ニュース・配当・企業情報など、生成時に実際に使った根拠 */
+    evidence: json("evidence"),
     /** 使ったモデル */
     model: varchar("model", { length: 64 }),
+    /** ユーザーが採用・修正・見送りを確定した時刻 */
+    confirmedAt: timestamp("confirmedAt"),
     createdAt: timestamp("createdAt").defaultNow().notNull(),
   },
   table => ({
     userSymbolIdx: index("add_proposals_user_symbol_idx").on(table.userId, table.symbol),
+    watchStatusIdx: index("add_proposals_watch_status_idx").on(
+      table.userId,
+      table.watchItemId,
+      table.reviewStatus
+    ),
     createdIdx: index("add_proposals_created_idx").on(table.userId, table.createdAt),
   })
 );

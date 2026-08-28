@@ -82,6 +82,42 @@ function overviewData(unknownCount: number) {
   };
 }
 
+function borrowingOverview() {
+  const data = overviewData(0);
+  data.summary.totalAssets = 964_000_000;
+  data.summary.totalValueBase = 870_751_581;
+  data.summary.totalBorrowedBase = 229_223_831;
+  data.summary.netAssetsBase = 737_103_099;
+  data.summary.overallLeverage = 1.18;
+  data.brokers = [
+    {
+      key: "ibkr",
+      label: "IBKR シンガポール",
+      count: 51,
+      value: 509_266_407,
+      pnl: 55_390_000,
+      pnlPct: 12.2,
+      pct: 58.5,
+      dividendIncomeBase: 12_525_194,
+      dividendYieldPct: 2.46,
+      leverage: {
+        borrowedBase: 229_223_831,
+        netValueBase: 280_042_576,
+        leverage: 1.82,
+        marginCushionBase: 174_022_087,
+        dropToMarginCallPct: 34.2,
+        riskLevel: "CAUTION",
+        interest: {
+          effectiveRatePct: 1.73,
+          annualInterestBase: 3_961_737,
+        },
+        carry: null,
+      },
+    },
+  ];
+  return data;
+}
+
 beforeEach(() => {
   vi.stubGlobal("React", React);
   mocks.assetTrend.mockReturnValue({
@@ -109,5 +145,17 @@ describe("Dashboard actual page", () => {
     mocks.overview.mockReturnValue({ data: overviewData(1), isLoading: false, error: null });
     render(React.createElement(Dashboard));
     expect(screen.getByText("配当データ未取得")).toBeTruthy();
+  });
+
+  it("promotes the leveraged IBKR account and keeps overall leverage as a reference", () => {
+    mocks.overview.mockReturnValue({ data: borrowingOverview(), isLoading: false, error: null });
+    render(React.createElement(Dashboard));
+    expect(screen.getByText("借入（IBKR シンガポールのみ）")).toBeTruthy();
+    expect(screen.getByText("IBKR シンガポール レバレッジ")).toBeTruthy();
+    expect(screen.getAllByText("1.82 倍").length).toBeGreaterThan(0);
+    expect(screen.getByText("全体レバレッジ（参考）")).toBeTruthy();
+    expect(screen.getByText("1.18 倍")).toBeTruthy();
+    expect(screen.getAllByText("追証までの下落余地").length).toBeGreaterThan(0);
+    expect(screen.getByText("年間の借入利息")).toBeTruthy();
   });
 });

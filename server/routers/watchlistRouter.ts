@@ -20,6 +20,11 @@ import {
 } from "../services/targetReviser";
 import { withAiRunLog } from "../services/aiRunLog";
 import { toFriendlyAiError } from "../services/aiErrors";
+import {
+  generateWatchProposalDraft,
+  listLatestWatchProposals,
+  reviewWatchProposal,
+} from "../services/watchProposalService";
 
 export const watchlistRouter = router({
   list: protectedProcedure.query(async ({ ctx }) => {
@@ -49,6 +54,10 @@ export const watchlistRouter = router({
         avgCost: Number(h.avgCost),
         broker: h.broker,
       }))
+    );
+    const latestProposals = await listLatestWatchProposals(
+      ctx.user.id,
+      items.map(item => item.id)
     );
 
     return items.map(w => {
@@ -107,6 +116,12 @@ export const watchlistRouter = router({
          * 率に意味がないため null を返す。
          */
         heldPnlPct: heldPnlPct(heldAvgCost, price),
+        /** AI が生成済みでも、本人が確認するまでは計画欄へ反映しない */
+        pendingProposal:
+          latestProposals.get(w.id)?.reviewStatus === "PENDING"
+            ? latestProposals.get(w.id) ?? null
+            : null,
+        latestProposal: latestProposals.get(w.id) ?? null,
       };
     });
   }),
@@ -205,6 +220,28 @@ export const watchlistRouter = router({
       });
       return { success: true } as const;
     }),
+
+  /**
+   * 先に保存した watch item について最新データを集め、AI 提案を下書き保存する。
+   * この操作だけでは targetPrice 等を変更しない。
+   */
+  generateProposal: protectedProcedure
+    .input(z.object({ id: z.number().int().positive() }))
+    .mutation(async ({ ctx, input }) => generateWatchProposalDraft(ctx.user.id, input.id)),
+
+  /** ユーザーが確認した場合だけ AI 提案を watchlist の計画欄へ反映する */
+  reviewProposal: protectedProcedure
+    .input(
+      z.object({
+        proposalId: z.number().int().positive(),
+        decision: z.enum(["ACCEPT", "EDIT", "REJECT"]),
+        targetPrice: z.number().min(0).nullable().optional(),
+        plannedAmount: z.number().min(0).nullable().optional(),
+        watchReason: z.string().max(4000).optional(),
+        buyConditions: z.string().max(4000).optional(),
+      })
+    )
+    .mutation(async ({ ctx, input }) => reviewWatchProposal(ctx.user.id, input)),
 
   remove: protectedProcedure
     .input(z.object({ id: z.number().int().positive() }))

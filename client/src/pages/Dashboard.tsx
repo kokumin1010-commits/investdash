@@ -506,6 +506,17 @@ export default function Dashboard() {
    * 従来の表示のままにして、無用な項目を増やさない。
    */
   const hasBorrowing = (summary?.totalBorrowedBase ?? 0) > 0;
+  /**
+   * 全体レバレッジは無借入口座の資産で薄まる。借入が集中する口座の
+   * 清算リスクを主表示するため、借入額が最大の口座を選ぶ。
+   */
+  const leveragedBrokers = (data?.brokers ?? [])
+    .filter(broker => (broker.leverage?.borrowedBase ?? 0) > 0)
+    .sort(
+      (a, b) => (b.leverage?.borrowedBase ?? 0) - (a.leverage?.borrowedBase ?? 0)
+    );
+  const primaryLeveragedBroker = leveragedBrokers[0] ?? null;
+  const borrowingAccountLabel = primaryLeveragedBroker?.label ?? "借入口座";
 
   return (
     <div className="mx-auto max-w-[1400px] space-y-6 pb-10">
@@ -614,7 +625,12 @@ export default function Dashboard() {
                       </span>
                     )}
                     <span className="flex items-center justify-between gap-2">
-                      <span className="text-muted-foreground">借入（信用取引）</span>
+                      <span className="text-muted-foreground">
+                        借入
+                        {primaryLeveragedBroker && leveragedBrokers.length === 1
+                          ? `（${borrowingAccountLabel}のみ）`
+                          : "（信用取引）"}
+                      </span>
                       <span className="tabular font-medium text-loss">
                         {/* 借りているのは日本円なので、他通貨表示でも円を併記する */}
                         −{moneyWithJpy(summary?.totalBorrowedBase)}
@@ -626,9 +642,43 @@ export default function Dashboard() {
                         {money(summary?.netAssetsBase)}
                       </span>
                     </span>
-                    <span className="flex items-center justify-between gap-2">
-                      <span className="text-muted-foreground">全体のレバレッジ</span>
-                      <span className="tabular font-medium">
+                    {primaryLeveragedBroker?.leverage ? (
+                      <>
+                        <span className="flex items-center justify-between gap-2 rounded-md bg-amber-50 px-2 py-1.5 dark:bg-amber-950/25">
+                          <span className="font-semibold text-foreground">
+                            {borrowingAccountLabel} レバレッジ
+                          </span>
+                          <span className="flex items-center gap-1.5">
+                            <span className="tabular text-base font-bold text-amber-700 dark:text-amber-300">
+                              {primaryLeveragedBroker.leverage.leverage?.toFixed(2) ?? "—"} 倍
+                            </span>
+                            <Badge
+                              variant="outline"
+                              className={`h-5 px-1.5 text-[10px] ${MARGIN_RISK_STYLES[primaryLeveragedBroker.leverage.riskLevel]}`}
+                            >
+                              {MARGIN_RISK_LABELS[primaryLeveragedBroker.leverage.riskLevel]}
+                            </Badge>
+                          </span>
+                        </span>
+                        <span className="flex items-center justify-between gap-2">
+                          <span className="text-muted-foreground">追証までの下落余地</span>
+                          <span className="tabular font-medium">
+                            {primaryLeveragedBroker.leverage.dropToMarginCallPct !== null
+                              ? `−${primaryLeveragedBroker.leverage.dropToMarginCallPct.toFixed(1)}%`
+                              : "—"}
+                          </span>
+                        </span>
+                        <span className="flex items-center justify-between gap-2">
+                          <span className="text-muted-foreground">年間の借入利息</span>
+                          <span className="tabular font-medium text-loss">
+                            −{moneyWithJpy(primaryLeveragedBroker.leverage.interest?.annualInterestBase)}
+                          </span>
+                        </span>
+                      </>
+                    ) : null}
+                    <span className="flex items-center justify-between gap-2 text-[11px]">
+                      <span className="text-muted-foreground">全体レバレッジ（参考）</span>
+                      <span className="tabular text-muted-foreground">
                         {summary?.overallLeverage !== null && summary?.overallLeverage !== undefined
                           ? `${summary.overallLeverage.toFixed(2)} 倍`
                           : "—"}
