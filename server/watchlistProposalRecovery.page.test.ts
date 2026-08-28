@@ -137,4 +137,24 @@ describe("Watchlist proposal recovery", () => {
     expect(mocks.generateCalls).toHaveBeenCalledTimes(2);
     expect(mocks.generateCalls).toHaveBeenLastCalledWith({ id: 7 });
   });
+
+  it("scrolls to and highlights the watch card selected by the focus URL", async () => {
+    const scrollIntoView = vi.fn();
+    Object.defineProperty(Element.prototype, "scrollIntoView", {
+      configurable: true,
+      value: scrollIntoView,
+    });
+    window.history.replaceState({}, "", "/watchlist?focus=7");
+
+    render(React.createElement(Watchlist));
+
+    const card = document.getElementById("watch-7");
+    expect(card).toBeTruthy();
+    await waitFor(() => {
+      expect(scrollIntoView).toHaveBeenCalledWith({ behavior: "smooth", block: "center" });
+      expect(card?.className).toContain("ring-sky-400/30");
+    });
+
+    window.history.replaceState({}, "", "/watchlist");
+  });
 });

@@ -59,8 +59,8 @@ import {
   TrendingDown,
 } from "lucide-react";
 import { Lightbulb, ChevronDown, ChevronUp, AlertTriangle, Wand2 } from "lucide-react";
-import { useState } from "react";
-import { Link } from "wouter";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Link, useLocation, useSearch } from "wouter";
 import { toast } from "sonner";
 
 type WatchRow = {
@@ -198,6 +198,8 @@ function industryJa(v: string | null): string {
 }
 export default function Watchlist() {
   const utils = trpc.useUtils();
+  const search = useSearch();
+  const [, setLocation] = useLocation();
   const list = trpc.watchlist.list.useQuery();
   const [addOpen, setAddOpen] = useState(false);
   const [editTarget, setEditTarget] = useState<WatchRow | null>(null);
@@ -217,6 +219,29 @@ export default function Watchlist() {
   const [suggestion, setSuggestion] = useState<SuggestionResult | null>(null);
   const [gapsOpen, setGapsOpen] = useState(false);
   const [picked, setPicked] = useState<Set<string>>(new Set());
+  const [highlightedWatchId, setHighlightedWatchId] = useState<number | null>(null);
+  const focusTimerRef = useRef<number | null>(null);
+
+  const focusWatchId = useMemo(() => {
+    const params = new URLSearchParams(search.startsWith("?") ? search.slice(1) : search);
+    const value = Number(params.get("focus"));
+    return Number.isInteger(value) && value > 0 ? value : null;
+  }, [search]);
+
+  const revealWatchCard = useCallback((id: number) => {
+    const target = document.getElementById(`watch-${id}`);
+    if (!target) return;
+
+    setHighlightedWatchId(id);
+    const reducedMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
+    target.scrollIntoView({ behavior: reducedMotion ? "auto" : "smooth", block: "center" });
+
+    if (focusTimerRef.current !== null) window.clearTimeout(focusTimerRef.current);
+    focusTimerRef.current = window.setTimeout(() => {
+      setHighlightedWatchId(current => (current === id ? null : current));
+      focusTimerRef.current = null;
+    }, 2600);
+  }, []);
 
   const syncPrices = trpc.portfolio.syncPrices.useMutation({
     onSuccess: async () => {
@@ -323,6 +348,19 @@ export default function Watchlist() {
    */
   const needsRework = rows.filter(r => r.targetNeedsRework);
   const heldSymbols = new Set(rows.map(r => r.symbol));
+
+  useEffect(() => {
+    if (focusWatchId === null || list.isLoading) return;
+    const frame = window.requestAnimationFrame(() => revealWatchCard(focusWatchId));
+    return () => window.cancelAnimationFrame(frame);
+  }, [focusWatchId, list.data, list.isLoading, revealWatchCard]);
+
+  useEffect(
+    () => () => {
+      if (focusTimerRef.current !== null) window.clearTimeout(focusTimerRef.current);
+    },
+    []
+  );
 
   if (list.isLoading) {
     return (
@@ -814,7 +852,18 @@ export default function Watchlist() {
       ) : (
         <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
           {rows.map(r => (
-            <Card key={r.id} className={r.reachedTarget ? "border-gain/40" : undefined}>
+            <Card
+              key={r.id}
+              id={`watch-${r.id}`}
+              data-watch-id={r.id}
+              className={`scroll-mt-6 transition-[box-shadow,background-color,border-color] duration-300 ${
+                r.reachedTarget ? "border-gain/40" : ""
+              } ${
+                highlightedWatchId === r.id
+                  ? "border-sky-500 bg-sky-50/70 ring-4 ring-sky-400/30 dark:border-sky-400 dark:bg-sky-950/30"
+                  : ""
+              }`}
+            >
               <CardHeader className="pb-3">
                 <div className="flex items-start justify-between gap-2">
                   <div className="min-w-0 space-y-1">
@@ -1185,6 +1234,15 @@ export default function Watchlist() {
       <WatchFormDialog
         open={addOpen}
         onOpenChange={setAddOpen}
+        onExistingWatch={id => {
+          setAddOpen(false);
+          setLocation(`/watchlist?focus=${id}`);
+          window.requestAnimationFrame(() => revealWatchCard(id));
+        }}
+        onExistingHolding={id => {
+          setAddOpen(false);
+          setLocation(`/holdings/${id}`);
+        }}
         onAdded={item => {
           setAddOpen(false);
           setProposalBusyId(item.id);
@@ -1236,11 +1294,15 @@ export function WatchFormDialog({
   onOpenChange,
   editing,
   onAdded,
+  onExistingWatch,
+  onExistingHolding,
 }: {
   open: boolean;
   onOpenChange: (o: boolean) => void;
   editing?: WatchRow | null;
   onAdded?: (item: { id: number; symbol: string }) => void;
+  onExistingWatch?: (id: number) => void;
+  onExistingHolding?: (id: number) => void;
 }) {
   const utils = trpc.useUtils();
   const isEdit = !!editing;
@@ -1297,6 +1359,10 @@ export function WatchFormDialog({
   });
 
   const preview = lookup.data;
+  const existingWatch = preview?.existingWatch ?? null;
+  const existingHoldings = preview?.existingHoldings ?? [];
+  const recommendedHolding = existingHoldings[0] ?? null;
+  const isAlreadyRegistered = existingWatch !== null || recommendedHolding !== null;
   const pending = add.isPending || update.isPending;
 
   return (
@@ -1333,7 +1399,10 @@ export function WatchFormDialog({
                 <Input
                   id="w-code"
                   value={code}
-                  onChange={e => setCode(e.target.value)}
+                  onChange={e => {
+                    setCode(e.target.value);
+                    if (lookup.data) lookup.reset();
+                  }}
                   placeholder="7203 / MSFT"
                   onKeyDown={e => {
                     if (e.key === "Enter" && code.trim()) {
@@ -1440,6 +1509,31 @@ export function WatchFormDialog({
                 />
               </div>
             </>
+          ) : preview && isAlreadyRegistered ? (
+            <div className="space-y-2" role="status" aria-live="polite">
+              {existingWatch ? (
+                <div className="rounded-lg border border-sky-200 bg-sky-50/70 p-3 dark:border-sky-900 dark:bg-sky-950/25">
+                  <p className="text-xs font-semibold text-sky-800 dark:text-sky-200">
+                    ウォッチリスト登録済み
+                  </p>
+                  <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground">
+                    新しく追加せず、登録済みのウォッチカードへ移動できます。
+                  </p>
+                </div>
+              ) : null}
+              {recommendedHolding ? (
+                <div className="rounded-lg border border-emerald-200 bg-emerald-50/70 p-3 dark:border-emerald-900 dark:bg-emerald-950/25">
+                  <p className="text-xs font-semibold text-emerald-800 dark:text-emerald-200">
+                    保有銘柄として登録済み
+                  </p>
+                  <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground">
+                    {existingHoldings.length > 1
+                      ? `${existingHoldings.length}口座で保有しています。保有詳細を優先して表示します。`
+                      : `${BROKER_LABELS[recommendedHolding.broker as Broker] ?? recommendedHolding.broker} で保有しています。`}
+                  </p>
+                </div>
+              ) : null}
+            </div>
           ) : preview ? (
             <div className="rounded-lg border border-sky-200 bg-sky-50/60 p-3 text-xs leading-relaxed text-sky-800 dark:border-sky-900 dark:bg-sky-950/20 dark:text-sky-200">
               この銘柄だけ先に保存します。その後、現在値・6か月価格・配当・企業情報・ニュースを取得し、AI が「今買うか」を提案します。
@@ -1448,28 +1542,49 @@ export function WatchFormDialog({
         </div>
 
         <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)}>
-            キャンセル
-          </Button>
           <Button
-            disabled={pending || (!isEdit && (!code.trim() || !preview))}
+            variant="outline"
             onClick={() => {
-              const payload = {
-                targetPrice: targetPrice ? Number(targetPrice) : null,
-                plannedAmount: plannedAmount ? Number(plannedAmount) : null,
-                priority,
-                watchReason: watchReason || undefined,
-                buyConditions: buyConditions || undefined,
-              };
-              if (isEdit) {
-                update.mutate({ id: editing!.id, ...payload });
-              } else {
-                add.mutate({ code: code.trim(), name: preview?.name });
-              }
+              reset();
+              onOpenChange(false);
             }}
           >
-            {pending ? "保存中..." : isEdit ? "保存" : "この銘柄を追加"}
+            キャンセル
           </Button>
+          {!isEdit && existingWatch ? (
+            <Button
+              variant={recommendedHolding ? "outline" : "default"}
+              onClick={() => onExistingWatch?.(existingWatch.id)}
+            >
+              {recommendedHolding ? "ウォッチカードを見る" : "登録済みの銘柄を見る"}
+            </Button>
+          ) : null}
+          {!isEdit && recommendedHolding ? (
+            <Button onClick={() => onExistingHolding?.(recommendedHolding.id)}>
+              保有詳細を見る
+            </Button>
+          ) : null}
+          {isEdit || !isAlreadyRegistered ? (
+            <Button
+              disabled={pending || (!isEdit && (!code.trim() || !preview))}
+              onClick={() => {
+                const payload = {
+                  targetPrice: targetPrice ? Number(targetPrice) : null,
+                  plannedAmount: plannedAmount ? Number(plannedAmount) : null,
+                  priority,
+                  watchReason: watchReason || undefined,
+                  buyConditions: buyConditions || undefined,
+                };
+                if (isEdit) {
+                  update.mutate({ id: editing!.id, ...payload });
+                } else {
+                  add.mutate({ code: code.trim(), name: preview?.name });
+                }
+              }}
+            >
+              {pending ? "保存中..." : isEdit ? "保存" : "この銘柄を追加"}
+            </Button>
+          ) : null}
         </DialogFooter>
       </DialogContent>
     </Dialog>

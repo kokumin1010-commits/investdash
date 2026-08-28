@@ -319,11 +319,20 @@ export const portfolioRouter = router({
   /** 銘柄コードから相場情報を照会（追加フォームのプレビュー用） */
   lookup: protectedProcedure
     .input(z.object({ code: z.string().min(1).max(24) }))
-    .mutation(async ({ input }) => {
+    .mutation(async ({ ctx, input }) => {
       const { symbol, tickerCode, market } = normalizeSymbol(input.code);
       if (!symbol) throw new TRPCError({ code: "BAD_REQUEST", message: "銘柄コードを入力してください" });
 
-      const quote = await fetchQuote(symbol);
+      /*
+       * 相場プレビューと同時に、現在の利用者がすでに登録している場所も解決する。
+       * 重複を add の CONFLICT で初めて知らせると、利用者は行き先を失うため、
+       * フォームの確認段階でウォッチカード／保有詳細へ案内できるようにする。
+       */
+      const [quote, existingWatch, existingHoldingsRaw] = await Promise.all([
+        fetchQuote(symbol),
+        db.getWatchBySymbol(ctx.user.id, symbol),
+        db.listHoldingsBySymbol(ctx.user.id, symbol),
+      ]);
       if (!quote || quote.price === null) {
         throw new TRPCError({
           code: "NOT_FOUND",
@@ -331,6 +340,7 @@ export const portfolioRouter = router({
         });
       }
       const profile = await fetchCompanyProfile(symbol);
+      const existingHoldings = [...existingHoldingsRaw].sort((a, b) => a.id - b.id);
 
       return {
         symbol,
@@ -347,6 +357,19 @@ export const portfolioRouter = router({
         industry: profile?.industry ?? null,
         website: profile?.website ?? null,
         businessSummary: profile?.businessSummary ?? null,
+        existingWatch: existingWatch
+          ? {
+              id: existingWatch.id,
+              symbol: existingWatch.symbol,
+              name: existingWatch.name,
+            }
+          : null,
+        existingHoldings: existingHoldings.map(holding => ({
+          id: holding.id,
+          symbol: holding.symbol,
+          name: holding.name,
+          broker: holding.broker,
+        })),
       };
     }),
 
