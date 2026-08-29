@@ -930,7 +930,7 @@ export default function Holdings() {
                   <TableHead className="min-w-[130px] text-right">評価損益</TableHead>
                   <TableHead className="min-w-[120px] text-right">年間配当</TableHead>
                   <TableHead className="text-right">構成比</TableHead>
-                  <TableHead className="min-w-[110px]">AIシグナル</TableHead>
+                  <TableHead className="min-w-[150px]">AIシグナル</TableHead>
                   <TableHead className="w-[120px] text-right">操作</TableHead>
                 </TableRow>
               </TableHeader>
