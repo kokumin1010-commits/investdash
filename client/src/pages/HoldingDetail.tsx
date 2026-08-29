@@ -2,13 +2,12 @@ import { DisclaimerNote } from "@/components/investing/DisclaimerNote";
 import { BrokerBadge } from "@/components/investing/BrokerBadge";
 import { MoneyText, PctText, PnlText } from "@/components/investing/Figures";
 import { CurrencyToggle } from "@/components/investing/CurrencyToggle";
-import { SignalBadge, SignalPlaceholder } from "@/components/investing/SignalBadge";
-import { elapsedLabel } from "@/components/investing/SignalBody";
 import {
-  BuffettLensBlock,
-  WouldBuyNowBadge,
-} from "@/components/investing/WouldBuyNowBadge";
-import { AddAmountLine } from "@/components/investing/AddAmountLine";
+  SignalBadge,
+  SignalPlaceholder,
+} from "@/components/investing/SignalBadge";
+import { elapsedLabel } from "@/components/investing/SignalBody";
+import { BuffettLensBlock } from "@/components/investing/WouldBuyNowBadge";
 import { PriceBandPlanCard } from "@/components/investing/PriceBandPlanCard";
 import {
   HoldingDurationSummary,
@@ -19,7 +18,13 @@ import { SymbolConsultList } from "@/components/investing/SymbolConsultList";
 import { AdviceRecordCard } from "@/components/investing/AdviceRecordCard";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -44,6 +49,7 @@ import {
   type SignalAction,
 } from "@shared/investing";
 import { buildSignalHistory } from "@shared/signalHistory";
+import { buildDividendDetailView } from "@shared/dividendDetail";
 import {
   ArrowLeft,
   ArrowRight,
@@ -78,8 +84,14 @@ function holdingDurationText(days: number): string {
   return months > 0 ? `${years}年${months}か月` : `${years}年`;
 }
 
-function holdingDurationBasis(confidence: "EXACT" | "AT_LEAST" | "TRACKED_SINCE"): string {
-  return confidence === "EXACT" ? "正確" : confidence === "AT_LEAST" ? "少なくとも" : "記録開始から";
+function holdingDurationBasis(
+  confidence: "EXACT" | "AT_LEAST" | "TRACKED_SINCE"
+): string {
+  return confidence === "EXACT"
+    ? "正確"
+    : confidence === "AT_LEAST"
+      ? "少なくとも"
+      : "記録開始から";
 }
 
 function holdingDurationSource(source: string): string {
@@ -107,7 +119,10 @@ export default function HoldingDetail({ params }: { params: { id: string } }) {
   const id = Number(params.id);
   const [, setLocation] = useLocation();
   const utils = trpc.useUtils();
-  const detail = trpc.portfolio.detail.useQuery({ id }, { enabled: Number.isFinite(id) && id > 0 });
+  const detail = trpc.portfolio.detail.useQuery(
+    { id },
+    { enabled: Number.isFinite(id) && id > 0 }
+  );
 
   /*
    * 買い増しプランは銘柄（symbol）単位。detail が読めてからでないと symbol が
@@ -218,9 +233,23 @@ export default function HoldingDetail({ params }: { params: { id: string } }) {
     );
   }
 
-  const { holding, view, card, news, signalHistory, chart, addPlan, groupWeightPct } =
+  const { holding, view, card, news, signalHistory, chart, actionPlan } =
     detail.data;
   const currency = holding.currency;
+  const dividend = buildDividendDetailView(
+    view?.dividend
+      ? {
+          quantity: Number(holding.quantity),
+          perShare: view.dividend.perShare,
+          annualIncomeBase: view.dividend.annualIncomeBase,
+          yieldPct: view.dividend.yieldPct,
+          recurringPerShare: view.dividend.recurringPerShare,
+          recurringYieldPct: view.dividend.recurringYieldPct,
+          hasSpecial: view.dividend.hasSpecial,
+          updatedAt: view.dividend.updatedAt,
+        }
+      : null
+  );
 
   /*
    * 履歴に「前回からの変化」と「当時株価から今までの値動き」を付ける。
@@ -230,10 +259,17 @@ export default function HoldingDetail({ params }: { params: { id: string } }) {
    * 前後関係を付けないと「ADD の前は ADD」となり、判定が変わった瞬間を
    * 取り違える。
    */
-  const historyRows = buildSignalHistory(signalHistory, view?.currentPrice ?? null);
+  const historyRows = buildSignalHistory(
+    signalHistory,
+    view?.currentPrice ?? null
+  );
 
   const chartData = chart.map(p => ({
-    date: new Date(p.t).toLocaleDateString("ja-JP", { year: "2-digit", month: "numeric", day: "numeric" }),
+    date: new Date(p.t).toLocaleDateString("ja-JP", {
+      year: "2-digit",
+      month: "numeric",
+      day: "numeric",
+    }),
     close: p.c,
   }));
 
@@ -254,14 +290,19 @@ export default function HoldingDetail({ params }: { params: { id: string } }) {
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div className="space-y-2">
             <div className="flex flex-wrap items-center gap-2">
-              <h1 className="text-2xl font-semibold tracking-tight">{holding.name}</h1>
+              <h1 className="text-2xl font-semibold tracking-tight">
+                {holding.name}
+              </h1>
               <Badge variant="secondary" className="tabular">
                 {holding.tickerCode}
               </Badge>
               <Badge variant="outline">{marketLabel(holding.market)}</Badge>
               <BrokerBadge broker={holding.broker} />
-              {view?.signal ? <SignalBadge action={view.signal.action} showLabel /> : <SignalPlaceholder />}
-              <WouldBuyNowBadge value={view?.signal?.wouldBuyNow ?? null} />
+              {view?.signal ? (
+                <SignalBadge action={view.signal.action} showLabel />
+              ) : (
+                <SignalPlaceholder />
+              )}
             </div>
             <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
               {holding.sector ? <span>{sectorJa(holding.sector)}</span> : null}
@@ -283,7 +324,9 @@ export default function HoldingDetail({ params }: { params: { id: string } }) {
           <div className="flex flex-wrap gap-2">
             {/* 他の画面と同じ表示通貨で評価額を見られるようにする */}
             <div className="flex items-center gap-1.5">
-              <span className="text-[11px] text-muted-foreground">金額表示</span>
+              <span className="text-[11px] text-muted-foreground">
+                金額表示
+              </span>
               <CurrencyToggle />
             </div>
             <Button
@@ -292,7 +335,9 @@ export default function HoldingDetail({ params }: { params: { id: string } }) {
               disabled={syncNews.isPending}
               onClick={() => syncNews.mutate({ symbol: holding.symbol })}
             >
-              <RefreshCw className={`mr-1.5 h-3.5 w-3.5 ${syncNews.isPending ? "animate-spin" : ""}`} />
+              <RefreshCw
+                className={`mr-1.5 h-3.5 w-3.5 ${syncNews.isPending ? "animate-spin" : ""}`}
+              />
               ニュース取得
             </Button>
             {/*
@@ -301,7 +346,9 @@ export default function HoldingDetail({ params }: { params: { id: string } }) {
               自動で前提に入る。
             */}
             <Button variant="outline" size="sm" asChild>
-              <Link href={`/consult?symbol=${encodeURIComponent(holding.symbol)}`}>
+              <Link
+                href={`/consult?symbol=${encodeURIComponent(holding.symbol)}`}
+              >
                 <MessageSquare className="mr-1.5 h-3.5 w-3.5" />
                 AI に相談
               </Link>
@@ -311,7 +358,9 @@ export default function HoldingDetail({ params }: { params: { id: string } }) {
               disabled={regenSignal.isPending}
               onClick={() => regenSignal.mutate({ id })}
             >
-              <Brain className={`mr-1.5 h-3.5 w-3.5 ${regenSignal.isPending ? "animate-pulse" : ""}`} />
+              <Brain
+                className={`mr-1.5 h-3.5 w-3.5 ${regenSignal.isPending ? "animate-pulse" : ""}`}
+              />
               AI 分析を実行
             </Button>
           </div>
@@ -321,13 +370,19 @@ export default function HoldingDetail({ params }: { params: { id: string } }) {
       {/* ポジションサマリー */}
       <Card>
         <CardContent className="grid gap-x-6 gap-y-4 py-5 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-7">
-          <Metric label="保有株数" value={`${formatNumber(Number(holding.quantity), 0)} 株`} />
+          <Metric
+            label="保有株数"
+            value={`${formatNumber(Number(holding.quantity), 0)} 株`}
+          />
           {/*
             単価は換算しない。板に出る値段と一致していないと
             「いくらで買えるか」の判断に使えないため。
           */}
           <Metric label="取得単価" value={formatMoney(avgCostNum, currency)} />
-          <Metric label="現在値" value={formatMoney(view?.currentPrice, currency)} />
+          <Metric
+            label="現在値"
+            value={formatMoney(view?.currentPrice, currency)}
+          />
           <Metric
             label="評価額"
             node={
@@ -355,7 +410,8 @@ export default function HoldingDetail({ params }: { params: { id: string } }) {
                   どちらも同じレートで換算されているため、差もそのまま円建てになる。
                 */
                 baseValue={
-                  view?.marketValueBase !== null && view?.marketValueBase !== undefined
+                  view?.marketValueBase !== null &&
+                  view?.marketValueBase !== undefined
                     ? view.marketValueBase - view.costValueBase
                     : null
                 }
@@ -380,7 +436,9 @@ export default function HoldingDetail({ params }: { params: { id: string } }) {
                 : "—"
             }
             sub={
-              view?.currentPrice && view?.fiftyTwoWeekHigh && view?.fiftyTwoWeekLow
+              view?.currentPrice &&
+              view?.fiftyTwoWeekHigh &&
+              view?.fiftyTwoWeekLow
                 ? `レンジ内 ${(
                     ((view.currentPrice - view.fiftyTwoWeekLow) /
                       (view.fiftyTwoWeekHigh - view.fiftyTwoWeekLow)) *
@@ -391,7 +449,72 @@ export default function HoldingDetail({ params }: { params: { id: string } }) {
           />
           <Metric
             label="保有期間"
-            node={<HoldingDurationSummary duration={view?.holdingDuration ?? null} />}
+            node={
+              <HoldingDurationSummary
+                duration={view?.holdingDuration ?? null}
+              />
+            }
+          />
+        </CardContent>
+      </Card>
+
+      <Card
+        data-testid="holding-dividend-summary"
+        className="border-emerald-200/70 bg-emerald-50/30"
+      >
+        <CardContent className="grid gap-x-6 gap-y-4 py-4 sm:grid-cols-2 lg:grid-cols-4">
+          <Metric
+            label="予想配当利回り"
+            value={
+              dividend.status === "UNKNOWN"
+                ? "未取得"
+                : dividend.forecastYieldPct === null
+                  ? "—"
+                  : `${dividend.forecastYieldPct.toFixed(2)}%`
+            }
+            sub={dividend.basisLabel}
+          />
+          <Metric
+            label="年間配当見込"
+            node={
+              dividend.status === "UNKNOWN" ? (
+                <p className="text-base font-semibold">未取得</p>
+              ) : (
+                <MoneyText
+                  value={dividend.annualIncomeLocal}
+                  currency={currency}
+                  baseValue={dividend.annualIncomeBase}
+                  className="text-base font-semibold"
+                />
+              )
+            }
+            sub={
+              dividend.status === "NONE"
+                ? "無配・税引前"
+                : "現在の口座保有分・税引前"
+            }
+          />
+          <Metric
+            label="1株配当"
+            value={
+              dividend.forecastPerShare === null
+                ? "未取得"
+                : formatMoney(dividend.forecastPerShare, currency)
+            }
+            sub={dividend.hasSpecial ? "特別配当を除外" : "継続配当の目安"}
+          />
+          <Metric
+            label="配当データ基準"
+            value={
+              dividend.updatedAt
+                ? new Date(dividend.updatedAt).toLocaleDateString("ja-JP", {
+                    year: "numeric",
+                    month: "numeric",
+                    day: "numeric",
+                  })
+                : "未取得"
+            }
+            sub="価格と直近12か月支払実績から算出"
           />
         </CardContent>
       </Card>
@@ -409,54 +532,59 @@ export default function HoldingDetail({ params }: { params: { id: string } }) {
                 <SignalQualityBadges signal={view.signal} />
                 <span>確信度 {view.signal.confidence ?? "—"}</span>
                 <span>·</span>
-                <span>{new Date(view.signal.createdAt).toLocaleString("ja-JP")}</span>
+                <span>
+                  {new Date(view.signal.createdAt).toLocaleString("ja-JP")}
+                </span>
               </div>
             </div>
           </CardHeader>
           <CardContent className="space-y-4">
-            <div className="flex items-start gap-3">
-              <SignalBadge action={view.signal.action} showLabel className="mt-0.5 shrink-0" />
+            <HoldingActionSummary
+              action={view.signal.action}
+              plan={actionPlan}
+              addSizing={bandPlan.data?.sizing ?? null}
+              currency={currency}
+            />
+
+            <div className="space-y-1.5">
+              <p className="text-xs font-medium text-muted-foreground">
+                判断理由
+              </p>
               <p className="text-sm leading-relaxed">{view.signal.rationale}</p>
             </div>
 
             <SignalDecisionMeta signal={view.signal} />
 
-            {/*
-              「今この株を持っていなかったら買うか」と
-              「株価と中身のどちらが速く伸びたか」を出す。
-              取得単価に引きずられた保有かどうかを見分けるための材料。
-            */}
-            <BuffettLensBlock
-              wouldBuyNow={view.signal.wouldBuyNow}
-              wouldBuyNowReason={view.signal.wouldBuyNowReason}
-              priceVsValue={view.signal.priceVsValue}
-              priceVsValueReason={view.signal.priceVsValueReason}
-            />
-
-            {/*
-              ADD なら「いくら買い増すか」を続けて出す。
-              判定だけでは何をすればよいか決まらないため。
-            */}
-            {addPlan && view.currency ? (
-              <AddAmountLine
-                plan={addPlan}
-                currency={view.currency}
-                market={view.market}
-                currentSharePct={groupWeightPct}
-              />
-            ) : null}
+            <details className="rounded-lg border border-dashed bg-muted/20 px-3 py-2.5">
+              <summary className="cursor-pointer text-xs font-medium text-muted-foreground">
+                参考視点（未保有なら買うか・株価と中身）
+              </summary>
+              <div className="mt-2">
+                <BuffettLensBlock
+                  wouldBuyNow={view.signal.wouldBuyNow}
+                  wouldBuyNowReason={view.signal.wouldBuyNowReason}
+                  priceVsValue={view.signal.priceVsValue}
+                  priceVsValueReason={view.signal.priceVsValueReason}
+                />
+              </div>
+            </details>
 
             {signalHistory[0]?.factors ? (
               <>
                 <Separator />
                 <dl className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
                   {Object.entries(FACTOR_LABELS).map(([key, label]) => {
-                    const factors = signalHistory[0].factors as Record<string, string> | null;
+                    const factors = signalHistory[0].factors as Record<
+                      string,
+                      string
+                    > | null;
                     const text = factors?.[key];
                     if (!text) return null;
                     return (
                       <div key={key} className="space-y-1">
-                        <dt className="text-xs font-medium text-muted-foreground">{label}</dt>
+                        <dt className="text-xs font-medium text-muted-foreground">
+                          {label}
+                        </dt>
                         <dd className="text-xs leading-relaxed">{text}</dd>
                       </div>
                     );
@@ -474,7 +602,11 @@ export default function HoldingDetail({ params }: { params: { id: string } }) {
               <br />
               投資カードを記入してから実行すると、判断材料が増えて分析の精度が上がります。
             </p>
-            <Button size="sm" disabled={regenSignal.isPending} onClick={() => regenSignal.mutate({ id })}>
+            <Button
+              size="sm"
+              disabled={regenSignal.isPending}
+              onClick={() => regenSignal.mutate({ id })}
+            >
               <Brain className="mr-1.5 h-3.5 w-3.5" />
               AI 分析を実行
             </Button>
@@ -496,9 +628,13 @@ export default function HoldingDetail({ params }: { params: { id: string } }) {
           if (symbol) generateBandPlan.mutate({ symbol });
         }}
         onRunChecks={bandId => runBandChecks.mutate({ bandId })}
-        isCheckingBandId={runBandChecks.isPending ? runBandChecks.variables?.bandId : null}
+        isCheckingBandId={
+          runBandChecks.isPending ? runBandChecks.variables?.bandId : null
+        }
         onSaveBand={params => updateBand.mutate(params)}
-        savingBandId={updateBand.isPending ? (updateBand.variables?.bandId ?? null) : null}
+        savingBandId={
+          updateBand.isPending ? (updateBand.variables?.bandId ?? null) : null
+        }
       />
 
       <Tabs defaultValue="card" className="min-w-0">
@@ -511,8 +647,12 @@ export default function HoldingDetail({ params }: { params: { id: string } }) {
               件数は重複を畳んだ後の数にする。タブに 13 と出して中身が 9 行だと
               「4 件抜けている」と受け取られる。
             */}
-            <TabsTrigger value="history">分析の履歴 ({historyRows.length})</TabsTrigger>
-            <TabsTrigger value="consult">相談 ({consults.data?.length ?? 0})</TabsTrigger>
+            <TabsTrigger value="history">
+              分析の履歴 ({historyRows.length})
+            </TabsTrigger>
+            <TabsTrigger value="consult">
+              相談 ({consults.data?.length ?? 0})
+            </TabsTrigger>
           </TabsList>
         </div>
 
@@ -559,11 +699,28 @@ export default function HoldingDetail({ params }: { params: { id: string } }) {
                 </p>
               ) : (
                 <ResponsiveContainer width="100%" height={300}>
-                  <AreaChart data={chartData} margin={{ left: 4, right: 8, top: 8, bottom: 0 }}>
+                  <AreaChart
+                    data={chartData}
+                    margin={{ left: 4, right: 8, top: 8, bottom: 0 }}
+                  >
                     <defs>
-                      <linearGradient id="priceFill" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="0%" stopColor="var(--chart-1)" stopOpacity={0.3} />
-                        <stop offset="100%" stopColor="var(--chart-1)" stopOpacity={0.02} />
+                      <linearGradient
+                        id="priceFill"
+                        x1="0"
+                        y1="0"
+                        x2="0"
+                        y2="1"
+                      >
+                        <stop
+                          offset="0%"
+                          stopColor="var(--chart-1)"
+                          stopOpacity={0.3}
+                        />
+                        <stop
+                          offset="100%"
+                          stopColor="var(--chart-1)"
+                          stopOpacity={0.02}
+                        />
                       </linearGradient>
                     </defs>
                     <XAxis
@@ -591,7 +748,10 @@ export default function HoldingDetail({ params }: { params: { id: string } }) {
                         fontSize: 12,
                         color: "var(--popover-foreground)",
                       }}
-                      formatter={(v: number) => [formatMoney(v, currency), "終値"]}
+                      formatter={(v: number) => [
+                        formatMoney(v, currency),
+                        "終値",
+                      ]}
                     />
                     <Area
                       type="monotone"
@@ -621,7 +781,9 @@ export default function HoldingDetail({ params }: { params: { id: string } }) {
             <CardContent className="space-y-2.5">
               {news.length === 0 ? (
                 <div className="flex flex-col items-center gap-3 py-8 text-center">
-                  <p className="text-sm text-muted-foreground">ニュースがまだ取得されていません</p>
+                  <p className="text-sm text-muted-foreground">
+                    ニュースがまだ取得されていません
+                  </p>
                   <Button
                     variant="outline"
                     size="sm"
@@ -649,7 +811,9 @@ export default function HoldingDetail({ params }: { params: { id: string } }) {
             </CardHeader>
             <CardContent className="space-y-3">
               {signalHistory.length === 0 ? (
-                <p className="py-8 text-center text-sm text-muted-foreground">履歴はまだありません</p>
+                <p className="py-8 text-center text-sm text-muted-foreground">
+                  履歴はまだありません
+                </p>
               ) : (
                 historyRows.map(s => (
                   <div
@@ -659,7 +823,9 @@ export default function HoldingDetail({ params }: { params: { id: string } }) {
                       13 件が同じ見た目で並ぶと「いつ考えが変わったか」が埋もれる。
                     */
                     className={`rounded-lg border p-3 ${
-                      s.changed ? "border-primary/40 bg-primary/[0.03]" : "border-border/70"
+                      s.changed
+                        ? "border-primary/40 bg-primary/[0.03]"
+                        : "border-border/70"
                     }`}
                   >
                     <div className="flex flex-wrap items-center justify-between gap-2">
@@ -670,7 +836,9 @@ export default function HoldingDetail({ params }: { params: { id: string } }) {
                         */}
                         {s.changed && s.prevAction ? (
                           <>
-                            <SignalBadge action={s.prevAction as SignalAction} />
+                            <SignalBadge
+                              action={s.prevAction as SignalAction}
+                            />
                             <ArrowRight className="h-3 w-3 text-muted-foreground" />
                           </>
                         ) : null}
@@ -706,13 +874,17 @@ export default function HoldingDetail({ params }: { params: { id: string } }) {
                           <>
                             <span>→</span>
                             <span className="tabular">
-                              今 {view?.currentPrice !== null && view?.currentPrice !== undefined
+                              今{" "}
+                              {view?.currentPrice !== null &&
+                              view?.currentPrice !== undefined
                                 ? formatMoney(view.currentPrice, currency)
                                 : "—"}
                             </span>
                             <span
                               className={`tabular font-medium ${
-                                s.priceChangePct >= 0 ? "text-gain" : "text-loss"
+                                s.priceChangePct >= 0
+                                  ? "text-gain"
+                                  : "text-loss"
                               }`}
                             >
                               {s.priceChangePct >= 0 ? "+" : ""}
@@ -722,7 +894,9 @@ export default function HoldingDetail({ params }: { params: { id: string } }) {
                         ) : null}
                       </p>
                     ) : null}
-                    <p className="mt-2 text-xs leading-relaxed text-muted-foreground">{s.rationale}</p>
+                    <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
+                      {s.rationale}
+                    </p>
                   </div>
                 ))
               )}
@@ -737,7 +911,9 @@ export default function HoldingDetail({ params }: { params: { id: string } }) {
             <CardTitle className="text-base">事業概要</CardTitle>
           </CardHeader>
           <CardContent>
-            <p className="text-xs leading-relaxed text-muted-foreground">{holding.businessSummary}</p>
+            <p className="text-xs leading-relaxed text-muted-foreground">
+              {holding.businessSummary}
+            </p>
           </CardContent>
         </Card>
       ) : null}
@@ -754,6 +930,127 @@ const FACTOR_LABELS: Record<string, string> = {
   positionSizing: "ポジションサイズ",
   thesisIntegrity: "投資ロジックの健全性",
 };
+
+function HoldingActionSummary({
+  action,
+  plan,
+  addSizing,
+  currency,
+}: {
+  action: SignalAction;
+  plan: {
+    direction: "BUY" | "NONE" | "REVIEW" | "SELL" | "EXIT";
+    shares: number | null;
+    amountLocal: number | null;
+    amountBase: number | null;
+    afterQuantity: number;
+    afterWeightPct: number | null;
+    accountCount: number;
+    lotUncertain: boolean;
+    rationale: string;
+  } | null;
+  addSizing: {
+    status: string;
+    shares: number;
+    amountLocal: number;
+    amountBase: number;
+    afterWeightPct: number;
+    reasons: string[];
+  } | null;
+  currency: string;
+}) {
+  const addReady =
+    action === "ADD" && addSizing?.status === "BUY" && addSizing.shares > 0;
+  const shares = addReady ? addSizing.shares : (plan?.shares ?? 0);
+  const amountLocal = addReady
+    ? addSizing.amountLocal
+    : (plan?.amountLocal ?? 0);
+  const amountBase = addReady ? addSizing.amountBase : (plan?.amountBase ?? 0);
+  const afterWeightPct = addReady
+    ? addSizing.afterWeightPct
+    : (plan?.afterWeightPct ?? null);
+  const afterQuantity = addReady ? null : (plan?.afterQuantity ?? null);
+
+  const headline =
+    action === "ADD"
+      ? addReady
+        ? `${formatNumber(shares, 0)}株の買い増しを検討`
+        : "買い増し条件と価格帯を確認"
+      : action === "REDUCE"
+        ? `${formatNumber(shares, 0)}株の一部売却を検討`
+        : action === "EXIT"
+          ? `${formatNumber(shares, 0)}株の全売却を検討`
+          : action === "WATCH"
+            ? `${formatNumber(plan?.afterQuantity ?? 0, 0)}株を維持して確認待ち`
+            : `${formatNumber(plan?.afterQuantity ?? 0, 0)}株を継続保有`;
+
+  return (
+    <div
+      data-testid="holding-action-summary"
+      className="space-y-3 rounded-xl border bg-primary/[0.035] p-3.5"
+    >
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <div>
+          <p className="text-xs font-medium text-muted-foreground">
+            現在の保有への提案
+          </p>
+          <p className="mt-1 text-base font-semibold">{headline}</p>
+        </div>
+        <SignalBadge action={action} showLabel />
+      </div>
+
+      <div className="grid grid-cols-3 gap-2 rounded-lg bg-background/80 p-2.5">
+        <div className="min-w-0">
+          <p className="text-[10px] text-muted-foreground">今回</p>
+          <p className="tabular text-sm font-semibold">
+            {formatNumber(shares, 0)} 株
+          </p>
+        </div>
+        <div className="min-w-0 border-l pl-2">
+          <p className="text-[10px] text-muted-foreground">概算金額</p>
+          {shares > 0 ? (
+            <MoneyText
+              value={amountLocal}
+              currency={currency}
+              baseValue={amountBase}
+              className="block truncate text-sm font-semibold"
+            />
+          ) : (
+            <p className="text-sm font-semibold">売買なし</p>
+          )}
+        </div>
+        <div className="min-w-0 border-l pl-2">
+          <p className="text-[10px] text-muted-foreground">実行後</p>
+          <p className="tabular text-sm font-semibold">
+            {afterWeightPct === null ? "—" : `${afterWeightPct.toFixed(2)}%`}
+          </p>
+          {afterQuantity !== null ? (
+            <p className="tabular truncate text-[10px] text-muted-foreground">
+              {formatNumber(afterQuantity, 0)} 株
+            </p>
+          ) : null}
+        </div>
+      </div>
+
+      <p className="text-xs leading-relaxed text-muted-foreground">
+        {addReady
+          ? addSizing.reasons[0]
+          : (plan?.rationale ?? "実行量を計算できません")}
+      </p>
+      {plan && plan.accountCount > 1 ? (
+        <p className="text-[11px] text-muted-foreground">
+          {plan.accountCount}
+          口座の合計で計算。実行する口座は確認して選択してください。
+        </p>
+      ) : null}
+      {plan?.lotUncertain ? (
+        <p className="text-[11px] text-amber-700">
+          香港株は銘柄ごとの売買単位を発注前に確認してください。
+        </p>
+      ) : null}
+    </div>
+  );
+}
 
 function Metric({
   label,
@@ -772,7 +1069,10 @@ function Metric({
     <div className="space-y-1">
       <p className="text-xs font-medium text-muted-foreground">{label}</p>
       {node ?? <p className="tabular text-base font-semibold">{value}</p>}
-      {subNode ?? (sub ? <p className="tabular text-xs text-muted-foreground">{sub}</p> : null)}
+      {subNode ??
+        (sub ? (
+          <p className="tabular text-xs text-muted-foreground">{sub}</p>
+        ) : null)}
     </div>
   );
 }
@@ -806,27 +1106,44 @@ function NewsRow({
             <ExternalLink className="mt-0.5 h-3 w-3 shrink-0 text-muted-foreground" />
           </a>
           {item.summary ? (
-            <p className="text-xs leading-relaxed text-muted-foreground">{item.summary}</p>
+            <p className="text-xs leading-relaxed text-muted-foreground">
+              {item.summary}
+            </p>
           ) : null}
           <div className="flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
             {item.source ? <span>{item.source}</span> : null}
             {item.publishedAt ? (
-              <span>{new Date(item.publishedAt).toLocaleString("ja-JP", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" })}</span>
+              <span>
+                {new Date(item.publishedAt).toLocaleString("ja-JP", {
+                  month: "numeric",
+                  day: "numeric",
+                  hour: "2-digit",
+                  minute: "2-digit",
+                })}
+              </span>
             ) : null}
           </div>
         </div>
         <div className="flex shrink-0 flex-col items-end gap-1">
           {item.sentiment ? (
-            <Badge variant="outline" className={`text-[11px] ${SENTIMENT_STYLES[item.sentiment]}`}>
+            <Badge
+              variant="outline"
+              className={`text-[11px] ${SENTIMENT_STYLES[item.sentiment]}`}
+            >
               {sentimentLabel(item.sentiment)}
             </Badge>
           ) : (
-            <Badge variant="outline" className="border-dashed text-[11px] text-muted-foreground">
+            <Badge
+              variant="outline"
+              className="border-dashed text-[11px] text-muted-foreground"
+            >
               未分析
             </Badge>
           )}
           {item.impactScore !== null ? (
-            <span className="tabular text-[11px] text-muted-foreground">影響度 {item.impactScore}</span>
+            <span className="tabular text-[11px] text-muted-foreground">
+              影響度 {item.impactScore}
+            </span>
           ) : null}
         </div>
       </div>
@@ -852,37 +1169,43 @@ const FIELDS = [
   {
     key: "buyReason" as const,
     label: "買付理由",
-    placeholder: "なぜこの銘柄を買ったのか。当時の判断材料を、未来の自分が読んで理解できる言葉で書き残します。",
+    placeholder:
+      "なぜこの銘柄を買ったのか。当時の判断材料を、未来の自分が読んで理解できる言葉で書き残します。",
     rows: 4,
   },
   {
     key: "coreThesis" as const,
     label: "コア投資ロジック",
-    placeholder: "この投資が成立するために必要な条件は何か。この前提が崩れたら投資理由が消える、という核心を 1〜3 点に絞って書きます。",
+    placeholder:
+      "この投資が成立するために必要な条件は何か。この前提が崩れたら投資理由が消える、という核心を 1〜3 点に絞って書きます。",
     rows: 4,
   },
   {
     key: "valuationAssumption" as const,
     label: "バリュエーション前提",
-    placeholder: "どの指標で、どの水準を妥当と考えたか。想定 PER・PBR・売上成長率・利益率などの前提を記録します。",
+    placeholder:
+      "どの指標で、どの水準を妥当と考えたか。想定 PER・PBR・売上成長率・利益率などの前提を記録します。",
     rows: 3,
   },
   {
     key: "keyFinancials" as const,
     label: "主要決算数値",
-    placeholder: "直近決算の売上・営業利益・EPS・進捗率など。決算発表のたびに追記していくと、変化が追えます。",
+    placeholder:
+      "直近決算の売上・営業利益・EPS・進捗率など。決算発表のたびに追記していくと、変化が追えます。",
     rows: 4,
   },
   {
     key: "exitConditions" as const,
     label: "エグジット条件",
-    placeholder: "どうなったら売るのか。目標株価到達、投資ロジックの崩壊、代替投資先の出現など、事前に決めておく条件を書きます。AI シグナルはこの条件を最優先で確認します。",
+    placeholder:
+      "どうなったら売るのか。目標株価到達、投資ロジックの崩壊、代替投資先の出現など、事前に決めておく条件を書きます。AI シグナルはこの条件を最優先で確認します。",
     rows: 4,
   },
   {
     key: "risks" as const,
     label: "想定リスク",
-    placeholder: "この投資が失敗するとしたら、どのシナリオか。競合、規制、為替、経営陣など。",
+    placeholder:
+      "この投資が失敗するとしたら、どのシナリオか。競合、規制、為替、経営陣など。",
     rows: 3,
   },
 ];
@@ -964,7 +1287,13 @@ function InvestmentCardForm({
 
   const fairValueGap = useMemo(() => {
     const fv = Number(form.fairValue);
-    if (!form.fairValue || !Number.isFinite(fv) || fv <= 0 || currentPrice === null) return null;
+    if (
+      !form.fairValue ||
+      !Number.isFinite(fv) ||
+      fv <= 0 ||
+      currentPrice === null
+    )
+      return null;
     return ((currentPrice - fv) / fv) * 100;
   }, [form.fairValue, currentPrice]);
 
@@ -978,11 +1307,16 @@ function InvestmentCardForm({
             <div>
               <CardTitle className="text-base">企業投資カード</CardTitle>
               <CardDescription className="text-xs">
-                「なぜこの銘柄を買ったのか」を忘れないための記録。AI シグナルはこの内容を判断材料に使います。
+                「なぜこの銘柄を買ったのか」を忘れないための記録。AI
+                シグナルはこの内容を判断材料に使います。
               </CardDescription>
             </div>
             <div className="flex flex-wrap items-center gap-2">
-              <Badge variant={filledCount === FIELDS.length ? "default" : "secondary"}>
+              <Badge
+                variant={
+                  filledCount === FIELDS.length ? "default" : "secondary"
+                }
+              >
                 {filledCount} / {FIELDS.length} 項目 記入済み
               </Badge>
               <Button
@@ -1022,7 +1356,9 @@ function InvestmentCardForm({
         <CardContent className="space-y-5">
           <div className="grid gap-4 sm:grid-cols-3">
             <div className="space-y-2">
-              <Label htmlFor="fair-value">想定フェアバリュー（{currency}）</Label>
+              <Label htmlFor="fair-value">
+                想定フェアバリュー（{currency}）
+              </Label>
               <Input
                 id="fair-value"
                 type="number"
@@ -1034,8 +1370,15 @@ function InvestmentCardForm({
               {fairValueGap !== null ? (
                 <p className="text-xs text-muted-foreground">
                   現在値は想定価値より{" "}
-                  <span className={fairValueGap > 0 ? "text-loss font-medium" : "text-gain font-medium"}>
-                    {fairValueGap > 0 ? "割高" : "割安"} {Math.abs(fairValueGap).toFixed(1)}%
+                  <span
+                    className={
+                      fairValueGap > 0
+                        ? "text-loss font-medium"
+                        : "text-gain font-medium"
+                    }
+                  >
+                    {fairValueGap > 0 ? "割高" : "割安"}{" "}
+                    {Math.abs(fairValueGap).toFixed(1)}%
                   </span>
                 </p>
               ) : null}

@@ -2,9 +2,17 @@ import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import * as db from "../db";
 import { protectedProcedure, router } from "../_core/trpc";
-import { fetchCompanyProfile, fetchPriceHistory, fetchQuote } from "../services/marketData";
+import {
+  fetchCompanyProfile,
+  fetchPriceHistory,
+  fetchQuote,
+} from "../services/marketData";
 import { isQuotaError, toFriendlyAiError } from "../services/aiErrors";
-import { buildAssetTrend, resolveScale, type SnapshotInput } from "../services/assetTrend";
+import {
+  buildAssetTrend,
+  resolveScale,
+  type SnapshotInput,
+} from "../services/assetTrend";
 import {
   buildInterestAssetViews,
   summarizeInterestAssets,
@@ -41,7 +49,10 @@ import {
 } from "../services/cardService";
 import { listAiRuns } from "../services/aiRunLog";
 import { checkVerdicts } from "../services/outcomeService";
-import { generateCandidateSuggestions, addCandidatesToWatchlist } from "../services/candidateService";
+import {
+  generateCandidateSuggestions,
+  addCandidatesToWatchlist,
+} from "../services/candidateService";
 import {
   generateProposal,
   generateProposalBatch,
@@ -68,6 +79,7 @@ import {
 import { BROKERS, normalizeSymbol } from "../../shared/investing";
 import { BAND_ACTIONS } from "../../shared/priceBands";
 import { computePortfolioPositionSizing } from "../../shared/portfolioPositionSizing";
+import { buildHoldingActionPlan } from "../../shared/holdingActionPlan";
 import { convertToJpy } from "../services/fx";
 import { getRailwayDataBackfillStatus } from "../railwayScheduler";
 import {
@@ -76,7 +88,9 @@ import {
   withSchedulerRunLog,
 } from "../services/schedulerRunLog";
 
-const decimalString = z.union([z.number(), z.string()]).transform(v => String(v));
+const decimalString = z
+  .union([z.number(), z.string()])
+  .transform(v => String(v));
 
 export const portfolioRouter = router({
   /** ダッシュボード・一覧の統合データ */
@@ -84,17 +98,23 @@ export const portfolioRouter = router({
     return buildPortfolio(ctx.user.id);
   }),
 
-  settings: protectedProcedure.query(async ({ ctx }) => db.getSettings(ctx.user.id)),
+  settings: protectedProcedure.query(async ({ ctx }) =>
+    db.getSettings(ctx.user.id)
+  ),
 
   /** Railway 常駐 cron が実際に動いた時刻と不足件数（運用確認用） */
-  railwayDataBackfillStatus: protectedProcedure.query(() => getRailwayDataBackfillStatus()),
+  railwayDataBackfillStatus: protectedProcedure.query(() =>
+    getRailwayDataBackfillStatus()
+  ),
 
   schedulerRuns: protectedProcedure
     .input(
       z
         .object({
           kind: z.string().max(64).optional(),
-          status: z.enum(["RUNNING", "SUCCESS", "PARTIAL", "FAILED", "SKIPPED"]).optional(),
+          status: z
+            .enum(["RUNNING", "SUCCESS", "PARTIAL", "FAILED", "SKIPPED"])
+            .optional(),
           trigger: z.enum(["SCHEDULED", "MANUAL", "STARTUP"]).optional(),
           from: z.coerce.date().optional(),
           to: z.coerce.date().optional(),
@@ -118,8 +138,14 @@ export const portfolioRouter = router({
     }),
 
   systemEvents: protectedProcedure
-    .input(z.object({ limit: z.number().int().min(1).max(200).default(50) }).default({ limit: 50 }))
-    .query(async ({ ctx, input }) => db.listSystemEvents(ctx.user.id, input.limit)),
+    .input(
+      z
+        .object({ limit: z.number().int().min(1).max(200).default(50) })
+        .default({ limit: 50 })
+    )
+    .query(async ({ ctx, input }) =>
+      db.listSystemEvents(ctx.user.id, input.limit)
+    ),
 
   updateSettings: protectedProcedure
     .input(
@@ -128,7 +154,12 @@ export const portfolioRouter = router({
         sgdJpyRate: z.number().positive().optional(),
         hkdJpyRate: z.number().positive().optional(),
         concentrationThreshold: z.number().int().min(1).max(100).optional(),
-        sectorConcentrationThreshold: z.number().int().min(1).max(100).optional(),
+        sectorConcentrationThreshold: z
+          .number()
+          .int()
+          .min(1)
+          .max(100)
+          .optional(),
         cashBalance: z.number().min(0).optional(),
         autoNewsEnabled: z.boolean().optional(),
         fxAutoUpdate: z.boolean().optional(),
@@ -136,12 +167,18 @@ export const portfolioRouter = router({
     )
     .mutation(async ({ ctx, input }) => {
       return db.updateSettings(ctx.user.id, {
-        usdJpyRate: input.usdJpyRate !== undefined ? String(input.usdJpyRate) : undefined,
-        sgdJpyRate: input.sgdJpyRate !== undefined ? String(input.sgdJpyRate) : undefined,
-        hkdJpyRate: input.hkdJpyRate !== undefined ? String(input.hkdJpyRate) : undefined,
+        usdJpyRate:
+          input.usdJpyRate !== undefined ? String(input.usdJpyRate) : undefined,
+        sgdJpyRate:
+          input.sgdJpyRate !== undefined ? String(input.sgdJpyRate) : undefined,
+        hkdJpyRate:
+          input.hkdJpyRate !== undefined ? String(input.hkdJpyRate) : undefined,
         concentrationThreshold: input.concentrationThreshold,
         sectorConcentrationThreshold: input.sectorConcentrationThreshold,
-        cashBalance: input.cashBalance !== undefined ? String(input.cashBalance) : undefined,
+        cashBalance:
+          input.cashBalance !== undefined
+            ? String(input.cashBalance)
+            : undefined,
         autoNewsEnabled: input.autoNewsEnabled,
         fxAutoUpdate: input.fxAutoUpdate,
         // 手動でレートを入れたときは、自動取得の時刻表示が実態と合わなくなるため消す
@@ -160,7 +197,11 @@ export const portfolioRouter = router({
   syncFxRate: protectedProcedure.mutation(async ({ ctx }) => {
     const rates = await syncFxRate(ctx.user.id, true);
     // すべて取れなかった場合だけ失敗として扱う（1 つでも取れれば前進している）
-    if (rates.usdJpy === null && rates.sgdJpy === null && rates.hkdJpy === null) {
+    if (
+      rates.usdJpy === null &&
+      rates.sgdJpy === null &&
+      rates.hkdJpy === null
+    ) {
       throw new TRPCError({
         code: "INTERNAL_SERVER_ERROR",
         message:
@@ -171,7 +212,9 @@ export const portfolioRouter = router({
   }),
 
   /** 口座別の残高・証拠金情報（信用取引の負債管理） */
-  brokerBalances: protectedProcedure.query(async ({ ctx }) => db.listBrokerBalances(ctx.user.id)),
+  brokerBalances: protectedProcedure.query(async ({ ctx }) =>
+    db.listBrokerBalances(ctx.user.id)
+  ),
 
   /**
    * 口座の残高・証拠金情報を保存する。
@@ -225,7 +268,10 @@ export const portfolioRouter = router({
       let merged = breakdown;
       if (existing?.currencyBreakdown) {
         try {
-          const prev = JSON.parse(existing.currencyBreakdown) as Record<string, number>;
+          const prev = JSON.parse(existing.currencyBreakdown) as Record<
+            string,
+            number
+          >;
           merged = { ...prev, ...breakdown };
         } catch {
           // 壊れた JSON は引き継がず、今回の入力だけを保存する
@@ -239,7 +285,8 @@ export const portfolioRouter = router({
         cashBalance: String(input.cashBalance),
         maintenanceMargin: String(input.maintenanceMargin),
         interestMtd: String(input.interestMtd),
-        currencyBreakdown: Object.keys(merged).length > 0 ? JSON.stringify(merged) : null,
+        currencyBreakdown:
+          Object.keys(merged).length > 0 ? JSON.stringify(merged) : null,
         capturedAt: new Date(),
       });
       return { id } as const;
@@ -299,10 +346,16 @@ export const portfolioRouter = router({
         name: input.name,
         currency: input.currency.toUpperCase(),
         amount: String(input.amount),
-        annualRatePct: input.annualRatePct === undefined ? null : String(input.annualRatePct),
-        dailyIncome: input.dailyIncome === undefined ? null : String(input.dailyIncome),
+        annualRatePct:
+          input.annualRatePct === undefined
+            ? null
+            : String(input.annualRatePct),
+        dailyIncome:
+          input.dailyIncome === undefined ? null : String(input.dailyIncome),
         cumulativeIncome:
-          input.cumulativeIncome === undefined ? null : String(input.cumulativeIncome),
+          input.cumulativeIncome === undefined
+            ? null
+            : String(input.cumulativeIncome),
         compounding: input.compounding,
         notes: input.notes ?? null,
         capturedAt: new Date(),
@@ -323,7 +376,11 @@ export const portfolioRouter = router({
     .input(z.object({ code: z.string().min(1).max(24) }))
     .mutation(async ({ ctx, input }) => {
       const { symbol, tickerCode, market } = normalizeSymbol(input.code);
-      if (!symbol) throw new TRPCError({ code: "BAD_REQUEST", message: "銘柄コードを入力してください" });
+      if (!symbol)
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "銘柄コードを入力してください",
+        });
 
       /*
        * 相場プレビューと同時に、現在の利用者がすでに登録している場所も解決する。
@@ -342,7 +399,9 @@ export const portfolioRouter = router({
         });
       }
       const profile = await fetchCompanyProfile(symbol);
-      const existingHoldings = [...existingHoldingsRaw].sort((a, b) => a.id - b.id);
+      const existingHoldings = [...existingHoldingsRaw].sort(
+        (a, b) => a.id - b.id
+      );
 
       return {
         symbol,
@@ -390,12 +449,20 @@ export const portfolioRouter = router({
     )
     .mutation(async ({ ctx, input }) => {
       const { symbol, tickerCode, market } = normalizeSymbol(input.code);
-      if (!symbol) throw new TRPCError({ code: "BAD_REQUEST", message: "銘柄コードが不正です" });
+      if (!symbol)
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "銘柄コードが不正です",
+        });
 
       // 同一銘柄でも証券口座が違えば別ポジションとして登録できる
       // （例: ヤクルトを moomoo と楽天 iSPEED の両方で保有）
       const broker = input.broker ?? "other";
-      const existing = await db.getHoldingBySymbolAndBroker(ctx.user.id, symbol, broker);
+      const existing = await db.getHoldingBySymbolAndBroker(
+        ctx.user.id,
+        symbol,
+        broker
+      );
       if (existing) {
         throw new TRPCError({
           code: "CONFLICT",
@@ -416,17 +483,22 @@ export const portfolioRouter = router({
         broker,
         quantity: String(input.quantity),
         avgCost: String(input.avgCost),
-        currentPrice: quote?.price !== null && quote?.price !== undefined ? String(quote.price) : undefined,
+        currentPrice:
+          quote?.price !== null && quote?.price !== undefined
+            ? String(quote.price)
+            : undefined,
         previousClose:
           quote?.previousClose !== null && quote?.previousClose !== undefined
             ? String(quote.previousClose)
             : undefined,
         fiftyTwoWeekHigh:
-          quote?.fiftyTwoWeekHigh !== null && quote?.fiftyTwoWeekHigh !== undefined
+          quote?.fiftyTwoWeekHigh !== null &&
+          quote?.fiftyTwoWeekHigh !== undefined
             ? String(quote.fiftyTwoWeekHigh)
             : undefined,
         fiftyTwoWeekLow:
-          quote?.fiftyTwoWeekLow !== null && quote?.fiftyTwoWeekLow !== undefined
+          quote?.fiftyTwoWeekLow !== null &&
+          quote?.fiftyTwoWeekLow !== undefined
             ? String(quote.fiftyTwoWeekLow)
             : undefined,
         sector: profile?.sector ?? undefined,
@@ -457,12 +529,18 @@ export const portfolioRouter = router({
     )
     .mutation(async ({ ctx, input }) => {
       const target = await db.getHolding(ctx.user.id, input.id);
-      if (!target) throw new TRPCError({ code: "NOT_FOUND", message: "銘柄が見つかりません" });
+      if (!target)
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "銘柄が見つかりません",
+        });
 
       await db.updateHolding(ctx.user.id, input.id, {
         name: input.name,
-        quantity: input.quantity !== undefined ? String(input.quantity) : undefined,
-        avgCost: input.avgCost !== undefined ? String(input.avgCost) : undefined,
+        quantity:
+          input.quantity !== undefined ? String(input.quantity) : undefined,
+        avgCost:
+          input.avgCost !== undefined ? String(input.avgCost) : undefined,
         broker: input.broker,
         notes: input.notes,
         acquiredAt: input.acquiredAt,
@@ -480,7 +558,11 @@ export const portfolioRouter = router({
     .input(z.object({ id: z.number().int().positive() }))
     .mutation(async ({ ctx, input }) => {
       const removed = await db.deleteHolding(ctx.user.id, input.id);
-      if (!removed) throw new TRPCError({ code: "NOT_FOUND", message: "銘柄が見つかりません" });
+      if (!removed)
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "銘柄が見つかりません",
+        });
       return { success: true, symbol: removed.symbol } as const;
     }),
 
@@ -489,7 +571,11 @@ export const portfolioRouter = router({
     .input(z.object({ id: z.number().int().positive() }))
     .query(async ({ ctx, input }) => {
       const holding = await db.getHolding(ctx.user.id, input.id);
-      if (!holding) throw new TRPCError({ code: "NOT_FOUND", message: "銘柄が見つかりません" });
+      if (!holding)
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "銘柄が見つかりません",
+        });
 
       const [card, news, history, chart, portfolio] = await Promise.all([
         db.getCard(ctx.user.id, holding.symbol),
@@ -505,7 +591,19 @@ export const portfolioRouter = router({
        * 口座ごとに 1 回分を出すと、同じ銘柄を 3 口座で持っている場合に
        * 3 倍の金額を買ってよいように見えてしまう。
        */
-      const group = portfolio.groups.find(g => g.symbol === holding.symbol) ?? null;
+      const group =
+        portfolio.groups.find(g => g.symbol === holding.symbol) ?? null;
+      const actionPlan = group?.signal?.action
+        ? buildHoldingActionPlan({
+            action: group.signal.action,
+            quantity: group.quantity,
+            currentPrice: group.currentPrice,
+            marketValueBase: group.marketValueBase,
+            currentWeightPct: group.weightPct,
+            market: group.market,
+            accountCount: group.entries.length,
+          })
+        : null;
 
       return {
         holding,
@@ -515,6 +613,7 @@ export const portfolioRouter = router({
         signalHistory: history,
         chart,
         addPlan: group?.addPlan ?? null,
+        actionPlan,
         /** 銘柄合計の構成比。買い増し後との比較に使う */
         groupWeightPct: group?.weightPct ?? null,
       };
@@ -527,7 +626,9 @@ export const portfolioRouter = router({
         range: z.enum(["1mo", "3mo", "6mo", "1y", "5y"]).default("1y"),
       })
     )
-    .query(async ({ input }) => fetchPriceHistory(input.symbol, input.range, "1d")),
+    .query(async ({ input }) =>
+      fetchPriceHistory(input.symbol, input.range, "1d")
+    ),
 
   saveCard: protectedProcedure
     .input(
@@ -575,7 +676,8 @@ export const portfolioRouter = router({
      * 「いつ買い増し圏に入ったか」が追えなくなる。
      * 記録の失敗で株価更新まで失敗扱いにはしない（株価の更新は成功しているため）。
      */
-    let transitions: Awaited<ReturnType<typeof recordTransitions>> | null = null;
+    let transitions: Awaited<ReturnType<typeof recordTransitions>> | null =
+      null;
     try {
       transitions = await recordTransitions(ctx.user.id);
     } catch (e) {
@@ -672,8 +774,12 @@ export const portfolioRouter = router({
    * days を変えれば期間を広げられる（初回は記録が浅いため）。
    */
   generateWeeklyReport: protectedProcedure
-    .input(z.object({ days: z.number().int().min(1).max(90).default(7) }).optional())
-    .mutation(async ({ ctx, input }) => createWeeklyReport(ctx.user.id, input?.days ?? 7)),
+    .input(
+      z.object({ days: z.number().int().min(1).max(90).default(7) }).optional()
+    )
+    .mutation(async ({ ctx, input }) =>
+      createWeeklyReport(ctx.user.id, input?.days ?? 7)
+    ),
 
   /**
    * 臨時レポートを今すぐ作る。
@@ -682,7 +788,11 @@ export const portfolioRouter = router({
    * lookbackHours を広げれば過去の出来事も対象にできる。
    */
   generateUrgentReports: protectedProcedure
-    .input(z.object({ lookbackHours: z.number().int().min(1).max(720).default(26) }).optional())
+    .input(
+      z
+        .object({ lookbackHours: z.number().int().min(1).max(720).default(26) })
+        .optional()
+    )
     .mutation(async ({ ctx, input }) =>
       createUrgentReports(ctx.user.id, input?.lookbackHours ?? 26)
     ),
@@ -695,7 +805,12 @@ export const portfolioRouter = router({
    * AI が下書きし、必要なら直すだけの形にする。
    */
   draftCard: protectedProcedure
-    .input(z.object({ symbol: z.string().min(1).max(24), force: z.boolean().default(false) }))
+    .input(
+      z.object({
+        symbol: z.string().min(1).max(24),
+        force: z.boolean().default(false),
+      })
+    )
     .mutation(async ({ ctx, input }) =>
       draftCardForSymbol(ctx.user.id, input.symbol, input.force)
     ),
@@ -786,7 +901,11 @@ export const portfolioRouter = router({
     .input(z.object({ id: z.number().int().positive() }))
     .mutation(async ({ ctx, input }) => {
       const holding = await db.getHolding(ctx.user.id, input.id);
-      if (!holding) throw new TRPCError({ code: "NOT_FOUND", message: "銘柄が見つかりません" });
+      if (!holding)
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "銘柄が見つかりません",
+        });
       try {
         return await regenerateSignal(ctx.user.id, holding);
       } catch (error) {
@@ -851,7 +970,8 @@ export const portfolioRouter = router({
 
       // 利用枠切れなら後続バッチも失敗するので打ち切る
       const processed = input.offset + batch.length;
-      const nextOffset = quotaExhausted || processed >= total ? null : processed;
+      const nextOffset =
+        quotaExhausted || processed >= total ? null : processed;
 
       if (quotaExhausted && ok === 0 && input.offset === 0) {
         throw new TRPCError({
@@ -861,7 +981,14 @@ export const portfolioRouter = router({
         });
       }
 
-      return { ok, failed, quotaExhausted, total, processed, nextOffset } as const;
+      return {
+        ok,
+        failed,
+        quotaExhausted,
+        total,
+        processed,
+        nextOffset,
+      } as const;
     }),
 
   generateMissingSignals: protectedProcedure
@@ -873,7 +1000,9 @@ export const portfolioRouter = router({
         })
         .default({ batchSize: 4, retryFailed: false })
     )
-    .mutation(async ({ ctx, input }) => generateMissingSignalsBatch(ctx.user.id, input)),
+    .mutation(async ({ ctx, input }) =>
+      generateMissingSignalsBatch(ctx.user.id, input)
+    ),
 
   refreshStaleSignals: protectedProcedure
     .input(
@@ -884,7 +1013,9 @@ export const portfolioRouter = router({
         })
         .default({ batchSize: 2, retryFailed: false })
     )
-    .mutation(async ({ ctx, input }) => refreshStaleSignalsBatch(ctx.user.id, input)),
+    .mutation(async ({ ctx, input }) =>
+      refreshStaleSignalsBatch(ctx.user.id, input)
+    ),
 
   generateMissingPriceBandPlans: protectedProcedure
     .input(
@@ -895,7 +1026,9 @@ export const portfolioRouter = router({
         })
         .default({ batchSize: 2, retryFailed: false })
     )
-    .mutation(async ({ ctx, input }) => generateMissingHoldingPlans(ctx.user.id, input)),
+    .mutation(async ({ ctx, input }) =>
+      generateMissingHoldingPlans(ctx.user.id, input)
+    ),
 
   runMissingBandChecks: protectedProcedure
     .input(
@@ -928,7 +1061,11 @@ export const portfolioRouter = router({
     ),
 
   runNewsTriggeredBandChecks: protectedProcedure
-    .input(z.object({ batchSize: z.number().int().min(1).max(3).default(2) }).default({ batchSize: 2 }))
+    .input(
+      z
+        .object({ batchSize: z.number().int().min(1).max(3).default(2) })
+        .default({ batchSize: 2 })
+    )
     .mutation(async ({ ctx, input }) =>
       withSchedulerRunLog({
         userId: ctx.user.id,
@@ -940,12 +1077,18 @@ export const portfolioRouter = router({
           succeeded: value.checked,
           failed: value.failed.length,
           remaining: value.remaining,
-          detail: { itemsChecked: value.itemsChecked, failedSymbols: value.failed, quotaExhausted: value.quotaExhausted },
+          detail: {
+            itemsChecked: value.itemsChecked,
+            failedSymbols: value.failed,
+            quotaExhausted: value.quotaExhausted,
+          },
         }),
       })
     ),
 
-  snapshots: protectedProcedure.query(async ({ ctx }) => db.listSnapshots(ctx.user.id)),
+  snapshots: protectedProcedure.query(async ({ ctx }) =>
+    db.listSnapshots(ctx.user.id)
+  ),
 
   /**
    * 資産推移グラフ用の集計。
@@ -954,7 +1097,9 @@ export const portfolioRouter = router({
    * 判定が画面ごとにばらつく。サーバーで確定させて 1 か所に集める。
    */
   assetTrend: protectedProcedure
-    .input(z.object({ scale: z.enum(["day", "month"]).default("month") }).optional())
+    .input(
+      z.object({ scale: z.enum(["day", "month"]).default("month") }).optional()
+    )
     .query(async ({ ctx, input }) => {
       const rows = await db.listSnapshots(ctx.user.id, 400);
       const mapped: SnapshotInput[] = rows.map(r => ({
@@ -973,7 +1118,9 @@ export const portfolioRouter = router({
 
   signalHistory: protectedProcedure
     .input(z.object({ symbol: z.string().min(1).max(24) }))
-    .query(async ({ ctx, input }) => db.signalHistory(ctx.user.id, input.symbol, 20)),
+    .query(async ({ ctx, input }) =>
+      db.signalHistory(ctx.user.id, input.symbol, 20)
+    ),
 
   /**
    * 買い増しプラン（価格帯ごとの行動）の取得。
@@ -1000,8 +1147,10 @@ export const portfolioRouter = router({
       if (!plan) return null;
 
       const sector = view?.sector ?? watch?.sector ?? null;
-      const sectorValueBase = portfolio.sectors.find(item => item.key === sector)?.value ?? 0;
-      const ibkr = portfolio.brokers.find(item => item.key === "ibkr")?.leverage ?? null;
+      const sectorValueBase =
+        portfolio.sectors.find(item => item.key === sector)?.value ?? 0;
+      const ibkr =
+        portfolio.brokers.find(item => item.key === "ibkr")?.leverage ?? null;
       const rates = {
         usdJpy: portfolio.summary.usdJpyRate,
         sgdJpy: portfolio.summary.sgdJpyRate,
@@ -1015,10 +1164,12 @@ export const portfolioRouter = router({
         localPrice: currentPrice,
         yenPerLocalUnit,
         netAssetsBase: portfolio.summary.netAssetsBase,
-        liquidAssetsBase: portfolio.summary.cashBalance + portfolio.summary.interestAssetsBase,
+        liquidAssetsBase:
+          portfolio.summary.cashBalance + portfolio.summary.interestAssetsBase,
         currentHoldingBase: view?.marketValueBase ?? 0,
         sectorValueBase,
-        userSectorLimitPct: (await db.getSettings(ctx.user.id)).sectorConcentrationThreshold,
+        userSectorLimitPct: (await db.getSettings(ctx.user.id))
+          .sectorConcentrationThreshold,
         ibkrLeverage: ibkr?.leverage ?? null,
         ibkrRiskLevel: ibkr?.riskLevel ?? null,
         ibkrDropToMarginCallPct: ibkr?.dropToMarginCallPct ?? null,
@@ -1083,7 +1234,9 @@ export const portfolioRouter = router({
    * いる・懸念がある・次の段が近い銘柄だけに絞る。
    */
   generateAddProposalBatch: protectedProcedure
-    .input(z.object({ limit: z.number().int().min(1).max(12).optional() }).optional())
+    .input(
+      z.object({ limit: z.number().int().min(1).max(12).optional() }).optional()
+    )
     .mutation(async ({ ctx, input }) => {
       try {
         return await generateProposalBatch(ctx.user.id, input?.limit);
@@ -1093,7 +1246,9 @@ export const portfolioRouter = router({
     }),
 
   /** 提案の一覧（銘柄ごとに最新の 1 件） */
-  addProposals: protectedProcedure.query(async ({ ctx }) => listProposals(ctx.user.id)),
+  addProposals: protectedProcedure.query(async ({ ctx }) =>
+    listProposals(ctx.user.id)
+  ),
 
   /**
    * 株価データの健全性。
@@ -1102,7 +1257,9 @@ export const portfolioRouter = router({
    * 買い増し圏を判定すると実際には圏外なのに「買い場」と出るため、
    * 古くなっている銘柄を自分から知らせる。
    */
-  dataHealth: protectedProcedure.query(async ({ ctx }) => checkDataHealth(ctx.user.id)),
+  dataHealth: protectedProcedure.query(async ({ ctx }) =>
+    checkDataHealth(ctx.user.id)
+  ),
 
   /**
    * 銘柄メモ（出来事の記録）。
@@ -1112,16 +1269,23 @@ export const portfolioRouter = router({
    */
   symbolNotes: protectedProcedure
     .input(z.object({ symbol: z.string().min(1).max(24) }))
-    .query(async ({ ctx, input }) => listSymbolNotes(ctx.user.id, input.symbol)),
+    .query(async ({ ctx, input }) =>
+      listSymbolNotes(ctx.user.id, input.symbol)
+    ),
 
   /** メモの件数（銘柄ごと）。保有一覧に印を出すため */
   noteCounts: protectedProcedure.query(async ({ ctx }) => {
     const map = await countNotesBySymbol(ctx.user.id);
-    return Array.from(map.entries()).map(([symbol, count]) => ({ symbol, count }));
+    return Array.from(map.entries()).map(([symbol, count]) => ({
+      symbol,
+      count,
+    }));
   }),
 
   /** 溜まっているデータからメモを積み直す（手動実行用） */
-  syncSymbolNotes: protectedProcedure.mutation(async ({ ctx }) => syncSymbolNotes(ctx.user.id)),
+  syncSymbolNotes: protectedProcedure.mutation(async ({ ctx }) =>
+    syncSymbolNotes(ctx.user.id)
+  ),
 
   /**
    * 今カードが必要な銘柄だけ自動で下書きする。
@@ -1131,13 +1295,19 @@ export const portfolioRouter = router({
    * 作られた方が正確なため。
    */
   draftTriggeredCards: protectedProcedure
-    .input(z.object({ limit: z.number().int().min(1).max(10).default(5) }).optional())
-    .mutation(async ({ ctx, input }) => draftTriggeredCards(ctx.user.id, input?.limit ?? 5)),
+    .input(
+      z.object({ limit: z.number().int().min(1).max(10).default(5) }).optional()
+    )
+    .mutation(async ({ ctx, input }) =>
+      draftTriggeredCards(ctx.user.id, input?.limit ?? 5)
+    ),
 
   /** 1 銘柄の提案履歴。判断がいつ変わったかを追えるようにする */
   addProposalHistory: protectedProcedure
     .input(z.object({ symbol: z.string().min(1).max(24) }))
-    .query(async ({ ctx, input }) => listProposalsForSymbol(ctx.user.id, input.symbol)),
+    .query(async ({ ctx, input }) =>
+      listProposalsForSymbol(ctx.user.id, input.symbol)
+    ),
 
   /**
    * 全銘柄の「今どの段にいるか」の一覧。
@@ -1242,7 +1412,10 @@ export const portfolioRouter = router({
           await generateAndSavePlanForHolding(ctx.user.id, t.symbol);
           ok += 1;
         } catch (error) {
-          console.warn(`[portfolio] price band plan failed for ${t.symbol}:`, error);
+          console.warn(
+            `[portfolio] price band plan failed for ${t.symbol}:`,
+            error
+          );
           failed.push(t.symbol);
           if (isQuotaError(error)) {
             quotaExhausted = true;
@@ -1252,7 +1425,8 @@ export const portfolioRouter = router({
       }
 
       const processed = input.offset + batch.length;
-      const nextOffset = quotaExhausted || processed >= total ? null : processed;
+      const nextOffset =
+        quotaExhausted || processed >= total ? null : processed;
 
       if (quotaExhausted && ok === 0 && input.offset === 0) {
         throw new TRPCError({
@@ -1262,7 +1436,14 @@ export const portfolioRouter = router({
         });
       }
 
-      return { ok, failed, quotaExhausted, total, processed, nextOffset } as const;
+      return {
+        ok,
+        failed,
+        quotaExhausted,
+        total,
+        processed,
+        nextOffset,
+      } as const;
     }),
 
   /** AI 実行履歴（いつ何をどう判断したかを後から追えるようにする） */
@@ -1317,7 +1498,10 @@ export const portfolioRouter = router({
       })
     )
     .mutation(async ({ ctx, input }) => {
-      const result = await addCandidatesToWatchlist(ctx.user.id, input.candidates);
+      const result = await addCandidatesToWatchlist(
+        ctx.user.id,
+        input.candidates
+      );
       /*
        * 取り込んだ印を付ける。印がないと、次に提案一覧を開いたときに
        * 既にウォッチリストへ入れた銘柄が「未検討」として並んでしまう。
@@ -1353,7 +1537,8 @@ export const portfolioRouter = router({
       reason: r.reason,
       concern: r.concern,
       priority: r.priority,
-      priceAtSuggestion: r.priceAtSuggestion != null ? Number(r.priceAtSuggestion) : null,
+      priceAtSuggestion:
+        r.priceAtSuggestion != null ? Number(r.priceAtSuggestion) : null,
       targetPrice: r.targetPrice != null ? Number(r.targetPrice) : null,
       targetBasis: r.targetBasis,
       currency: r.currency,

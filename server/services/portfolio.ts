@@ -37,8 +37,14 @@ import {
   type InterestAssetView,
 } from "./interestAssets";
 import { groupPositionsBySymbol, type GroupedPosition } from "./groupPositions";
-import { buildHoldingDuration, type HoldingDurationView } from "../../shared/holdingDuration";
-import { evaluateSignalFreshness, type SignalFreshness } from "../../shared/signalFreshness";
+import {
+  buildHoldingDuration,
+  type HoldingDurationView,
+} from "../../shared/holdingDuration";
+import {
+  evaluateSignalFreshness,
+  type SignalFreshness,
+} from "../../shared/signalFreshness";
 import { buildAddReason } from "../../shared/addReason";
 import { fillMissingSectors } from "./sectorFill";
 import { buildMarketSlices, type MarketSlice } from "./marketSlices";
@@ -299,7 +305,13 @@ export type PortfolioSummary = {
   interestRatePct: number | null;
 };
 
-export type SectorSlice = { key: string; label: string; value: number; pct: number; count: number };
+export type SectorSlice = {
+  key: string;
+  label: string;
+  value: number;
+  pct: number;
+  count: number;
+};
 
 /** 証券プラットフォーム別の内訳。口座ごとの成績を比較できるよう損益も持たせる */
 export type BrokerSlice = SectorSlice & {
@@ -464,7 +476,8 @@ export async function buildPortfolio(userId: number): Promise<{
   for (const item of allNews) {
     const entry = newsBySymbol.get(item.symbol) ?? { total: 0, negative: 0 };
     entry.total += 1;
-    if (item.sentiment === "NEGATIVE" && (item.impactScore ?? 0) >= 40) entry.negative += 1;
+    if (item.sentiment === "NEGATIVE" && (item.impactScore ?? 0) >= 40)
+      entry.negative += 1;
     newsBySymbol.set(item.symbol, entry);
     if (item.analyzedAt) {
       const previous = latestAnalyzedNewsAtBySymbol.get(item.symbol);
@@ -553,7 +566,12 @@ export async function buildPortfolio(userId: number): Promise<{
             recurringPerShare,
             recurringYieldPct: dividendYield(recurringPerShare, currentPrice),
             yieldNeedsCheck: isImplausibleYield(divYieldPct),
-            monthlyIncomeBase: monthlyIncomeBase(h.monthlyDividends, quantity, h.currency, toBase),
+            monthlyIncomeBase: monthlyIncomeBase(
+              h.monthlyDividends,
+              quantity,
+              h.currency,
+              toBase
+            ),
             monthlyPerShare:
               h.monthlyDividends && h.monthlyDividends.length === 12
                 ? h.monthlyDividends
@@ -606,10 +624,14 @@ export async function buildPortfolio(userId: number): Promise<{
             priceVsValueReason: sig.priceVsValueReason,
             dataQuality: sig.dataQuality,
             reviewTriggers: Array.isArray(sig.reviewTriggers)
-              ? sig.reviewTriggers.filter((item): item is string => typeof item === "string")
+              ? sig.reviewTriggers.filter(
+                  (item): item is string => typeof item === "string"
+                )
               : [],
             riskFlags: Array.isArray(sig.riskFlags)
-              ? sig.riskFlags.filter((item): item is string => typeof item === "string")
+              ? sig.riskFlags.filter(
+                  (item): item is string => typeof item === "string"
+                )
               : [],
             validUntil: sig.validUntil,
             schemaVersion: sig.schemaVersion,
@@ -622,7 +644,10 @@ export async function buildPortfolio(userId: number): Promise<{
     } satisfies PositionView;
   });
 
-  const totalValueBase = partial.reduce((acc, p) => acc + (p.marketValueBase ?? 0), 0);
+  const totalValueBase = partial.reduce(
+    (acc, p) => acc + (p.marketValueBase ?? 0),
+    0
+  );
   const totalCostBase = partial.reduce((acc, p) => acc + p.costValueBase, 0);
 
   const positions = partial
@@ -641,7 +666,8 @@ export async function buildPortfolio(userId: number): Promise<{
     return acc + (toBase(prev, p.currency) ?? prev);
   }, 0);
 
-  const dayChangeBase = prevValueBase > 0 ? totalValueBase - prevValueBase : null;
+  const dayChangeBase =
+    prevValueBase > 0 ? totalValueBase - prevValueBase : null;
   const cashBalance = n(settings.cashBalance) ?? 0;
 
   /*
@@ -722,7 +748,10 @@ export async function buildPortfolio(userId: number): Promise<{
      * 通貨別内訳（currencyBreakdown）にマイナス残高の通貨があれば
      * それを借入通貨として扱い、無ければ口座通貨で計算する。
      */
-    const borrowCurrency = detectBorrowCurrency(bal.currencyBreakdown, bal.currency);
+    const borrowCurrency = detectBorrowCurrency(
+      bal.currencyBreakdown,
+      bal.currency
+    );
     const interestView = buildInterestView(
       borrowCurrency,
       lev.borrowed,
@@ -741,7 +770,10 @@ export async function buildPortfolio(userId: number): Promise<{
       interestView === null
         ? null
         : (() => {
-            const c = evaluateCarry(brokerDividendBase, interestView.annualInterestBase);
+            const c = evaluateCarry(
+              brokerDividendBase,
+              interestView.annualInterestBase
+            );
             return {
               annualDividendBase: c.annualDividendBase,
               annualInterestBase: c.annualInterestBase,
@@ -781,7 +813,8 @@ export async function buildPortfolio(userId: number): Promise<{
     let borrowedTotal = 0;
     for (const lev of Array.from(leverageByBroker.values())) {
       const rate = lev.interest?.effectiveRatePct;
-      if (rate === undefined || rate === null || lev.borrowedBase <= 0) continue;
+      if (rate === undefined || rate === null || lev.borrowedBase <= 0)
+        continue;
       weighted += rate * lev.borrowedBase;
       borrowedTotal += lev.borrowedBase;
     }
@@ -823,7 +856,9 @@ export async function buildPortfolio(userId: number): Promise<{
     totalPnlPct: calcPnlPct(totalValueBase - totalCostBase, totalCostBase),
     dayChangeBase,
     dayChangePct:
-      dayChangeBase !== null && prevValueBase > 0 ? (dayChangeBase / prevValueBase) * 100 : null,
+      dayChangeBase !== null && prevValueBase > 0
+        ? (dayChangeBase / prevValueBase) * 100
+        : null,
     // 同一銘柄を複数口座で持つ場合、レコード数ではなく銘柄数を表示する
     positionCount: groups.length,
     cashBalance,
@@ -854,15 +889,26 @@ export async function buildPortfolio(userId: number): Promise<{
      * 純資産に利息資産を加える。富途香港の現金宝のように
      * 株ではないが自分の資産である現金性資産を落とすと純資産が過小になる。
      */
-    netAssetsBase: totalValueBase + cashBalance + interestSummary.totalBase - totalBorrowedBase,
+    netAssetsBase:
+      totalValueBase +
+      cashBalance +
+      interestSummary.totalBase -
+      totalBorrowedBase,
     /*
      * 全体のレバレッジ。株式時価 ÷ 純資産で求める。
      * 借入がなければ 1.0 前後になり、借入があると 1 を超える。
      */
     overallLeverage:
-      totalValueBase + cashBalance + interestSummary.totalBase - totalBorrowedBase > 0
+      totalValueBase +
+        cashBalance +
+        interestSummary.totalBase -
+        totalBorrowedBase >
+      0
         ? totalValueBase /
-          (totalValueBase + cashBalance + interestSummary.totalBase - totalBorrowedBase)
+          (totalValueBase +
+            cashBalance +
+            interestSummary.totalBase -
+            totalBorrowedBase)
         : null,
     interestAssetsBase: interestSummary.totalBase,
     interestIncomeBase: interestSummary.projectedAnnualIncomeBase,
@@ -872,7 +918,10 @@ export async function buildPortfolio(userId: number): Promise<{
   /* --- 分布集計 --- */
   const sectorMap = new Map<string, { value: number; count: number }>();
   const currencyMap = new Map<string, { value: number; count: number }>();
-  const brokerMap = new Map<string, { value: number; count: number; cost: number }>();
+  const brokerMap = new Map<
+    string,
+    { value: number; count: number; cost: number }
+  >();
 
   for (const p of positions) {
     const v = p.marketValueBase ?? 0;
@@ -894,7 +943,9 @@ export async function buildPortfolio(userId: number): Promise<{
     brokerMap.set(p.broker, b);
   }
 
-  const toSlices = (m: Map<string, { value: number; count: number }>): SectorSlice[] =>
+  const toSlices = (
+    m: Map<string, { value: number; count: number }>
+  ): SectorSlice[] =>
     Array.from(m.entries())
       .map(([key, v]) => ({
         key,
@@ -949,7 +1000,12 @@ export async function buildPortfolio(userId: number): Promise<{
      * 配当の全体集計。銘柄単位ではなく口座レコード単位で合計する
      * （同一銘柄を複数口座で持っていれば、その分だけ配当も増えるため）。
      */
-    dividends: buildDividendSummary(positions, groups, totalValueBase, totalCostBase),
+    dividends: buildDividendSummary(
+      positions,
+      groups,
+      totalValueBase,
+      totalCostBase
+    ),
     /**
      * 月別の配当の銘柄内訳。どの月にどの銘柄から配当が入るかを見るため、
      * 口座レコード単位で保持する（同一銘柄を複数口座で持つ場合は分けて出す）。
@@ -978,7 +1034,8 @@ export async function buildPortfolio(userId: number): Promise<{
           /** 借入がある口座のみ信用情報を付ける（現物口座は null） */
           leverage: leverageByBroker.get(key) ?? null,
           dividendIncomeBase,
-          dividendYieldPct: v.value > 0 ? (dividendIncomeBase / v.value) * 100 : null,
+          dividendYieldPct:
+            v.value > 0 ? (dividendIncomeBase / v.value) * 100 : null,
         };
       })
       .sort((a, b) => b.value - a.value),
@@ -987,7 +1044,9 @@ export async function buildPortfolio(userId: number): Promise<{
      * 利息資産（貨幣市場基金）の明細。額の大きい順に並べる。
      * 株式の positions とは意味が違うので別のキーで返す。
      */
-    interestAssets: interestViews.sort((a, b) => (b.amountBase ?? 0) - (a.amountBase ?? 0)),
+    interestAssets: interestViews.sort(
+      (a, b) => (b.amountBase ?? 0) - (a.amountBase ?? 0)
+    ),
   };
 }
 
@@ -1033,7 +1092,8 @@ function buildDividendSummary(
     const d = p.dividend;
     if (!d || d.annualIncomeBase === null) continue;
     if (d.perShare > 0 && d.recurringPerShare !== d.perShare) {
-      recurringIncomeBase += d.annualIncomeBase * (d.recurringPerShare / d.perShare);
+      recurringIncomeBase +=
+        d.annualIncomeBase * (d.recurringPerShare / d.perShare);
     } else {
       recurringIncomeBase += d.annualIncomeBase;
     }
@@ -1084,13 +1144,15 @@ function buildDividendSummary(
       sector: sectorBySymbol.get(p.symbol) ?? p.sector,
       annualIncomeBase: p.dividend?.annualIncomeBase ?? null,
       marketValueBase: p.marketValueBase,
-    })),
+    }))
   );
 
   return {
     annualIncomeBase,
-    yieldPct: totalValueBase > 0 ? (annualIncomeBase / totalValueBase) * 100 : null,
-    yieldOnCostPct: totalCostBase > 0 ? (annualIncomeBase / totalCostBase) * 100 : null,
+    yieldPct:
+      totalValueBase > 0 ? (annualIncomeBase / totalValueBase) * 100 : null,
+    yieldOnCostPct:
+      totalCostBase > 0 ? (annualIncomeBase / totalCostBase) * 100 : null,
     monthlyAverageBase: annualIncomeBase / 12,
     payingCount,
     nonPayingCount,
@@ -1165,7 +1227,8 @@ export function detectBorrowCurrency(
       if (key.startsWith("__")) continue;
       const amount = typeof value === "number" ? value : Number(value);
       if (!Number.isFinite(amount) || amount >= 0) continue;
-      if (worst === null || amount < worst.amount) worst = { currency: key, amount };
+      if (worst === null || amount < worst.amount)
+        worst = { currency: key, amount };
     }
     return worst?.currency ?? fallback;
   } catch {
@@ -1233,7 +1296,11 @@ export async function syncPrices(userId: number): Promise<{
   updated: number;
   failed: string[];
   /** 更新できた為替レート。取得に失敗した通貨は null */
-  fxRates: { usdJpy: number | null; sgdJpy: number | null; hkdJpy: number | null };
+  fxRates: {
+    usdJpy: number | null;
+    sgdJpy: number | null;
+    hkdJpy: number | null;
+  };
 }> {
   const [hs, ws, settings] = await Promise.all([
     db.listHoldings(userId),
@@ -1253,7 +1320,9 @@ export async function syncPrices(userId: number): Promise<{
    * 重複を排除して外部 API への無駄なリクエストを避ける。
    * 更新自体はレコードごとに行うため、全口座に反映される。
    */
-  const symbols = Array.from(new Set([...hs.map(h => h.symbol), ...ws.map(w => w.symbol)]));
+  const symbols = Array.from(
+    new Set([...hs.map(h => h.symbol), ...ws.map(w => w.symbol)])
+  );
   if (symbols.length === 0) {
     await db.updateSettings(userId, { lastPriceSyncAt: new Date() });
     return { updated: 0, failed: [], fxRates };
@@ -1272,9 +1341,12 @@ export async function syncPrices(userId: number): Promise<{
     }
     await db.updateHolding(userId, h.id, {
       currentPrice: String(q.price),
-      previousClose: q.previousClose === null ? undefined : String(q.previousClose),
-      fiftyTwoWeekHigh: q.fiftyTwoWeekHigh === null ? undefined : String(q.fiftyTwoWeekHigh),
-      fiftyTwoWeekLow: q.fiftyTwoWeekLow === null ? undefined : String(q.fiftyTwoWeekLow),
+      previousClose:
+        q.previousClose === null ? undefined : String(q.previousClose),
+      fiftyTwoWeekHigh:
+        q.fiftyTwoWeekHigh === null ? undefined : String(q.fiftyTwoWeekHigh),
+      fiftyTwoWeekLow:
+        q.fiftyTwoWeekLow === null ? undefined : String(q.fiftyTwoWeekLow),
       currency: q.currency,
       priceUpdatedAt: now,
     });
@@ -1289,7 +1361,8 @@ export async function syncPrices(userId: number): Promise<{
     }
     await db.updateWatchItem(userId, w.id, {
       currentPrice: String(q.price),
-      previousClose: q.previousClose === null ? undefined : String(q.previousClose),
+      previousClose:
+        q.previousClose === null ? undefined : String(q.previousClose),
       currency: q.currency,
       priceUpdatedAt: now,
     });
@@ -1334,7 +1407,11 @@ export async function syncPrices(userId: number): Promise<{
 export async function syncFxRate(
   userId: number,
   enabled = true
-): Promise<{ usdJpy: number | null; sgdJpy: number | null; hkdJpy: number | null }> {
+): Promise<{
+  usdJpy: number | null;
+  sgdJpy: number | null;
+  hkdJpy: number | null;
+}> {
   if (!enabled) return { usdJpy: null, sgdJpy: null, hkdJpy: null };
 
   /*
@@ -1359,7 +1436,9 @@ export async function syncFxRate(
     }
     // 明らかに異常な値は採用しない（API 仕様変更やパース失敗の検知）
     if (!isPlausibleRate(result.value, min, max)) {
-      console.warn(`[portfolio] ${label} が想定範囲外のため更新をスキップ: ${result.value}`);
+      console.warn(
+        `[portfolio] ${label} が想定範囲外のため更新をスキップ: ${result.value}`
+      );
       return null;
     }
     return result.value;
@@ -1416,7 +1495,10 @@ export async function enrichProfileBatch(
   const force = opts.force ?? false;
   const offset = Math.max(0, opts.offset ?? 0);
   const batchSize = Math.min(30, Math.max(1, opts.batchSize ?? 20));
-  const [hs, ws] = await Promise.all([db.listHoldings(userId), db.listWatchlist(userId)]);
+  const [hs, ws] = await Promise.all([
+    db.listHoldings(userId),
+    db.listWatchlist(userId),
+  ]);
 
   const symbols = new Map<
     string,
@@ -1454,7 +1536,10 @@ export async function enrichProfileBatch(
     try {
       const profile = await fetchCompanyProfile(symbol);
       if (!profile || (!profile.sector && !profile.industry)) {
-        failed.push({ symbol, reason: "Yahoo から業種情報を取得できませんでした" });
+        failed.push({
+          symbol,
+          reason: "Yahoo から業種情報を取得できませんでした",
+        });
         continue;
       }
       const now = new Date();
@@ -1498,14 +1583,25 @@ export async function enrichProfileBatch(
 }
 
 /** 従来の設定画面向け。1 バッチの更新件数だけを返す互換 API。 */
-export async function enrichProfiles(userId: number, force = false): Promise<number> {
+export async function enrichProfiles(
+  userId: number,
+  force = false
+): Promise<number> {
   const result = await enrichProfileBatch(userId, { force, batchSize: 20 });
   return result.updated;
 }
 
-type NewsTarget = { symbol: string; name: string; tickerCode: string; market: Market };
+type NewsTarget = {
+  symbol: string;
+  name: string;
+  tickerCode: string;
+  market: Market;
+};
 
-function latestNewsActivity(publishedAt: Date | string | null, createdAt: Date | string | null): Date | null {
+function latestNewsActivity(
+  publishedAt: Date | string | null,
+  createdAt: Date | string | null
+): Date | null {
   const timestamps = [publishedAt, createdAt]
     .filter((value): value is Date | string => value !== null)
     .map(value => new Date(value).getTime())
@@ -1567,9 +1663,9 @@ export async function syncNewsForTargets(
       }
 
       // 前回 AI 利用枠切れで残った未分析記事も、次回の手動更新で再試行する。
-      const pending = (await db.listNews(userId, { symbol: t.symbol, limit: 14 })).filter(
-        item => !item.sentiment
-      );
+      const pending = (
+        await db.listNews(userId, { symbol: t.symbol, limit: 14 })
+      ).filter(item => !item.sentiment);
       if (pending.length === 0) continue;
 
       try {
@@ -1585,11 +1681,16 @@ export async function syncNewsForTargets(
         }
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
-        if (/usage exhausted|412 Precondition|failed_precondition/i.test(message)) {
+        if (
+          /usage exhausted|412 Precondition|failed_precondition/i.test(message)
+        ) {
           analysisUnavailable = true;
         }
         failedSymbols.push(t.symbol);
-        console.warn(`[portfolio] news analysis failed for ${t.symbol}:`, error);
+        console.warn(
+          `[portfolio] news analysis failed for ${t.symbol}:`,
+          error
+        );
       }
     } catch (error) {
       console.warn(`[portfolio] news sync failed for ${t.symbol}:`, error);
@@ -1598,7 +1699,13 @@ export async function syncNewsForTargets(
   }
 
   await db.updateSettings(userId, { lastNewsSyncAt: new Date() });
-  return { fetched, analyzed, analysisUnavailable, failedSymbols, processedSymbols: targets.map(target => target.symbol) };
+  return {
+    fetched,
+    analyzed,
+    analysisUnavailable,
+    failedSymbols,
+    processedSymbols: targets.map(target => target.symbol),
+  };
 }
 
 /**
@@ -1623,7 +1730,10 @@ export async function syncNewsForUser(
   backlogBefore: number;
   remainingBacklog: number;
 }> {
-  const [hs, ws] = await Promise.all([db.listHoldings(userId), db.listWatchlist(userId)]);
+  const [hs, ws] = await Promise.all([
+    db.listHoldings(userId),
+    db.listWatchlist(userId),
+  ]);
   /**
    * ニュースは銘柄単位。同一銘柄を複数の証券口座で保有していても
    * 検索・分析は 1 回で足りるため、シンボルで重複を排除する。
@@ -1634,25 +1744,44 @@ export async function syncNewsForUser(
   for (const x of [...hs, ...ws]) {
     if (seen.has(x.symbol)) continue;
     seen.add(x.symbol);
-    targets.push({ symbol: x.symbol, name: x.name, tickerCode: x.tickerCode, market: x.market });
+    targets.push({
+      symbol: x.symbol,
+      name: x.name,
+      tickerCode: x.tickerCode,
+      market: x.market,
+    });
   }
 
   const coverageRows = await db.listNewsCoverage(userId);
   const coverage = new Map(
     coverageRows.map(row => [
       row.symbol,
-      { count: Number(row.count), latest: latestNewsActivity(row.latestPublishedAt, row.latestCreatedAt) },
+      {
+        count: Number(row.count),
+        latest: latestNewsActivity(row.latestPublishedAt, row.latestCreatedAt),
+      },
     ])
   );
   const staleBefore = Date.now() - 14 * 24 * 60 * 60 * 1000;
-  const isBacklog = (entry: { count: number; latest: Date | null } | undefined) =>
-    !entry || entry.count === 0 || !entry.latest || entry.latest.getTime() < staleBefore;
-  const backlogBefore = targets.filter(target => isBacklog(coverage.get(target.symbol))).length;
+  const isBacklog = (
+    entry: { count: number; latest: Date | null } | undefined
+  ) =>
+    !entry ||
+    entry.count === 0 ||
+    !entry.latest ||
+    entry.latest.getTime() < staleBefore;
+  const backlogBefore = targets.filter(target =>
+    isBacklog(coverage.get(target.symbol))
+  ).length;
   targets.sort((a, b) => {
     const ca = coverage.get(a.symbol);
     const cb = coverage.get(b.symbol);
     const rank = (entry: { count: number; latest: Date | null } | undefined) =>
-      !entry || entry.count === 0 ? 0 : !entry.latest || entry.latest.getTime() < staleBefore ? 1 : 2;
+      !entry || entry.count === 0
+        ? 0
+        : !entry.latest || entry.latest.getTime() < staleBefore
+          ? 1
+          : 2;
     return rank(ca) - rank(cb) || a.symbol.localeCompare(b.symbol);
   });
 
@@ -1672,10 +1801,15 @@ export async function syncNewsForUser(
   const refreshedCoverage = new Map(
     (await db.listNewsCoverage(userId)).map(row => [
       row.symbol,
-      { count: Number(row.count), latest: latestNewsActivity(row.latestPublishedAt, row.latestCreatedAt) },
+      {
+        count: Number(row.count),
+        latest: latestNewsActivity(row.latestPublishedAt, row.latestCreatedAt),
+      },
     ])
   );
-  const remainingBacklog = targets.filter(target => isBacklog(refreshedCoverage.get(target.symbol))).length;
+  const remainingBacklog = targets.filter(target =>
+    isBacklog(refreshedCoverage.get(target.symbol))
+  ).length;
 
   return {
     ...result,
@@ -1711,6 +1845,12 @@ export async function regenerateSignal(userId: number, holding: Holding) {
    * 株数・取得単価・損益率・構成比はすべて合計値を使う。
    */
   const view = portfolio.groups.find(g => g.symbol === holding.symbol);
+  const ibkr = portfolio.brokers.find(b => b.key === "ibkr")?.leverage ?? null;
+  const dividendUpdatedAt =
+    view?.entries
+      .map(entry => entry.dividend?.updatedAt ?? null)
+      .filter((value): value is Date => value instanceof Date)
+      .sort((a, b) => b.getTime() - a.getTime())[0] ?? null;
   /** 口座をまたいでいる場合は、AI に口座別の状況も伝える */
   const accountBreakdown =
     view && view.isSplit
@@ -1757,6 +1897,23 @@ export async function regenerateSignal(userId: number, holding: Holding) {
      */
     businessSummary: holding.businessSummary,
     accountBreakdown,
+    dividend: view?.dividend
+      ? {
+          perShare: view.dividend.perShare,
+          annualIncomeBase: view.dividend.annualIncomeBase,
+          yieldPct: view.dividend.yieldPct,
+          recurringYieldPct: view.dividend.recurringYieldPct,
+          hasSpecial: view.dividend.hasSpecial,
+          updatedAt: dividendUpdatedAt,
+        }
+      : null,
+    ibkrRisk: ibkr
+      ? {
+          leverage: ibkr.leverage,
+          riskLevel: ibkr.riskLevel,
+          dropToMarginCallPct: ibkr.dropToMarginCallPct,
+        }
+      : null,
     card: card
       ? {
           buyReason: card.buyReason,
@@ -1801,8 +1958,14 @@ export async function regenerateSignal(userId: number, holding: Holding) {
     riskFlags: result.riskFlags,
     validUntil: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
     schemaVersion: SIGNAL_SCHEMA_VERSION,
-    priceAtSignal: view?.currentPrice !== null && view?.currentPrice !== undefined ? String(view.currentPrice) : undefined,
-    pnlPctAtSignal: view?.pnlPct !== null && view?.pnlPct !== undefined ? view.pnlPct.toFixed(4) : undefined,
+    priceAtSignal:
+      view?.currentPrice !== null && view?.currentPrice !== undefined
+        ? String(view.currentPrice)
+        : undefined,
+    pnlPctAtSignal:
+      view?.pnlPct !== null && view?.pnlPct !== undefined
+        ? view.pnlPct.toFixed(4)
+        : undefined,
     scope: "HOLDING",
   });
 
@@ -1826,7 +1989,11 @@ export type MissingSignalBatchResult = {
  */
 export async function generateMissingSignalsBatch(
   userId: number,
-  opts: { batchSize?: number; retryFailed?: boolean; failureCooldownMs?: number } = {},
+  opts: {
+    batchSize?: number;
+    retryFailed?: boolean;
+    failureCooldownMs?: number;
+  } = {},
   deps: {
     listHoldings: typeof db.listHoldings;
     buildPortfolio: typeof buildPortfolio;
@@ -1850,7 +2017,8 @@ export async function generateMissingSignalsBatch(
 
   const holdingBySymbol = new Map<string, Holding>();
   for (const holding of holdings) {
-    if (!holdingBySymbol.has(holding.symbol)) holdingBySymbol.set(holding.symbol, holding);
+    if (!holdingBySymbol.has(holding.symbol))
+      holdingBySymbol.set(holding.symbol, holding);
   }
   const missing = portfolio.groups
     .filter(group => !group.signal)
@@ -1916,7 +2084,11 @@ export type StaleSignalBatchResult = {
  */
 export async function refreshStaleSignalsBatch(
   userId: number,
-  opts: { batchSize?: number; retryFailed?: boolean; failureCooldownMs?: number } = {},
+  opts: {
+    batchSize?: number;
+    retryFailed?: boolean;
+    failureCooldownMs?: number;
+  } = {},
   deps: {
     listHoldings: typeof db.listHoldings;
     buildPortfolio: typeof buildPortfolio;
@@ -1940,10 +2112,17 @@ export async function refreshStaleSignalsBatch(
 
   const holdingBySymbol = new Map<string, Holding>();
   for (const holding of holdings) {
-    if (!holdingBySymbol.has(holding.symbol)) holdingBySymbol.set(holding.symbol, holding);
+    if (!holdingBySymbol.has(holding.symbol))
+      holdingBySymbol.set(holding.symbol, holding);
   }
 
-  const actionPriority: Record<string, number> = { EXIT: 5, REDUCE: 4, WATCH: 3, ADD: 2, HOLD: 1 };
+  const actionPriority: Record<string, number> = {
+    EXIT: 5,
+    REDUCE: 4,
+    WATCH: 3,
+    ADD: 2,
+    HOLD: 1,
+  };
   const stale = portfolio.groups
     .filter(group => group.signal?.freshness.isStale)
     .map(group => ({
@@ -1998,7 +2177,10 @@ export async function refreshStaleSignalsBatch(
   };
 }
 
-export async function regenerateWatchSignal(userId: number, item: WatchlistItem) {
+export async function regenerateWatchSignal(
+  userId: number,
+  item: WatchlistItem
+) {
   const news = await db.listNews(userId, { symbol: item.symbol, limit: 10 });
   const result = await generateWatchSignal({
     name: item.name,
@@ -2130,13 +2312,19 @@ export async function syncDividends(
   for (let i = 0; i < slice.length; i += concurrency) {
     const batch = slice.slice(i, i + concurrency);
     const histories = await Promise.all(
-      batch.map(async symbol => ({ symbol, history: await deps.fetchDividendHistory(symbol) }))
+      batch.map(async symbol => ({
+        symbol,
+        history: await deps.fetchDividendHistory(symbol),
+      }))
     );
 
     for (const { symbol, history } of histories) {
       if (!history) {
         failed.push(symbol);
-        failureDetails.push({ symbol, reason: "配当履歴を取得できませんでした" });
+        failureDetails.push({
+          symbol,
+          reason: "配当履歴を取得できませんでした",
+        });
         continue;
       }
       const rows = bySymbol.get(symbol) ?? [];
@@ -2156,7 +2344,11 @@ export async function syncDividends(
         });
         continue;
       }
-      const summary = summarizeDividends(history.dividends, history.splits, now);
+      const summary = summarizeDividends(
+        history.dividends,
+        history.splits,
+        now
+      );
       for (const h of rows) {
         await deps.updateHolding(userId, h.id, {
           annualDividend: summary.annualDividend.toFixed(6),
@@ -2166,7 +2358,9 @@ export async function syncDividends(
           monthlyDividends: summary.monthlyDividends,
           lastDividendDate: summary.lastDate ?? undefined,
           lastDividendAmount:
-            summary.lastAmount === null ? undefined : summary.lastAmount.toFixed(6),
+            summary.lastAmount === null
+              ? undefined
+              : summary.lastAmount.toFixed(6),
           dividendUpdatedAt: now,
         });
         updated += 1;
@@ -2188,6 +2382,12 @@ export async function syncDividends(
     updatedSymbols,
     total,
     remaining,
-    nextOffset: force ? (consumed < total ? consumed : null) : remaining > 0 ? 0 : null,
+    nextOffset: force
+      ? consumed < total
+        ? consumed
+        : null
+      : remaining > 0
+        ? 0
+        : null,
   };
 }

@@ -7,7 +7,9 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const invokeLLM = vi.hoisted(() => vi.fn());
 vi.mock("./_core/llm", () => ({ invokeLLM }));
 
-const { buildSignalPrompt, generateSignal } = await import("./services/analysis");
+const { buildSignalPrompt, generateSignal } = await import(
+  "./services/analysis"
+);
 type SignalContext = Parameters<typeof buildSignalPrompt>[0];
 
 /**
@@ -31,6 +33,19 @@ function baseContext(overrides: Partial<SignalContext> = {}): SignalContext {
     fiftyTwoWeekLow: 800,
     return1m: 5.2,
     return3m: 12.8,
+    dividend: {
+      perShare: 112,
+      annualIncomeBase: 224000,
+      yieldPct: 4.09,
+      recurringYieldPct: 4.09,
+      hasSpecial: false,
+      updatedAt: new Date("2026-08-28T19:22:43Z"),
+    },
+    ibkrRisk: {
+      leverage: 1.8251,
+      riskLevel: "CAUTION",
+      dropToMarginCallPct: 31.2,
+    },
     card: null,
     news: [],
     ...overrides,
@@ -77,9 +92,25 @@ describe("buildSignalPrompt", () => {
 
   it("価格が未取得でも例外を投げない", () => {
     const prompt = buildSignalPrompt(
-      baseContext({ currentPrice: null, pnlPct: null, fiftyTwoWeekHigh: null, fiftyTwoWeekLow: null })
+      baseContext({
+        currentPrice: null,
+        pnlPct: null,
+        fiftyTwoWeekHigh: null,
+        fiftyTwoWeekLow: null,
+      })
     );
     expect(prompt).toContain("データ未取得");
+  });
+
+  it("実保有・配当・IBKR 主リスクを主判断の入力にする", () => {
+    const prompt = buildSignalPrompt(baseContext());
+    expect(prompt).toContain("保有株数: 7,900 株");
+    expect(prompt).toContain(
+      "年間配当見込（全口座合計・円換算・税引前）: 224,000 円"
+    );
+    expect(prompt).toContain("継続配当利回り（特別配当除外）: 4.09%");
+    expect(prompt).toContain("主レバレッジ: 1.83x");
+    expect(prompt).toContain("リスク区分: CAUTION");
   });
 });
 
@@ -99,7 +130,8 @@ describe("generateSignal", () => {
     mockResponse({
       action: "HOLD",
       confidence: 62,
-      rationale: "ニュースは未取得だが、取得単価から+38%で推移しており前提の崩れは見られない。",
+      rationale:
+        "ニュースは未取得だが、取得単価から+38%で推移しており前提の崩れは見られない。",
       factors: ["取得単価から+38.66%", "52週レンジ上位"],
     });
 
@@ -113,21 +145,37 @@ describe("generateSignal", () => {
     expect(invokeLLM).toHaveBeenCalledOnce();
 
     // ニュース 0 件でもプロンプトが渡っていること
-    const sent = invokeLLM.mock.calls[0][0] as { messages: { content: string }[] };
-    expect(sent.messages[1].content).toContain("直近のニュースは取得されていません");
+    const sent = invokeLLM.mock.calls[0][0] as {
+      messages: { content: string }[];
+    };
+    expect(sent.messages[1].content).toContain(
+      "直近のニュースは取得されていません"
+    );
   });
 
   it("confidence が範囲外でも 0〜資料品質上限に収める", async () => {
-    mockResponse({ action: "WATCH", confidence: 140, rationale: "テスト", factors: [] });
+    mockResponse({
+      action: "WATCH",
+      confidence: 140,
+      rationale: "テスト",
+      factors: [],
+    });
     expect((await generateSignal(baseContext())).confidence).toBe(55);
 
-    mockResponse({ action: "WATCH", confidence: -20, rationale: "テスト", factors: [] });
+    mockResponse({
+      action: "WATCH",
+      confidence: -20,
+      rationale: "テスト",
+      factors: [],
+    });
     expect((await generateSignal(baseContext())).confidence).toBe(0);
   });
 
   it("LLM が文字列を返さない場合はエラーにする", async () => {
     invokeLLM.mockResolvedValue({ choices: [{ message: { content: null } }] });
-    await expect(generateSignal(baseContext())).rejects.toThrow("シグナルの応答が空でした");
+    await expect(generateSignal(baseContext())).rejects.toThrow(
+      "シグナルの応答が空でした"
+    );
   });
 
   it("Markdown で返ってきても JSON を取り出して処理する", async () => {
@@ -150,8 +198,27 @@ describe("generateSignal", () => {
 
   it("LLM 側の失敗はそのまま伝播する（上位でメッセージ変換する設計）", async () => {
     invokeLLM.mockRejectedValue(
-      new Error('LLM invoke failed: 412 Precondition Failed – {"code":9,"message":"your account has hit a usage exhausted"}')
+      new Error(
+        'LLM invoke failed: 412 Precondition Failed – {"code":9,"message":"your account has hit a usage exhausted"}'
+      )
     );
-    await expect(generateSignal(baseContext())).rejects.toThrow("usage exhausted");
+    await expect(generateSignal(baseContext())).rejects.toThrow(
+      "usage exhausted"
+    );
+  });
+
+  it("旧式の未保有仮説で始まる主文を実保有の行動へ正規化する", async () => {
+    mockResponse({
+      action: "REDUCE",
+      confidence: 70,
+      rationale:
+        "今この株を持っていなかったらこの値段で買うかという問いにはNOです。業績悪化を確認する必要があります。",
+      factors: {},
+    });
+    const result = await generateSignal(baseContext({ quantity: 2000 }));
+    expect(result.rationale).toMatch(
+      /^2,000株を保有中で、一部売却による縮小を検討/
+    );
+    expect(result.rationale).not.toContain("持っていなかったら");
   });
 });

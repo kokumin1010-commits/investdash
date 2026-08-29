@@ -62,13 +62,25 @@ const NEWS_SCHEMA = {
           items: {
             type: "object",
             properties: {
-              index: { type: "number", description: "入力リストの番号（1始まり）" },
-              sentiment: { type: "string", enum: ["POSITIVE", "NEGATIVE", "NEUTRAL"] },
+              index: {
+                type: "number",
+                description: "入力リストの番号（1始まり）",
+              },
+              sentiment: {
+                type: "string",
+                enum: ["POSITIVE", "NEGATIVE", "NEUTRAL"],
+              },
               impactScore: { type: "number" },
               summary: { type: "string" },
               reasoning: { type: "string" },
             },
-            required: ["index", "sentiment", "impactScore", "summary", "reasoning"],
+            required: [
+              "index",
+              "sentiment",
+              "impactScore",
+              "summary",
+              "reasoning",
+            ],
             additionalProperties: false,
           },
         },
@@ -178,6 +190,21 @@ export type SignalContext = {
     avgCost: number;
     pnlPct: number | null;
   }> | null;
+  /** 直近 12 か月实绩与特别配当剔除后的持续配当（symbol 合计） */
+  dividend?: {
+    perShare: number;
+    annualIncomeBase: number | null;
+    yieldPct: number | null;
+    recurringYieldPct: number | null;
+    hasSpecial: boolean;
+    updatedAt: Date | null;
+  } | null;
+  /** 借入が集中する IBKR 口座の主リスク。全体レバレッジで薄めない */
+  ibkrRisk?: {
+    leverage: number | null;
+    riskLevel: "SAFE" | "CAUTION" | "WARNING" | "DANGER";
+    dropToMarginCallPct: number | null;
+  } | null;
   /** 投資カードの記録内容 */
   card: {
     buyReason: string | null;
@@ -246,17 +273,18 @@ const SIGNAL_SYSTEM = `あなたは長期投資を前提とする個人投資家
 - EXIT: 当初の投資ロジックが実質的に崩れた、またはエグジット条件に該当した
 
 判定の原則:
-1. **取得単価は判断に使わない。** 含み損の大きさそれ自体を売却理由にしてはならず、
-   含み益の大きさを買い増し理由にしてもならない。「5 倍になったから売る」
-   「原価を回収したから売る」はいずれも誤りである。$20 で買ったか $80 で
-   買ったかは、今この値段で買うかどうかとは無関係である。
-2. **必ず次を自問する: 「今この株を 1 株も持っておらず現金を持っていたら、
-   この値段で買うか」。** これに YES と答えられないなら、その保有は
-   取得単価に引きずられている可能性がある。答えを wouldBuyNow に入れる。
+1. **主判断は、現在保有している合計ポジションを今どう扱うか。** 保有株数、
+   複数口座の合計構成比、現在の損益、投資ロジック、配当、IBKR の借入リスクを踏まえ、
+   ADD / HOLD / WATCH / REDUCE / EXIT を実際の保有に対して判定する。
+2. 取得単価と含み損益は実行・税務・リスクの材料として扱うが、含み損の大きさだけを
+   売却理由にしたり、含み益の大きさだけを買い増し理由にしてはならない。
+3. **「今この株を 1 株も持っておらず現金を持っていたら、この値段で買うか」も
+   参考として別に自問する。** 答えを wouldBuyNow に入れるが、これは主判断ではなく、
+   rationale の冒頭や現在保有への提案に書かない。
 	   - YES: 未保有なら新規に買う水準
 	   - NO: 新規に買う水準ではない（ただし保有中なら売るべきとは限らない）
    - UNCLEAR: 判断材料が足りない
-3. **株価の伸びと企業の中身の伸びを比べる。** 売却を検討すべきなのは
+4. **株価の伸びと企業の中身の伸びを比べる。** 売却を検討すべきなのは
    「値上がりしたから」ではなく「価格の上昇速度が企業価値の上昇速度を
    超えたから」である。1 年・3 年・5 年の株価騰落率と、事業内容から
    推測できる企業価値の伸びを比較し、priceVsValue に入れる。
@@ -267,15 +295,15 @@ const SIGNAL_SYSTEM = `あなたは長期投資を前提とする個人投資家
    **重要: 財務諸表の数値は与えられていない。営業利益率や ROE を具体的な
    数字で断定してはならない。** 事業内容と一般に知られた企業の性質から
    定性的に述べ、確信が持てない場合は UNKNOWN とする。
-4. **企業の型を見る。** 事業内容から次を判断する。
+5. **企業の型を見る。** 事業内容から次を判断する。
    - 設備や工場に絶えず大きな資本を投じ続けないと競争力を保てない型か
    - ブランド・規約収入・切り替えの手間などで、追加資本をあまり必要とせず
      利益を伸ばせる型か
    前者は株価が伸びても中身が追いつかないことが起きやすい。
    後者は長く持つほど有利になりやすい。
-5. 判断の基準は常に「当初の投資ロジックが今も有効か」。
-6. 投資カードにエグジット条件が記録されている場合、それに該当するかを最優先で確認する。
-7. **投資カードが未記入でも、WATCH に固定してはならない。** その場合は入手可能な
+6. 判断の基準は常に「当初の投資ロジックが今も有効か」。
+7. 投資カードにエグジット条件が記録されている場合、それに該当するかを最優先で確認する。
+8. **投資カードが未記入でも、WATCH に固定してはならない。** その場合は入手可能な
    客観データ（ニュースの内容と影響度、52週レンジ内の位置、直近騰落率、構成比）から
    最も妥当なシグナルを判定する。判断の指針:
    - 影響度 70 以上の好材料が複数あり、ロジックを損なう悪材料がない → ADD または HOLD
@@ -286,24 +314,28 @@ const SIGNAL_SYSTEM = `あなたは長期投資を前提とする個人投資家
    投資カードが未記入であることは confidence を下げる要因として扱い、rationale の
    最後に「投資カードを記入すると判定の精度が上がる」と 1 文で添える。
    ただしこれを判定そのものの理由にしてはならない。
-8. ニュースは impactScore が高いものを重視する。低スコアのニュースを過度に重視しない。
-9. 構成比が 25% を超える銘柄は、ロジックが健全でも集中リスクに言及する。
-10. データが欠損している項目については推測せず、「データ未取得」と明記する。
-11. confidence は判断材料の充足度を表す。目安:
+9. ニュースは impactScore が高いものを重視する。低スコアのニュースを過度に重視しない。
+10. 構成比が 25% を超える銘柄は、ロジックが健全でも集中リスクに言及する。
+11. IBKR が CAUTION 以上の場合、借入を増やす ADD を安易に出さず、主文でリスクを明記する。
+12. 配当データがある場合は、無配と誤記してはならない。特別配当を除いた利回りも区別する。
+13. データが欠損している項目については推測せず、「データ未取得」と明記する。
+14. confidence は判断材料の充足度を表す。目安:
    - 投資カード記入済み + 影響度の高いニュースあり → 70〜90
    - 投資カード未記入だが影響度の高いニュースあり → 45〜65
    - 投資カード未記入・ニュースも乏しい → 40 未満
-12. WATCH は「具体的に未解決の確認事項」または「好悪材料が衝突している」ときだけ使う。
+15. WATCH は「具体的に未解決の確認事項」または「好悪材料が衝突している」ときだけ使う。
    投資ロジックが維持され、材料が揃い、今すぐ行動する根拠が無い場合は HOLD とする。
    単に一部データが無いことだけを理由に全銘柄を WATCH に寄せてはならない。
-13. reviewTriggers は、次回に確認できる具体条件を 1〜3 件書く。例: 決算で通期見通しが
+16. reviewTriggers は、次回に確認できる具体条件を 1〜3 件書く。例: 決算で通期見通しが
    下方修正された時、52週高値を更新した時、投資カードのエグジット条件に該当した時。
    「注視する」「様子を見る」だけの抽象表現は禁止する。
-14. riskFlags は入力資料から確認できる現在の主要リスクを 0〜3 件書く。根拠が無いリスクを
+17. riskFlags は入力資料から確認できる現在の主要リスクを 0〜3 件書く。根拠が無いリスクを
    一般論で追加しない。該当しない場合は空配列にする。
 
-rationale は日本語 3〜5 文。**冒頭で「今この株を持っていなかったらこの値段で
-買うか」への答えを述べ**、その後に理由と次に確認すべき点を書く。
+rationale は日本語 3〜5 文。**冒頭で「現在の合計保有株数と、それをどうするか」を述べ、
+実際の保有に対する提案から始める。**「今この株を持っていなかったら」「未保有なら」
+「新規に買うか」という仮定を rationale の冒頭または主文に書くことは禁止する。
+その後に理由、構成比・配当・借入リスク、次に確認すべき点を書く。
 断定的な売買推奨表現（「買うべき」「売却すべき」）は避け、「〜を検討する材料がある」
 「〜の確認を推奨する」という表現を用いる。
 
@@ -320,7 +352,10 @@ const SIGNAL_SCHEMA = {
     schema: {
       type: "object",
       properties: {
-        action: { type: "string", enum: ["ADD", "HOLD", "WATCH", "REDUCE", "EXIT"] },
+        action: {
+          type: "string",
+          enum: ["ADD", "HOLD", "WATCH", "REDUCE", "EXIT"],
+        },
         confidence: { type: "number" },
         rationale: { type: "string" },
         wouldBuyNow: { type: "string", enum: ["YES", "NO", "UNCLEAR"] },
@@ -451,6 +486,21 @@ export function buildSignalPrompt(ctx: SignalContext): string {
     ? ctx.businessSummary.slice(0, 1200)
     : "事業内容は取得できていません。企業の型は判断材料にしないこと。";
 
+  const dividendBlock = ctx.dividend
+    ? `- 1株配当（直近12か月実績）: ${fmt(ctx.dividend.perShare, ` ${ctx.currency}`)}
+- 年間配当見込（全口座合計・円換算・税引前）: ${fmt(ctx.dividend.annualIncomeBase, " 円")}
+- 現在値配当利回り: ${ctx.dividend.yieldPct === null ? "データ未取得" : `${ctx.dividend.yieldPct.toFixed(2)}%`}
+- 継続配当利回り（特別配当除外）: ${ctx.dividend.recurringYieldPct === null ? "データ未取得" : `${ctx.dividend.recurringYieldPct.toFixed(2)}%`}
+- 特別配当: ${ctx.dividend.hasSpecial ? "含む" : "なし"}
+- 配当データ更新: ${ctx.dividend.updatedAt ? ctx.dividend.updatedAt.toISOString() : "データ未取得"}`
+    : "配当データは未取得です。無配と断定しないこと。";
+
+  const ibkrBlock = ctx.ibkrRisk
+    ? `- 主レバレッジ: ${ctx.ibkrRisk.leverage === null ? "データ未取得" : `${ctx.ibkrRisk.leverage.toFixed(2)}x`}
+- リスク区分: ${ctx.ibkrRisk.riskLevel}
+- 追証までの下落余地: ${ctx.ibkrRisk.dropToMarginCallPct === null ? "データ未取得" : `${ctx.ibkrRisk.dropToMarginCallPct.toFixed(1)}%`}`
+    : "IBKR 借入データは未取得です。";
+
   return `## 銘柄
 ${ctx.name}（${ctx.symbol}）／セクター: ${ctx.sector ?? "未取得"}／業種: ${ctx.industry ?? "未取得"}
 
@@ -461,6 +511,12 @@ ${ctx.name}（${ctx.symbol}）／セクター: ${ctx.sector ?? "未取得"}／�
 - 損益率: ${ctx.pnlPct === null ? "データ未取得" : `${ctx.pnlPct.toFixed(2)}%`}
 - ポートフォリオ構成比: ${ctx.weightPct === null ? "データ未取得" : `${ctx.weightPct.toFixed(1)}%`}
 ${breakdownBlock}
+## 配当（直近12か月実績ベース）
+${dividendBlock}
+
+## IBKR 集中借入リスク（全体レバレッジで薄めない）
+${ibkrBlock}
+
 ## 価格の位置
 - 52週高値: ${fmt(ctx.fiftyTwoWeekHigh, ` ${ctx.currency}`)}／52週安値: ${fmt(ctx.fiftyTwoWeekLow, ` ${ctx.currency}`)}
 - 52週レンジ内の位置: ${rangePos}
@@ -483,7 +539,7 @@ ${newsLines}
 以上の材料のみに基づいて、シグナルを判定してください。`;
 }
 
-export const SIGNAL_SCHEMA_VERSION = 2;
+export const SIGNAL_SCHEMA_VERSION = 3;
 
 /**
  * モデルの confidence をそのまま信用しない。入力の実際の充足度をサーバー側で
@@ -502,7 +558,9 @@ export function assessSignalDataQuality(
         ctx.card.risks,
       ]
     : [];
-  const cardFilled = cardValues.filter(value => typeof value === "string" && value.trim()).length;
+  const cardFilled = cardValues.filter(
+    value => typeof value === "string" && value.trim()
+  ).length;
   const analyzedNews = ctx.news.filter(
     item => item.sentiment !== null && item.impactScore !== null
   ).length;
@@ -512,10 +570,17 @@ export function assessSignalDataQuality(
     ctx.fiftyTwoWeekLow !== null &&
     ctx.longTerm !== null &&
     ctx.longTerm !== undefined;
-  const hasCompanyProfile = Boolean(ctx.businessSummary?.trim() && ctx.sector && ctx.industry);
+  const hasCompanyProfile = Boolean(
+    ctx.businessSummary?.trim() && ctx.sector && ctx.industry
+  );
 
-  if (cardFilled >= 4 && analyzedNews >= 1 && hasPriceSet && hasCompanyProfile) return "STRONG";
-  if (cardFilled >= 2 && ctx.currentPrice !== null && (analyzedNews >= 1 || hasCompanyProfile)) {
+  if (cardFilled >= 4 && analyzedNews >= 1 && hasPriceSet && hasCompanyProfile)
+    return "STRONG";
+  if (
+    cardFilled >= 2 &&
+    ctx.currentPrice !== null &&
+    (analyzedNews >= 1 || hasCompanyProfile)
+  ) {
     return "MODERATE";
   }
   return "LIMITED";
@@ -524,12 +589,51 @@ export function assessSignalDataQuality(
 function normalizeSignalList(value: unknown): string[] {
   if (!Array.isArray(value)) return [];
   return value
-    .filter((item): item is string => typeof item === "string" && item.trim().length > 0)
+    .filter(
+      (item): item is string =>
+        typeof item === "string" && item.trim().length > 0
+    )
     .map(item => item.trim().slice(0, 240))
     .slice(0, 3);
 }
 
-export async function generateSignal(ctx: SignalContext): Promise<SignalResult> {
+export function ensureHoldingRationaleLead(
+  rationale: string,
+  action: SignalResult["action"],
+  quantity: number
+): string {
+  const trimmed = rationale.trim();
+  const firstSentence = trimmed.split("。")[0] ?? "";
+  const alreadyActual =
+    /保有/.test(firstSentence) &&
+    !/持っていなかったら|未保有なら|新規に買うか/.test(firstSentence);
+  if (alreadyActual) return trimmed;
+
+  const hypotheticalLead =
+    /^(今[、]?この株を持っていなかったら|未保有なら|今この株を1株も持っていなかったら)/.test(
+      firstSentence
+    );
+  const remainder = hypotheticalLead
+    ? trimmed
+        .slice(firstSentence.length + (trimmed.includes("。") ? 1 : 0))
+        .trim()
+    : trimmed;
+  const quantityLabel = quantity.toLocaleString("ja-JP", {
+    maximumFractionDigits: 4,
+  });
+  const lead: Record<SignalResult["action"], string> = {
+    ADD: `${quantityLabel}株を保有中で、現在は買い増しを検討する判断です`,
+    HOLD: `${quantityLabel}株を保有中で、現在のポジションを維持する判断です`,
+    WATCH: `${quantityLabel}株を保有中で、追加売買をせず確認条件を待つ判断です`,
+    REDUCE: `${quantityLabel}株を保有中で、一部売却による縮小を検討する判断です`,
+    EXIT: `${quantityLabel}株を保有中で、全保有の退出を検討する判断です`,
+  };
+  return remainder ? `${lead[action]}。${remainder}` : `${lead[action]}。`;
+}
+
+export async function generateSignal(
+  ctx: SignalContext
+): Promise<SignalResult> {
   const res = await invokeLLM({
     model: ANALYSIS_MODEL,
     messages: [
@@ -541,12 +645,24 @@ export async function generateSignal(ctx: SignalContext): Promise<SignalResult> 
   });
 
   const text = res.choices?.[0]?.message?.content;
-  const parsed = parseLlmJson<Omit<SignalResult, "dataQuality">>(text, "シグナルの応答");
+  const parsed = parseLlmJson<Omit<SignalResult, "dataQuality">>(
+    text,
+    "シグナルの応答"
+  );
   const dataQuality = assessSignalDataQuality(ctx);
-  const confidenceCap = dataQuality === "STRONG" ? 100 : dataQuality === "MODERATE" ? 75 : 55;
+  const confidenceCap =
+    dataQuality === "STRONG" ? 100 : dataQuality === "MODERATE" ? 75 : 55;
   return {
     ...parsed,
-    confidence: Math.max(0, Math.min(confidenceCap, Math.round(parsed.confidence))),
+    rationale: ensureHoldingRationaleLead(
+      parsed.rationale,
+      parsed.action,
+      ctx.quantity
+    ),
+    confidence: Math.max(
+      0,
+      Math.min(confidenceCap, Math.round(parsed.confidence))
+    ),
     dataQuality,
     reviewTriggers: normalizeSignalList(parsed.reviewTriggers),
     riskFlags: normalizeSignalList(parsed.riskFlags),
@@ -583,7 +699,9 @@ EXIT（ウォッチリストから外すことを検討）のいずれかを提�
 4. 断定的な推奨表現は避ける。
 rationale は日本語 3〜4 文。`;
 
-export async function generateWatchSignal(ctx: WatchSignalContext): Promise<SignalResult> {
+export async function generateWatchSignal(
+  ctx: WatchSignalContext
+): Promise<SignalResult> {
   const gap =
     ctx.currentPrice && ctx.targetPrice
       ? `${(((ctx.currentPrice - ctx.targetPrice) / ctx.targetPrice) * 100).toFixed(1)}%（プラスは目標より高い）`
@@ -592,7 +710,10 @@ export async function generateWatchSignal(ctx: WatchSignalContext): Promise<Sign
   const newsLines =
     ctx.news.length > 0
       ? ctx.news
-          .map(n => `- [${n.sentiment ?? "未判定"} / 影響度${n.impactScore ?? "—"}] ${n.title}`)
+          .map(
+            n =>
+              `- [${n.sentiment ?? "未判定"} / 影響度${n.impactScore ?? "—"}] ${n.title}`
+          )
           .join("\n")
       : "直近のニュースは取得されていません。";
 
@@ -626,5 +747,8 @@ ${newsLines}
 
   const text = res.choices?.[0]?.message?.content;
   const parsed = parseLlmJson<SignalResult>(text, "シグナルの応答");
-  return { ...parsed, confidence: Math.max(0, Math.min(100, Math.round(parsed.confidence))) };
+  return {
+    ...parsed,
+    confidence: Math.max(0, Math.min(100, Math.round(parsed.confidence))),
+  };
 }
