@@ -210,4 +210,18 @@
 - [x] 为 Dashboard、保有一覧、HoldingDetail 的次回确认状态补充桌面/390px DOM 测试
 - [x] 完整运行 Vitest、TypeScript 与生产构建，并部署 Railway（128 文件、1047 项，生产 f08edf3）
 - [x] 在正式入口验证真实信号有效期作为 AI目安，并确认官方日程未取得时不冒充决算日；Dashboard/列表/详情无写入验收通过
-- [ ] 更新次回确认审计与运维文档、同步 GitHub 并保存最终 checkpoint
+- [x] 更新次回确认审计与运维文档、同步 GitHub 并保存最终 checkpoint
+- [x] 审计决算/新闻后再分析、holdingActionPlan、买い増し计划与现有用户确认数据链路
+- [x] 设计 WAITING/REVIEWING/PENDING_ACTION/APPROVED/SNOOZED/SKIPPED/COMPLETED 状态机与幂等入队规则
+- [x] 设计行动优先级、期限、当前持仓、建议买卖股数金额和执行后仓位的统一契约
+- [x] 新增 action queue 持久表、迁移、数据库 helper 与受保护 tRPC 路由
+- [x] 在决算/重要新闻触发再分析后，仅将有可执行变化的 ADD/REDUCE/EXIT 或需要确认 WATCH 自动入队
+- [x] 为 HOLD/无变化/重复事件建立不入队或更新原队列项的幂等规则
+- [x] 实现日文アクション待ち页面，显示当前持仓、建议动作、股数金额、执行后仓位、理由、期限与证据
+- [x] 实现“計画に追加／今回は見送る／あとで確認／確認済み”交互，不自动下单
+- [x] 在 Dashboard 与导航加入待处理数量、紧急优先项和直达入口
+- [x] 为状态机、行动计算、事件触发、重复入队、用户确认和旧数据兼容补充单元/页面测试
+- [x] 为アクション待ち页面和 Dashboard 入口补充桌面/390px DOM 测试
+- [x] 完整运行 Vitest、TypeScript 与生产构建（130 文件、1055 项）；Railway 部署待执行
+- [ ] 在正式入口用真实 HOLD/REDUCE/WATCH 样本完成无写入生产验收，避免改写真实持仓或下单
+- [ ] 更新アクション待ち审计与运维文档、同步 GitHub 并保存最终 checkpoint

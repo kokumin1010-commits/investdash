@@ -34,11 +34,12 @@ import {
   Settings,
   Wallet,
   Activity,
+  ListChecks,
 } from "lucide-react";
 import { MessageSquare } from "lucide-react";
 import { CSSProperties, useEffect, useRef, useState } from "react";
 import { useLocation } from "wouter";
-import { DashboardLayoutSkeleton } from './DashboardLayoutSkeleton';
+import { DashboardLayoutSkeleton } from "./DashboardLayoutSkeleton";
 import PasscodeGate from "./PasscodeGate";
 
 const menuItems = [
@@ -46,6 +47,7 @@ const menuItems = [
   { icon: Wallet, label: "保有銘柄", path: "/holdings" },
   { icon: Coins, label: "配当", path: "/dividends" },
   { icon: Target, label: "買い増しプラン", path: "/buy-plans" },
+  { icon: ListChecks, label: "アクション待ち", path: "/action-queue" },
   { icon: FileText, label: "レポート", path: "/reports" },
   { icon: MessageSquare, label: "AI に相談", path: "/consult" },
   { icon: Eye, label: "ウォッチリスト", path: "/watchlist" },
@@ -77,7 +79,7 @@ export default function DashboardLayout({
 
   // 保存済みトークンの有効性を確認している間だけスケルトンを出す
   if (checking) {
-    return <DashboardLayoutSkeleton />
+    return <DashboardLayoutSkeleton />;
   }
 
   if (!unlocked) {

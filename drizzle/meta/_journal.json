@@ -218,6 +218,13 @@
       "when": 1787947688777,
       "tag": "0030_strong_pyro",
       "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "5",
+      "when": 1788007952819,
+      "tag": "0031_thick_stranger",
+      "breakpoints": true
     }
   ]
 }

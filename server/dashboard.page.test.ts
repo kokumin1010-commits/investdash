@@ -12,29 +12,88 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("@/lib/trpc", () => ({
   trpc: {
-    useUtils: () => ({ invalidate: vi.fn(), portfolio: { invalidate: vi.fn() } }),
+    useUtils: () => ({
+      invalidate: vi.fn(),
+      portfolio: { invalidate: vi.fn() },
+    }),
     portfolio: {
       overview: { useQuery: mocks.overview },
       assetTrend: { useQuery: mocks.assetTrend },
       dataHealth: { useQuery: () => ({ data: null, isLoading: false }) },
-      syncPrices: { useMutation: () => ({ mutate: vi.fn(), mutateAsync: mocks.mutateAsync, isPending: false }) },
-      regenerateAllSignals: { useMutation: () => ({ mutate: vi.fn(), mutateAsync: mocks.mutateAsync, isPending: false }) },
-      syncDividends: { useMutation: () => ({ mutate: vi.fn(), mutateAsync: mocks.mutateAsync, isPending: false }) },
+      syncPrices: {
+        useMutation: () => ({
+          mutate: vi.fn(),
+          mutateAsync: mocks.mutateAsync,
+          isPending: false,
+        }),
+      },
+      regenerateAllSignals: {
+        useMutation: () => ({
+          mutate: vi.fn(),
+          mutateAsync: mocks.mutateAsync,
+          isPending: false,
+        }),
+      },
+      syncDividends: {
+        useMutation: () => ({
+          mutate: vi.fn(),
+          mutateAsync: mocks.mutateAsync,
+          isPending: false,
+        }),
+      },
     },
-    news: { syncAll: { useMutation: () => ({ mutate: vi.fn(), mutateAsync: mocks.mutateAsync, isPending: false }) } },
+    actionQueue: {
+      summary: {
+        useQuery: () => ({
+          data: {
+            pending: 0,
+            urgent: 0,
+            approved: 0,
+            snoozed: 0,
+            reviewing: 0,
+            failed: 0,
+            top: [],
+          },
+          isLoading: false,
+        }),
+      },
+    },
+    news: {
+      syncAll: {
+        useMutation: () => ({
+          mutate: vi.fn(),
+          mutateAsync: mocks.mutateAsync,
+          isPending: false,
+        }),
+      },
+    },
   },
 }));
 
 vi.mock("@/hooks/useBatchRun", () => ({
-  useBatchRun: () => ({ start: vi.fn(), progress: { running: false, processed: 0, total: 0 } }),
+  useBatchRun: () => ({
+    start: vi.fn(),
+    progress: { running: false, processed: 0, total: 0 },
+  }),
 }));
 
 vi.mock("recharts", () => {
-  const box = ({ children }: { children?: React.ReactNode }) => children ?? null;
+  const box = ({ children }: { children?: React.ReactNode }) =>
+    children ?? null;
   return {
-    Area: box, AreaChart: box, Bar: box, BarChart: box, Cell: box, Line: box,
-    Pie: box, PieChart: box, ReferenceLine: box, ResponsiveContainer: box,
-    Tooltip: box, XAxis: box, YAxis: box,
+    Area: box,
+    AreaChart: box,
+    Bar: box,
+    BarChart: box,
+    Cell: box,
+    Line: box,
+    Pie: box,
+    PieChart: box,
+    ReferenceLine: box,
+    ResponsiveContainer: box,
+    Tooltip: box,
+    XAxis: box,
+    YAxis: box,
   };
 });
 
@@ -63,26 +122,67 @@ function overviewData(unknownCount: number) {
     createdAt: new Date("2026-08-28T00:00:00Z"),
   };
   const group = {
-    symbol: "7203.T", name: "トヨタ自動車", market: "JP", currency: "JPY",
-    quantity: 100, avgCost: 2500, currentPrice: 3000, marketValue: 300000,
-    marketValueBase: 300000, costValueBase: 250000, pnl: 50000, pnlBase: 50000,
-    pnlPct: 20, weightPct: 100, sector: "一般消費財", industry: "Auto Manufacturers",
-    signal, accountCount: 1, brokers: [], dividend: null, holdingDuration: null,
+    symbol: "7203.T",
+    name: "トヨタ自動車",
+    market: "JP",
+    currency: "JPY",
+    quantity: 100,
+    avgCost: 2500,
+    currentPrice: 3000,
+    marketValue: 300000,
+    marketValueBase: 300000,
+    costValueBase: 250000,
+    pnl: 50000,
+    pnlBase: 50000,
+    pnlPct: 20,
+    weightPct: 100,
+    sector: "一般消費財",
+    industry: "Auto Manufacturers",
+    signal,
+    accountCount: 1,
+    brokers: [],
+    dividend: null,
+    holdingDuration: null,
   };
   return {
     summary: {
-      baseCurrency: "JPY", totalAssets: 300000, totalValueBase: 300000,
-      totalCostBase: 250000, totalPnl: 50000, totalPnlPct: 20, positionCount: 1,
-      cashBalance: 0, interestAssetsBase: 0, interestIncomeBase: 0, interestRatePct: 0,
-      totalBorrowedBase: 0, netAssetsBase: 300000, overallLeverage: 1,
-      missingPriceCount: 0, lastPriceSyncAt: new Date("2026-08-28T00:00:00Z"), periodChange: null,
+      baseCurrency: "JPY",
+      totalAssets: 300000,
+      totalValueBase: 300000,
+      totalCostBase: 250000,
+      totalPnl: 50000,
+      totalPnlPct: 20,
+      positionCount: 1,
+      cashBalance: 0,
+      interestAssetsBase: 0,
+      interestIncomeBase: 0,
+      interestRatePct: 0,
+      totalBorrowedBase: 0,
+      netAssetsBase: 300000,
+      overallLeverage: 1,
+      missingPriceCount: 0,
+      lastPriceSyncAt: new Date("2026-08-28T00:00:00Z"),
+      periodChange: null,
     },
-    positions: [], groups: [group], sectors: [], currencies: [], markets: [], brokers: [],
-    alerts: [], interestAssets: [], dividendCalendar: {},
+    positions: [],
+    groups: [group],
+    sectors: [],
+    currencies: [],
+    markets: [],
+    brokers: [],
+    alerts: [],
+    interestAssets: [],
+    dividendCalendar: {},
     dividends: {
-      annualIncomeBase: 0, monthlyAverageBase: 0, recurringIncomeBase: 0,
-      yieldPct: 0, yieldOnCostPct: 0, payingCount: 0,
-      nonPayingCount: unknownCount === 0 ? 1 : 0, unknownCount, specialCount: 0,
+      annualIncomeBase: 0,
+      monthlyAverageBase: 0,
+      recurringIncomeBase: 0,
+      yieldPct: 0,
+      yieldOnCostPct: 0,
+      payingCount: 0,
+      nonPayingCount: unknownCount === 0 ? 1 : 0,
+      unknownCount,
+      specialCount: 0,
       updatedAt: unknownCount === 0 ? new Date("2026-08-28T00:00:00Z") : null,
     },
   };
@@ -127,10 +227,21 @@ function borrowingOverview() {
 beforeEach(() => {
   vi.stubGlobal("React", React);
   mocks.assetTrend.mockReturnValue({
-    data: { points: [], snapshotCount: 0, firstAt: null, lastAt: null, changedPointCount: 0, priceOnlyChange: null },
+    data: {
+      points: [],
+      snapshotCount: 0,
+      firstAt: null,
+      lastAt: null,
+      changedPointCount: 0,
+      priceOnlyChange: null,
+    },
     isLoading: false,
   });
-  mocks.overview.mockReturnValue({ data: overviewData(0), isLoading: false, error: null });
+  mocks.overview.mockReturnValue({
+    data: overviewData(0),
+    isLoading: false,
+    error: null,
+  });
 });
 
 afterEach(() => cleanup());
@@ -147,18 +258,28 @@ describe("Dashboard actual page", () => {
     expect(screen.getByText("あと7日で確認")).toBeTruthy();
     expect(screen.getByText("AI目安")).toBeTruthy();
     expect(screen.getByText("次回決算を確認")).toBeTruthy();
-    const signalCard = screen.getByText("AI シグナル内訳").closest("[data-slot='card']");
+    const signalCard = screen
+      .getByText("AI シグナル内訳")
+      .closest("[data-slot='card']");
     expect(signalCard?.querySelectorAll("button")).toHaveLength(5);
   });
 
   it("renders a dash when every symbol dividend is unknown", () => {
-    mocks.overview.mockReturnValue({ data: overviewData(1), isLoading: false, error: null });
+    mocks.overview.mockReturnValue({
+      data: overviewData(1),
+      isLoading: false,
+      error: null,
+    });
     render(React.createElement(Dashboard));
     expect(screen.getByText("配当データ未取得")).toBeTruthy();
   });
 
   it("promotes the leveraged IBKR account and keeps overall leverage as a reference", () => {
-    mocks.overview.mockReturnValue({ data: borrowingOverview(), isLoading: false, error: null });
+    mocks.overview.mockReturnValue({
+      data: borrowingOverview(),
+      isLoading: false,
+      error: null,
+    });
     render(React.createElement(Dashboard));
     expect(screen.getByText("借入（IBKR シンガポールのみ）")).toBeTruthy();
     expect(screen.getByText("IBKR シンガポール レバレッジ")).toBeTruthy();

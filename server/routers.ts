@@ -8,6 +8,7 @@ import { newsRouter } from "./routers/newsRouter";
 import { consultRouter } from "./routers/consultRouter";
 import { portfolioRouter } from "./routers/portfolio";
 import { watchlistRouter } from "./routers/watchlistRouter";
+import { actionQueueRouter } from "./routers/actionQueueRouter";
 
 export const appRouter = router({
   system: systemRouter,
@@ -25,6 +26,7 @@ export const appRouter = router({
   watchlist: watchlistRouter,
   consult: consultRouter,
   import: importRouter,
+  actionQueue: actionQueueRouter,
 });
 
 export type AppRouter = typeof appRouter;

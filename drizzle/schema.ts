@@ -18,8 +18,14 @@ import { BROKERS, MARKETS } from "../shared/investing";
  * ここで文字列を再掲すると、口座や市場を追加したときにスキーマ側の更新が
  * 漏れて「型は通るが DB が受け付けない」状態になるため、定数から生成する。
  */
-const BROKER_ENUM = BROKERS as unknown as [(typeof BROKERS)[number], ...(typeof BROKERS)[number][]];
-const MARKET_ENUM = MARKETS as unknown as [(typeof MARKETS)[number], ...(typeof MARKETS)[number][]];
+const BROKER_ENUM = BROKERS as unknown as [
+  (typeof BROKERS)[number],
+  ...(typeof BROKERS)[number][],
+];
+const MARKET_ENUM = MARKETS as unknown as [
+  (typeof MARKETS)[number],
+  ...(typeof MARKETS)[number][],
+];
 /**
  * Core user table backing auth flow.
  * Columns use camelCase to match both database fields and generated types.
@@ -40,7 +46,13 @@ export type User = typeof users.$inferSelect;
 export type InsertUser = typeof users.$inferInsert;
 
 /** 意思決定シグナルの種別 */
-export const SIGNAL_VALUES = ["ADD", "HOLD", "WATCH", "REDUCE", "EXIT"] as const;
+export const SIGNAL_VALUES = [
+  "ADD",
+  "HOLD",
+  "WATCH",
+  "REDUCE",
+  "EXIT",
+] as const;
 export type SignalAction = (typeof SIGNAL_VALUES)[number];
 
 /**
@@ -61,9 +73,7 @@ export const holdings = mysqlTable(
     market: mysqlEnum("market", MARKET_ENUM).default("JP").notNull(),
     currency: varchar("currency", { length: 8 }).default("JPY").notNull(),
     /** どの証券プラットフォームで保有しているか */
-    broker: mysqlEnum("broker", BROKER_ENUM)
-      .default("other")
-      .notNull(),
+    broker: mysqlEnum("broker", BROKER_ENUM).default("other").notNull(),
     /** 保有株数 */
     quantity: decimal("quantity", { precision: 20, scale: 4 }).notNull(),
     /** 取得単価 */
@@ -97,7 +107,10 @@ export const holdings = mysqlTable(
      * 特別配当を除いた年間配当の推定（現地通貨）。
      * 特別配当がなければ annualDividend と同じ値になる。
      */
-    recurringDividend: decimal("recurringDividend", { precision: 18, scale: 6 }),
+    recurringDividend: decimal("recurringDividend", {
+      precision: 18,
+      scale: 6,
+    }),
     /**
      * 月別の 1 株あたり配当額を JSON 配列で保存する（12 要素、添字 0 = 1 月）。
      * 月ごとに 12 列を作るより、配列 1 列の方がスキーマが単純で、
@@ -107,11 +120,17 @@ export const holdings = mysqlTable(
     /** 最後に配当が支払われた日（権利落ち日） */
     lastDividendDate: timestamp("lastDividendDate"),
     /** 最後の 1 回あたりの配当額（現地通貨） */
-    lastDividendAmount: decimal("lastDividendAmount", { precision: 20, scale: 6 }),
+    lastDividendAmount: decimal("lastDividendAmount", {
+      precision: 20,
+      scale: 6,
+    }),
     /** ユーザー確認または証券会社の約定履歴に基づく実際の取得開始日 */
     acquiredAt: timestamp("acquiredAt"),
     /** acquiredAt の根拠。推定日や取込日はここへ保存しない */
-    acquiredAtSource: mysqlEnum("acquiredAtSource", ["USER_CONFIRMED", "BROKER_TRADE"]),
+    acquiredAtSource: mysqlEnum("acquiredAtSource", [
+      "USER_CONFIRMED",
+      "BROKER_TRADE",
+    ]),
     dividendUpdatedAt: timestamp("dividendUpdatedAt"),
     priceUpdatedAt: timestamp("priceUpdatedAt"),
     profileUpdatedAt: timestamp("profileUpdatedAt"),
@@ -120,7 +139,10 @@ export const holdings = mysqlTable(
     updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
   },
   table => ({
-    userSymbolIdx: index("holdings_user_symbol_idx").on(table.userId, table.symbol),
+    userSymbolIdx: index("holdings_user_symbol_idx").on(
+      table.userId,
+      table.symbol
+    ),
     /**
      * 同一銘柄を複数の証券口座で保有できる（例: ヤクルトを moomoo と楽天の両方で持つ）。
      * 保有の一意性は「ユーザー + シンボル + 口座」で判断するため、この組み合わせで引く。
@@ -170,7 +192,10 @@ export const investmentCards = mysqlTable(
     updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
   },
   table => ({
-    userSymbolIdx: index("cards_user_symbol_idx").on(table.userId, table.symbol),
+    userSymbolIdx: index("cards_user_symbol_idx").on(
+      table.userId,
+      table.symbol
+    ),
   })
 );
 
@@ -208,7 +233,14 @@ export const symbolNotes = mysqlTable(
      * BAND = 買い増しプランの判定変化、CONSULT = 相談した、
      * OUTCOME = 提案の当否が確定した、MANUAL = 手で書いた
      */
-    kind: mysqlEnum("kind", ["NEWS", "EARNINGS", "BAND", "CONSULT", "OUTCOME", "MANUAL"]).notNull(),
+    kind: mysqlEnum("kind", [
+      "NEWS",
+      "EARNINGS",
+      "BAND",
+      "CONSULT",
+      "OUTCOME",
+      "MANUAL",
+    ]).notNull(),
     /** 一覧で読む 1 行。ニュースなら見出しをそのまま使う */
     headline: varchar("headline", { length: 512 }).notNull(),
     /** 補足。ニュースの要約や判定変化の前後など */
@@ -233,14 +265,23 @@ export const symbolNotes = mysqlTable(
     createdAt: timestamp("createdAt").defaultNow().notNull(),
   },
   table => ({
-    userSymbolIdx: index("symbolNotes_user_symbol_idx").on(table.userId, table.symbol),
-    occurredIdx: index("symbolNotes_occurred_idx").on(table.userId, table.occurredAt),
+    userSymbolIdx: index("symbolNotes_user_symbol_idx").on(
+      table.userId,
+      table.symbol
+    ),
+    occurredIdx: index("symbolNotes_occurred_idx").on(
+      table.userId,
+      table.occurredAt
+    ),
     /**
      * 同じ出来事を重複して積まないよう一意にする。
      * 株価更新のたびに走るため、重複を防がないと同じニュースが
      * 何十件も並んで読めなくなる。
      */
-    sourceUnique: uniqueIndex("symbolNotes_source_unique").on(table.userId, table.sourceKey),
+    sourceUnique: uniqueIndex("symbolNotes_source_unique").on(
+      table.userId,
+      table.sourceKey
+    ),
   })
 );
 
@@ -275,7 +316,11 @@ export const newsItems = mysqlTable(
   },
   table => ({
     userSymbolIdx: index("news_user_symbol_idx").on(table.userId, table.symbol),
-    hashIdx: uniqueIndex("news_symbol_hash_unique").on(table.userId, table.symbol, table.urlHash),
+    hashIdx: uniqueIndex("news_symbol_hash_unique").on(
+      table.userId,
+      table.symbol,
+      table.urlHash
+    ),
   })
 );
 
@@ -335,11 +380,16 @@ export const signals = mysqlTable(
     priceAtSignal: decimal("priceAtSignal", { precision: 20, scale: 4 }),
     pnlPctAtSignal: decimal("pnlPctAtSignal", { precision: 10, scale: 4 }),
     /** watchlist 銘柄のシグナルか */
-    scope: mysqlEnum("scope", ["HOLDING", "WATCHLIST"]).default("HOLDING").notNull(),
+    scope: mysqlEnum("scope", ["HOLDING", "WATCHLIST"])
+      .default("HOLDING")
+      .notNull(),
     createdAt: timestamp("createdAt").defaultNow().notNull(),
   },
   table => ({
-    userSymbolIdx: index("signals_user_symbol_idx").on(table.userId, table.symbol),
+    userSymbolIdx: index("signals_user_symbol_idx").on(
+      table.userId,
+      table.symbol
+    ),
   })
 );
 
@@ -369,7 +419,9 @@ export const watchlist = mysqlTable(
     watchReason: text("watchReason"),
     /** 想定投資額 */
     plannedAmount: decimal("plannedAmount", { precision: 20, scale: 2 }),
-    priority: mysqlEnum("priority", ["HIGH", "MEDIUM", "LOW"]).default("MEDIUM").notNull(),
+    priority: mysqlEnum("priority", ["HIGH", "MEDIUM", "LOW"])
+      .default("MEDIUM")
+      .notNull(),
     sector: varchar("sector", { length: 80 }),
     industry: varchar("industry", { length: 120 }),
     priceUpdatedAt: timestamp("priceUpdatedAt"),
@@ -377,7 +429,10 @@ export const watchlist = mysqlTable(
     updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
   },
   table => ({
-    userSymbolIdx: index("watchlist_user_symbol_idx").on(table.userId, table.symbol),
+    userSymbolIdx: index("watchlist_user_symbol_idx").on(
+      table.userId,
+      table.symbol
+    ),
   })
 );
 
@@ -468,9 +523,15 @@ export const monthlySnapshots = mysqlTable(
      */
     periodYm: varchar("periodYm", { length: 7 }).notNull(),
     /** 総評価額（JPY 換算） */
-    totalValueJpy: decimal("totalValueJpy", { precision: 20, scale: 2 }).notNull(),
+    totalValueJpy: decimal("totalValueJpy", {
+      precision: 20,
+      scale: 2,
+    }).notNull(),
     /** 取得原価（JPY 換算） */
-    totalCostJpy: decimal("totalCostJpy", { precision: 20, scale: 2 }).notNull(),
+    totalCostJpy: decimal("totalCostJpy", {
+      precision: 20,
+      scale: 2,
+    }).notNull(),
     /** 借入残高（JPY 換算・信用取引） */
     borrowedJpy: decimal("borrowedJpy", { precision: 20, scale: 2 }),
     /** 現金性資産（JPY 換算・貨幣市場基金など） */
@@ -482,7 +543,10 @@ export const monthlySnapshots = mysqlTable(
     /** レコード数（口座別の明細の数） */
     recordCount: int("recordCount").notNull(),
     /** 年間配当見込み（JPY 換算） */
-    annualDividendJpy: decimal("annualDividendJpy", { precision: 20, scale: 2 }),
+    annualDividendJpy: decimal("annualDividendJpy", {
+      precision: 20,
+      scale: 2,
+    }),
     /**
      * 記録時点の為替レート。後から推移を見るとき、
      * 円換算額の変化が株価によるものか為替によるものかを切り分けるために必要。
@@ -554,17 +618,23 @@ export const userSettings = mysqlTable("userSettings", {
   /** 表示基準通貨 */
   baseCurrency: varchar("baseCurrency", { length: 8 }).default("JPY").notNull(),
   /** USD/JPY レート（手動または自動取得） */
-  usdJpyRate: decimal("usdJpyRate", { precision: 12, scale: 4 }).default("150.0000").notNull(),
+  usdJpyRate: decimal("usdJpyRate", { precision: 12, scale: 4 })
+    .default("150.0000")
+    .notNull(),
   /**
    * SGD/JPY レート（手動または自動取得）。
    * IBKR シンガポール口座は基軸通貨が SGD で、借入額・維持証拠金も SGD 建て。
    * SGX 上場銘柄の評価額も SGD なので、円換算に直接レートが必要になる。
    */
-  sgdJpyRate: decimal("sgdJpyRate", { precision: 12, scale: 4 }).default("115.0000").notNull(),
+  sgdJpyRate: decimal("sgdJpyRate", { precision: 12, scale: 4 })
+    .default("115.0000")
+    .notNull(),
   /**
    * 1 HKD が何円か。富途香港口座の港股・港元基金の円換算に使う。
    */
-  hkdJpyRate: decimal("hkdJpyRate", { precision: 12, scale: 4 }).default("19.0000").notNull(),
+  hkdJpyRate: decimal("hkdJpyRate", { precision: 12, scale: 4 })
+    .default("19.0000")
+    .notNull(),
   /**
    * 為替レートを株価更新と同時に自動取得するか。
    * false にすると usdJpyRate / sgdJpyRate の手動設定値を使い続ける。
@@ -575,9 +645,13 @@ export const userSettings = mysqlTable("userSettings", {
   /** 単一銘柄の集中度アラートしきい値（%） */
   concentrationThreshold: int("concentrationThreshold").default(20).notNull(),
   /** 単一セクターの集中度アラートしきい値（%） */
-  sectorConcentrationThreshold: int("sectorConcentrationThreshold").default(35).notNull(),
+  sectorConcentrationThreshold: int("sectorConcentrationThreshold")
+    .default(35)
+    .notNull(),
   /** 現金残高（口座サマリーから） */
-  cashBalance: decimal("cashBalance", { precision: 20, scale: 2 }).default("0.00").notNull(),
+  cashBalance: decimal("cashBalance", { precision: 20, scale: 2 })
+    .default("0.00")
+    .notNull(),
   autoNewsEnabled: boolean("autoNewsEnabled").default(true).notNull(),
   lastPriceSyncAt: timestamp("lastPriceSyncAt"),
   lastNewsSyncAt: timestamp("lastNewsSyncAt"),
@@ -612,7 +686,9 @@ export const brokerBalances = mysqlTable(
      * 現金残高。マイナスなら借入（信用取引の建玉分）。
      * IBKR の「現金」欄をそのまま入れる。
      */
-    cashBalance: decimal("cashBalance", { precision: 20, scale: 2 }).default("0.00").notNull(),
+    cashBalance: decimal("cashBalance", { precision: 20, scale: 2 })
+      .default("0.00")
+      .notNull(),
     /**
      * 維持証拠金。追証の判定に使う。信用取引を使わない口座では 0。
      */
@@ -620,7 +696,9 @@ export const brokerBalances = mysqlTable(
       .default("0.00")
       .notNull(),
     /** 月初来の支払利息（マイナス表記）。借入コストの把握に使う */
-    interestMtd: decimal("interestMtd", { precision: 20, scale: 2 }).default("0.00").notNull(),
+    interestMtd: decimal("interestMtd", { precision: 20, scale: 2 })
+      .default("0.00")
+      .notNull(),
     /**
      * 借入の通貨別内訳（JSON）。
      * 例: {"JPY": -228720494.5, "SGD": 6585.22, "USD": 2495.02}
@@ -633,7 +711,10 @@ export const brokerBalances = mysqlTable(
     updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
   },
   table => ({
-    userBrokerIdx: index("brokerBalances_user_broker_idx").on(table.userId, table.broker),
+    userBrokerIdx: index("brokerBalances_user_broker_idx").on(
+      table.userId,
+      table.broker
+    ),
   })
 );
 
@@ -684,7 +765,10 @@ export const interestAssets = mysqlTable(
     updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
   },
   table => ({
-    userBrokerIdx: index("interestAssets_user_broker_idx").on(table.userId, table.broker),
+    userBrokerIdx: index("interestAssets_user_broker_idx").on(
+      table.userId,
+      table.broker
+    ),
   })
 );
 export type InterestAsset = typeof interestAssets.$inferSelect;
@@ -720,7 +804,9 @@ export const priceBandPlans = mysqlTable(
      * 保有銘柄の買い増し判断か、未保有銘柄の新規購入判断か。
      * 同じ仕組みを両方に使えるようにする。
      */
-    scope: mysqlEnum("scope", ["HOLDING", "WATCHLIST"]).default("HOLDING").notNull(),
+    scope: mysqlEnum("scope", ["HOLDING", "WATCHLIST"])
+      .default("HOLDING")
+      .notNull(),
     /** 全体の考え方。なぜこの段組みにしたかの説明 */
     strategy: text("strategy"),
     /** 提案の根拠。数字だけ出しても信用できないため必ず持つ */
@@ -734,7 +820,10 @@ export const priceBandPlans = mysqlTable(
     updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
   },
   table => ({
-    userSymbolIdx: index("priceBandPlans_user_symbol_idx").on(table.userId, table.symbol),
+    userSymbolIdx: index("priceBandPlans_user_symbol_idx").on(
+      table.userId,
+      table.symbol
+    ),
   })
 );
 
@@ -761,7 +850,13 @@ export const priceBands = mysqlTable(
      * HOLD=様子見 / ADD_SMALL=小幅追加 / ADD_MAIN=主力で買い増す /
      * VERIFY=条件を確認してから判断 / REDUCE=減らす
      */
-    action: mysqlEnum("action", ["HOLD", "ADD_SMALL", "ADD_MAIN", "VERIFY", "REDUCE"]).notNull(),
+    action: mysqlEnum("action", [
+      "HOLD",
+      "ADD_SMALL",
+      "ADD_MAIN",
+      "VERIFY",
+      "REDUCE",
+    ]).notNull(),
     /** ユーザーの言葉に近い行動の記述（例: 基本面未変時に主力で買い増す） */
     actionLabel: varchar("actionLabel", { length: 160 }).notNull(),
     /** その価格帯をそう判断する理由 */
@@ -856,11 +951,23 @@ export const bandTransitions = mysqlTable(
      * 変化前の行動。初回の記録や、帯の外から入った場合は null。
      * 「null → ADD_SMALL」と「HOLD → ADD_SMALL」は意味が違うため区別する。
      */
-    fromAction: mysqlEnum("fromAction", ["HOLD", "ADD_SMALL", "ADD_MAIN", "VERIFY", "REDUCE"]),
+    fromAction: mysqlEnum("fromAction", [
+      "HOLD",
+      "ADD_SMALL",
+      "ADD_MAIN",
+      "VERIFY",
+      "REDUCE",
+    ]),
     /** 変化前の段の説明。段を編集しても当時の文言が残るよう複製して持つ */
     fromLabel: varchar("fromLabel", { length: 160 }),
     /** 変化後の行動。帯の外に出た場合は null */
-    toAction: mysqlEnum("toAction", ["HOLD", "ADD_SMALL", "ADD_MAIN", "VERIFY", "REDUCE"]),
+    toAction: mysqlEnum("toAction", [
+      "HOLD",
+      "ADD_SMALL",
+      "ADD_MAIN",
+      "VERIFY",
+      "REDUCE",
+    ]),
     toLabel: varchar("toLabel", { length: 160 }),
     /**
      * 帯の外にいるか。帯の外は action が null になるので、
@@ -881,8 +988,14 @@ export const bandTransitions = mysqlTable(
     createdAt: timestamp("createdAt").defaultNow().notNull(),
   },
   table => ({
-    userSymbolIdx: index("bandTransitions_user_symbol_idx").on(table.userId, table.symbol),
-    createdAtIdx: index("bandTransitions_created_idx").on(table.userId, table.createdAt),
+    userSymbolIdx: index("bandTransitions_user_symbol_idx").on(
+      table.userId,
+      table.symbol
+    ),
+    createdAtIdx: index("bandTransitions_created_idx").on(
+      table.userId,
+      table.createdAt
+    ),
   })
 );
 
@@ -936,7 +1049,10 @@ export const aiReports = mysqlTable(
   },
   table => ({
     userKindIdx: index("aiReports_user_kind_idx").on(table.userId, table.kind),
-    createdIdx: index("aiReports_created_idx").on(table.userId, table.createdAt),
+    createdIdx: index("aiReports_created_idx").on(
+      table.userId,
+      table.createdAt
+    ),
   })
 );
 
@@ -990,7 +1106,13 @@ export const schedulerRunLogs = mysqlTable(
     trigger: mysqlEnum("trigger", ["SCHEDULED", "MANUAL", "STARTUP"])
       .default("SCHEDULED")
       .notNull(),
-    status: mysqlEnum("status", ["RUNNING", "SUCCESS", "PARTIAL", "FAILED", "SKIPPED"])
+    status: mysqlEnum("status", [
+      "RUNNING",
+      "SUCCESS",
+      "PARTIAL",
+      "FAILED",
+      "SKIPPED",
+    ])
       .default("RUNNING")
       .notNull(),
     processed: int("processed").default(0).notNull(),
@@ -1005,9 +1127,18 @@ export const schedulerRunLogs = mysqlTable(
     createdAt: timestamp("createdAt").defaultNow().notNull(),
   },
   table => ({
-    userStartedIdx: index("scheduler_runs_user_started_idx").on(table.userId, table.startedAt),
-    kindStartedIdx: index("scheduler_runs_kind_started_idx").on(table.kind, table.startedAt),
-    statusStartedIdx: index("scheduler_runs_status_started_idx").on(table.status, table.startedAt),
+    userStartedIdx: index("scheduler_runs_user_started_idx").on(
+      table.userId,
+      table.startedAt
+    ),
+    kindStartedIdx: index("scheduler_runs_kind_started_idx").on(
+      table.kind,
+      table.startedAt
+    ),
+    statusStartedIdx: index("scheduler_runs_status_started_idx").on(
+      table.status,
+      table.startedAt
+    ),
   })
 );
 
@@ -1024,10 +1155,18 @@ export const systemEvents = mysqlTable(
   {
     id: int("id").autoincrement().primaryKey(),
     userId: int("userId").notNull(),
-    source: mysqlEnum("source", ["APP", "EXTERNAL_HEALTH", "RAILWAY_WEBHOOK"]).notNull(),
+    source: mysqlEnum("source", [
+      "APP",
+      "EXTERNAL_HEALTH",
+      "RAILWAY_WEBHOOK",
+    ]).notNull(),
     kind: varchar("kind", { length: 64 }).notNull(),
-    severity: mysqlEnum("severity", ["INFO", "WARNING", "CRITICAL", "RECOVERED"])
-      .notNull(),
+    severity: mysqlEnum("severity", [
+      "INFO",
+      "WARNING",
+      "CRITICAL",
+      "RECOVERED",
+    ]).notNull(),
     eventKey: varchar("eventKey", { length: 191 }),
     title: varchar("title", { length: 255 }).notNull(),
     message: text("message"),
@@ -1036,9 +1175,18 @@ export const systemEvents = mysqlTable(
     createdAt: timestamp("createdAt").defaultNow().notNull(),
   },
   table => ({
-    userOccurredIdx: index("system_events_user_occurred_idx").on(table.userId, table.occurredAt),
-    kindOccurredIdx: index("system_events_kind_occurred_idx").on(table.kind, table.occurredAt),
-    eventKeyUnique: uniqueIndex("system_events_event_key_unique").on(table.userId, table.eventKey),
+    userOccurredIdx: index("system_events_user_occurred_idx").on(
+      table.userId,
+      table.occurredAt
+    ),
+    kindOccurredIdx: index("system_events_kind_occurred_idx").on(
+      table.kind,
+      table.occurredAt
+    ),
+    eventKeyUnique: uniqueIndex("system_events_event_key_unique").on(
+      table.userId,
+      table.eventKey
+    ),
   })
 );
 
@@ -1105,7 +1253,10 @@ export const consultations = mysqlTable(
     updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
   },
   table => ({
-    userUpdatedIdx: index("consultations_user_updated_idx").on(table.userId, table.updatedAt),
+    userUpdatedIdx: index("consultations_user_updated_idx").on(
+      table.userId,
+      table.updatedAt
+    ),
     symbolIdx: index("consultations_symbol_idx").on(table.userId, table.symbol),
   })
 );
@@ -1143,7 +1294,8 @@ export const consultationMessages = mysqlTable(
   })
 );
 export type ConsultationMessage = typeof consultationMessages.$inferSelect;
-export type InsertConsultationMessage = typeof consultationMessages.$inferInsert;
+export type InsertConsultationMessage =
+  typeof consultationMessages.$inferInsert;
 
 /**
  * 相談で出た提案と、それを実行したかどうか、その後どうなったか。
@@ -1201,9 +1353,17 @@ export const consultOutcomes = mysqlTable(
     updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
   },
   table => ({
-    userSymbolIdx: index("consult_outcomes_user_symbol_idx").on(table.userId, table.symbol),
-    consultationIdx: index("consult_outcomes_consultation_idx").on(table.consultationId),
-    pendingIdx: index("consult_outcomes_pending_idx").on(table.userId, table.executed),
+    userSymbolIdx: index("consult_outcomes_user_symbol_idx").on(
+      table.userId,
+      table.symbol
+    ),
+    consultationIdx: index("consult_outcomes_consultation_idx").on(
+      table.consultationId
+    ),
+    pendingIdx: index("consult_outcomes_pending_idx").on(
+      table.userId,
+      table.executed
+    ),
   })
 );
 export type ConsultOutcome = typeof consultOutcomes.$inferSelect;
@@ -1229,7 +1389,12 @@ export const addProposals = mysqlTable(
     /** 初回ウォッチ提案の場合に、確認対象の watchlist 行を紐付ける */
     watchItemId: int("watchItemId"),
     /** AI が生成しただけでは PENDING。ユーザー操作でのみ確定する */
-    reviewStatus: mysqlEnum("reviewStatus", ["PENDING", "ACCEPTED", "EDITED", "REJECTED"]),
+    reviewStatus: mysqlEnum("reviewStatus", [
+      "PENDING",
+      "ACCEPTED",
+      "EDITED",
+      "REJECTED",
+    ]),
     /** 提案時点で保有していたか。未保有なら新規購入の提案になる */
     held: boolean("held").notNull().default(true),
     /**
@@ -1248,7 +1413,10 @@ export const addProposals = mysqlTable(
     /** 提案時点の株価（現地通貨）。後から当否を測る基準 */
     priceAtProposal: decimal("priceAtProposal", { precision: 20, scale: 4 }),
     /** 提案時点の構成比（%） */
-    sharePctAtProposal: decimal("sharePctAtProposal", { precision: 10, scale: 4 }),
+    sharePctAtProposal: decimal("sharePctAtProposal", {
+      precision: 10,
+      scale: 4,
+    }),
     /** 結論を覆す条件。何が起きたら考えを変えるか */
     invalidation: text("invalidation"),
     /** AI が提案した具体的な買付条件。確認前は watchlist に書き込まない */
@@ -1264,17 +1432,129 @@ export const addProposals = mysqlTable(
     createdAt: timestamp("createdAt").defaultNow().notNull(),
   },
   table => ({
-    userSymbolIdx: index("add_proposals_user_symbol_idx").on(table.userId, table.symbol),
+    userSymbolIdx: index("add_proposals_user_symbol_idx").on(
+      table.userId,
+      table.symbol
+    ),
     watchStatusIdx: index("add_proposals_watch_status_idx").on(
       table.userId,
       table.watchItemId,
       table.reviewStatus
     ),
-    createdIdx: index("add_proposals_created_idx").on(table.userId, table.createdAt),
+    createdIdx: index("add_proposals_created_idx").on(
+      table.userId,
+      table.createdAt
+    ),
   })
 );
 export type AddProposal = typeof addProposals.$inferSelect;
 export type InsertAddProposal = typeof addProposals.$inferInsert;
+
+/**
+ * 決算・重要ニュース・手動再分析の後に、本人の判断を待つ具体的な行動。
+ *
+ * AI シグナルだけでは「今何株あり、何株売買し、実行後どうなるか」が
+ * 一覧で分からない。提案時点の数値をスナップショットとして保存し、
+ * 後から相場が動いても当時の判断を改変しない。
+ */
+export const actionQueueItems = mysqlTable(
+  "actionQueueItems",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    userId: int("userId").notNull(),
+    symbol: varchar("symbol", { length: 24 }).notNull(),
+    name: varchar("name", { length: 255 }).notNull(),
+    status: mysqlEnum("status", [
+      "WAITING_MATERIAL",
+      "REANALYZING",
+      "PENDING_ACTION",
+      "APPROVED",
+      "SNOOZED",
+      "SKIPPED",
+      "COMPLETED",
+      "FAILED",
+    ])
+      .default("PENDING_ACTION")
+      .notNull(),
+    triggerType: mysqlEnum("triggerType", [
+      "INITIAL_REVIEW",
+      "EARNINGS",
+      "IMPORTANT_NEWS",
+      "MANUAL_ANALYSIS",
+      "SIGNAL_CHANGE",
+    ]).notNull(),
+    /** 同じイベント/再試行を 1 行に保つための決定的なキー */
+    triggerKey: varchar("triggerKey", { length: 191 }).notNull(),
+    triggerSummary: text("triggerSummary"),
+    sourceNewsId: int("sourceNewsId"),
+    sourceSignalId: int("sourceSignalId"),
+    previousSignalId: int("previousSignalId"),
+    previousAction: mysqlEnum("previousAction", [
+      "ADD",
+      "HOLD",
+      "WATCH",
+      "REDUCE",
+      "EXIT",
+    ]),
+    action: mysqlEnum("action", ["ADD", "HOLD", "WATCH", "REDUCE", "EXIT"]),
+    direction: mysqlEnum("direction", [
+      "BUY",
+      "NONE",
+      "REVIEW",
+      "SELL",
+      "EXIT",
+    ]),
+    currency: varchar("currency", { length: 8 }).notNull(),
+    rationale: text("rationale"),
+    evidence: json("evidence").$type<Record<string, unknown> | null>(),
+    currentQuantity: decimal("currentQuantity", { precision: 20, scale: 4 }),
+    currentPrice: decimal("currentPrice", { precision: 20, scale: 4 }),
+    currentValueBase: decimal("currentValueBase", { precision: 20, scale: 2 }),
+    currentWeightPct: decimal("currentWeightPct", { precision: 10, scale: 4 }),
+    recommendedShares: decimal("recommendedShares", {
+      precision: 20,
+      scale: 4,
+    }),
+    recommendedAmountLocal: decimal("recommendedAmountLocal", {
+      precision: 20,
+      scale: 2,
+    }),
+    recommendedAmountBase: decimal("recommendedAmountBase", {
+      precision: 20,
+      scale: 2,
+    }),
+    afterQuantity: decimal("afterQuantity", { precision: 20, scale: 4 }),
+    afterWeightPct: decimal("afterWeightPct", { precision: 10, scale: 4 }),
+    /** 高いほど先に表示。EXIT/REDUCE、決算、期限、評価額を反映する */
+    priority: int("priority").default(0).notNull(),
+    deadline: timestamp("deadline"),
+    snoozedUntil: timestamp("snoozedUntil"),
+    decisionNote: text("decisionNote"),
+    approvedAt: timestamp("approvedAt"),
+    skippedAt: timestamp("skippedAt"),
+    completedAt: timestamp("completedAt"),
+    createdAt: timestamp("createdAt").defaultNow().notNull(),
+    updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+  },
+  table => ({
+    triggerUnique: uniqueIndex("action_queue_user_trigger_unique").on(
+      table.userId,
+      table.triggerKey
+    ),
+    statusDeadlineIdx: index("action_queue_user_status_deadline_idx").on(
+      table.userId,
+      table.status,
+      table.deadline
+    ),
+    symbolUpdatedIdx: index("action_queue_user_symbol_updated_idx").on(
+      table.userId,
+      table.symbol,
+      table.updatedAt
+    ),
+  })
+);
+export type ActionQueueItem = typeof actionQueueItems.$inferSelect;
+export type InsertActionQueueItem = typeof actionQueueItems.$inferInsert;
 
 /**
  * AI が挙げた新規候補銘柄の記録。
@@ -1310,7 +1590,10 @@ export const candidateSuggestions = mysqlTable(
     concern: text("concern").notNull(),
     priority: mysqlEnum("priority", ["HIGH", "MEDIUM", "LOW"]).notNull(),
     /** 提案時点の株価（現地通貨） */
-    priceAtSuggestion: decimal("priceAtSuggestion", { precision: 20, scale: 4 }),
+    priceAtSuggestion: decimal("priceAtSuggestion", {
+      precision: 20,
+      scale: 4,
+    }),
     /** 買いたい値段（現地通貨） */
     targetPrice: decimal("targetPrice", { precision: 20, scale: 4 }),
     /** その値段の根拠 */
@@ -1334,17 +1617,20 @@ export const candidateSuggestions = mysqlTable(
     createdAt: timestamp("createdAt").defaultNow().notNull(),
   },
   table => ({
-    userIdx: index("candidate_suggestions_user_idx").on(table.userId, table.createdAt),
+    userIdx: index("candidate_suggestions_user_idx").on(
+      table.userId,
+      table.createdAt
+    ),
     /**
      * 同じ銘柄を何度も行として増やさない。
      * 提案が繰り返されても 1 銘柄 1 行に保ち、内容を更新する。
      * 履歴として複数行残すと「過去に挙げた銘柄」の一覧が重複で膨らむ。
      */
-    userSymbolUnique: uniqueIndex("candidate_suggestions_user_symbol_unique").on(
-      table.userId,
-      table.symbol
-    ),
+    userSymbolUnique: uniqueIndex(
+      "candidate_suggestions_user_symbol_unique"
+    ).on(table.userId, table.symbol),
   })
 );
 export type CandidateSuggestionRow = typeof candidateSuggestions.$inferSelect;
-export type InsertCandidateSuggestion = typeof candidateSuggestions.$inferInsert;
+export type InsertCandidateSuggestion =
+  typeof candidateSuggestions.$inferInsert;

@@ -1,4 +1,8 @@
-import type { Holding, WatchlistItem } from "../../drizzle/schema";
+import type {
+  Holding,
+  InsertActionQueueItem,
+  WatchlistItem,
+} from "../../drizzle/schema";
 import * as db from "../db";
 import {
   analyzeNewsBatch,
@@ -75,6 +79,17 @@ import { FX_FALLBACK, convertToJpy, isPlausibleRate, type FxRates } from "./fx";
 import { isQuotaError } from "./aiErrors";
 import { listAiRuns } from "./aiRunLog";
 import { selectBackfillQueue } from "../../shared/backfillQueue";
+import { buildHoldingActionPlan } from "../../shared/holdingActionPlan";
+import { computePortfolioPositionSizing } from "../../shared/portfolioPositionSizing";
+import {
+  actionQueueDeadline,
+  actionQueuePriority,
+  buildActionQueueTriggerKey,
+  shouldQueueSignal,
+  type ActionQueueTriggerType,
+} from "../../shared/actionQueue";
+import { detectUrgentEvents } from "../../shared/eventDetect";
+import { upsertActionQueueItem } from "./actionQueueService";
 
 /**
  * 保有ポジションとウォッチリストに対する横断処理。
@@ -1834,11 +1849,174 @@ export async function syncNewsForUser(
   };
 }
 
+type RegenerateSignalOptions = {
+  triggerType?: ActionQueueTriggerType;
+  staleReasons?: string[];
+};
+
+function actionQueueSnapshot(input: {
+  userId: number;
+  portfolio: Awaited<ReturnType<typeof buildPortfolio>>;
+  sectorLimitPct: number | null;
+  symbol: string;
+  action: "ADD" | "HOLD" | "WATCH" | "REDUCE" | "EXIT";
+  rationale: string;
+  reviewTriggers: string[];
+  riskFlags: string[];
+  dataQuality: "STRONG" | "MODERATE" | "LIMITED";
+  sourceSignalId: number;
+  previousSignalId: number | null;
+  previousAction: "ADD" | "HOLD" | "WATCH" | "REDUCE" | "EXIT" | null;
+  triggerType: ActionQueueTriggerType;
+  triggerSummary: string;
+  sourceNewsId: number | null;
+  now?: Date;
+}): InsertActionQueueItem | null {
+  const group = input.portfolio.groups.find(
+    item => item.symbol === input.symbol
+  );
+  if (!group || !shouldQueueSignal(input)) return null;
+
+  const now = input.now ?? new Date();
+  const ibkr =
+    input.portfolio.brokers.find(item => item.key === "ibkr")?.leverage ?? null;
+  const sectorValueBase =
+    input.portfolio.sectors.find(item => item.key === group.sector)?.value ?? 0;
+  let direction: "BUY" | "NONE" | "REVIEW" | "SELL" | "EXIT";
+  let recommendedShares: number | null;
+  let recommendedAmountLocal: number | null;
+  let recommendedAmountBase: number | null;
+  let afterQuantity: number;
+  let afterWeightPct: number | null;
+  let sizingEvidence: Record<string, unknown>;
+
+  if (input.action === "ADD") {
+    const sizing = computePortfolioPositionSizing({
+      action: "ADD_SMALL",
+      priority: "MEDIUM",
+      market: group.market,
+      localPrice: group.currentPrice,
+      yenPerLocalUnit: convertToJpy(1, group.currency, {
+        usdJpy: input.portfolio.summary.usdJpyRate,
+        sgdJpy: input.portfolio.summary.sgdJpyRate,
+        hkdJpy: input.portfolio.summary.hkdJpyRate,
+      }),
+      netAssetsBase: input.portfolio.summary.netAssetsBase,
+      liquidAssetsBase:
+        input.portfolio.summary.cashBalance +
+        input.portfolio.summary.interestAssetsBase,
+      currentHoldingBase: group.marketValueBase ?? 0,
+      sectorValueBase,
+      userSectorLimitPct: input.sectorLimitPct,
+      ibkrLeverage: ibkr?.leverage ?? null,
+      ibkrRiskLevel: ibkr?.riskLevel ?? null,
+      ibkrDropToMarginCallPct: ibkr?.dropToMarginCallPct ?? null,
+    });
+    direction = sizing.status === "BUY" ? "BUY" : "REVIEW";
+    recommendedShares = sizing.shares;
+    recommendedAmountLocal = sizing.amountLocal;
+    recommendedAmountBase = sizing.amountBase;
+    afterQuantity = group.quantity + sizing.shares;
+    afterWeightPct = sizing.afterWeightPct;
+    sizingEvidence = {
+      sizingStatus: sizing.status,
+      sizingReasons: sizing.reasons,
+      fundingMode: sizing.fundingMode,
+      targetWeightPct: sizing.targetWeightPct,
+      ibkrRiskLevel: sizing.ibkrRiskLevel,
+      ibkrLeverage: sizing.ibkrLeverage,
+    };
+  } else {
+    const plan = buildHoldingActionPlan({
+      action: input.action,
+      quantity: group.quantity,
+      currentPrice: group.currentPrice,
+      marketValueBase: group.marketValueBase,
+      currentWeightPct: group.weightPct,
+      market: group.market,
+      accountCount: group.entries.length,
+    });
+    direction = plan.direction;
+    recommendedShares = plan.shares;
+    recommendedAmountLocal = plan.amountLocal;
+    recommendedAmountBase = plan.amountBase;
+    afterQuantity = plan.afterQuantity;
+    afterWeightPct = plan.afterWeightPct;
+    sizingEvidence = {
+      planRationale: plan.rationale,
+      lotSize: plan.lotSize,
+      lotUncertain: plan.lotUncertain,
+    };
+  }
+
+  const deadline = actionQueueDeadline(input.action, input.triggerType, now);
+  return {
+    userId: input.userId,
+    symbol: group.symbol,
+    name: group.name,
+    status: "PENDING_ACTION",
+    triggerType: input.triggerType,
+    triggerKey: buildActionQueueTriggerKey({
+      triggerType: input.triggerType,
+      previousSignalId: input.previousSignalId,
+      sourceSignalId: input.sourceSignalId,
+      sourceNewsId: input.sourceNewsId,
+      symbol: group.symbol,
+    }),
+    triggerSummary: input.triggerSummary,
+    sourceNewsId: input.sourceNewsId,
+    sourceSignalId: input.sourceSignalId,
+    previousSignalId: input.previousSignalId,
+    previousAction: input.previousAction,
+    action: input.action,
+    direction,
+    currency: group.currency,
+    rationale: input.rationale,
+    evidence: {
+      reviewTriggers: input.reviewTriggers,
+      riskFlags: input.riskFlags,
+      dataQuality: input.dataQuality,
+      accountCount: group.entries.length,
+      brokers: group.brokers,
+      ...sizingEvidence,
+    },
+    currentQuantity: group.quantity.toFixed(4),
+    currentPrice: group.currentPrice?.toFixed(4) ?? null,
+    currentValueBase: group.marketValueBase?.toFixed(2) ?? null,
+    currentWeightPct: group.weightPct?.toFixed(4) ?? null,
+    recommendedShares: recommendedShares?.toFixed(4) ?? null,
+    recommendedAmountLocal: recommendedAmountLocal?.toFixed(2) ?? null,
+    recommendedAmountBase: recommendedAmountBase?.toFixed(2) ?? null,
+    afterQuantity: afterQuantity.toFixed(4),
+    afterWeightPct: afterWeightPct?.toFixed(4) ?? null,
+    priority: actionQueuePriority({
+      action: input.action,
+      triggerType: input.triggerType,
+      deadline,
+      currentValueBase: group.marketValueBase,
+      now,
+    }),
+    deadline,
+  };
+}
+
 /**
- * 1 銘柄のシグナルを生成して保存する。
+ * 1 銘柄のシグナルを生成して保存し、実行判断が必要なら待ちリストへ入れる。
  */
-export async function regenerateSignal(userId: number, holding: Holding) {
-  const [card, news, portfolio, history, monthly] = await Promise.all([
+export async function regenerateSignal(
+  userId: number,
+  holding: Holding,
+  options: RegenerateSignalOptions = {}
+) {
+  const [
+    card,
+    news,
+    portfolio,
+    history,
+    monthly,
+    previousSignals,
+    userSettings,
+  ] = await Promise.all([
     db.getCard(userId, holding.symbol),
     db.listNews(userId, { symbol: holding.symbol, limit: 12 }),
     buildPortfolio(userId),
@@ -1851,7 +2029,10 @@ export async function regenerateSignal(userId: number, holding: Holding) {
      * 取得に失敗しても空配列が返るだけでシグナル生成は続く。
      */
     fetchPriceHistory(holding.symbol, "5y", "1mo"),
+    db.signalHistory(userId, holding.symbol, 1),
+    db.getSettings(userId),
   ]);
+  const previousSignal = previousSignals[0] ?? null;
   /**
    * シグナルは銘柄単位。同一銘柄を複数の証券口座で保有している場合は
    * 口座ごとに別々の判断が出ると混乱するため、口座をまたいだ合計ポジションで判定する。
@@ -1949,7 +2130,7 @@ export async function regenerateSignal(userId: number, holding: Holding) {
 
   const result = await generateSignal(ctx);
 
-  await db.insertSignal({
+  const sourceSignalId = await db.insertSignal({
     userId,
     symbol: holding.symbol,
     action: result.action,
@@ -1982,7 +2163,104 @@ export async function regenerateSignal(userId: number, holding: Holding) {
     scope: "HOLDING",
   });
 
+  const newsAfterPrevious = news.filter(
+    item =>
+      !previousSignal ||
+      !item.publishedAt ||
+      item.publishedAt >= previousSignal.createdAt
+  );
+  const urgentEvent = options.staleReasons?.includes("NEW_NEWS")
+    ? (detectUrgentEvents(newsAfterPrevious, new Set([holding.symbol]))[0] ??
+      null)
+    : null;
+  const triggerType: ActionQueueTriggerType =
+    options.triggerType ??
+    (urgentEvent?.kind === "EARNINGS"
+      ? "EARNINGS"
+      : urgentEvent?.kind === "NEWS"
+        ? "IMPORTANT_NEWS"
+        : "SIGNAL_CHANGE");
+  const triggerSummary =
+    urgentEvent?.news.title ??
+    (triggerType === "MANUAL_ANALYSIS"
+      ? "手動のAI再分析"
+      : previousSignal && previousSignal.action !== result.action
+        ? `${previousSignal.action} から ${result.action} へ判断変更`
+        : "シグナル更新");
+  const queueItem = actionQueueSnapshot({
+    userId,
+    portfolio,
+    sectorLimitPct: userSettings.sectorConcentrationThreshold,
+    symbol: holding.symbol,
+    action: result.action,
+    rationale: result.rationale,
+    reviewTriggers: result.reviewTriggers,
+    riskFlags: result.riskFlags,
+    dataQuality: result.dataQuality,
+    sourceSignalId,
+    previousSignalId: previousSignal?.id ?? null,
+    previousAction: previousSignal?.action ?? null,
+    triggerType,
+    triggerSummary,
+    sourceNewsId: urgentEvent?.news.id ?? null,
+  });
+  if (queueItem) await upsertActionQueueItem(queueItem);
+
   return result;
+}
+
+/**
+ * 既存の最新シグナルを「初回整理」として待ちリストへ入れる。
+ * HOLD は行動不要なので除外し、同じ signal id は triggerKey で再実行しても重複しない。
+ */
+export async function backfillInitialActionQueue(userId: number) {
+  const [portfolio, signals, settings] = await Promise.all([
+    buildPortfolio(userId),
+    db.latestSignals(userId),
+    db.getSettings(userId),
+  ]);
+  let queued = 0;
+  const skipped: string[] = [];
+
+  for (const group of portfolio.groups) {
+    const signal = signals.get(group.symbol);
+    if (!signal || signal.action === "HOLD") continue;
+    const reviewTriggers = Array.isArray(signal.reviewTriggers)
+      ? signal.reviewTriggers.filter(
+          (value): value is string => typeof value === "string"
+        )
+      : [];
+    const riskFlags = Array.isArray(signal.riskFlags)
+      ? signal.riskFlags.filter(
+          (value): value is string => typeof value === "string"
+        )
+      : [];
+    const item = actionQueueSnapshot({
+      userId,
+      portfolio,
+      sectorLimitPct: settings.sectorConcentrationThreshold,
+      symbol: group.symbol,
+      action: signal.action,
+      rationale: signal.rationale,
+      reviewTriggers,
+      riskFlags,
+      dataQuality: signal.dataQuality ?? "LIMITED",
+      sourceSignalId: signal.id,
+      previousSignalId: null,
+      previousAction: null,
+      triggerType: "INITIAL_REVIEW",
+      triggerSummary: "既存シグナルの初回整理",
+      sourceNewsId: null,
+    });
+    if (!item) {
+      skipped.push(group.symbol);
+      continue;
+    }
+    await upsertActionQueueItem(item);
+    queued += 1;
+  }
+
+  return { queued, skipped };
 }
 
 export type MissingSignalBatchResult = {
@@ -2163,7 +2441,9 @@ export async function refreshStaleSignalsBatch(
       continue;
     }
     try {
-      await deps.regenerateSignal(userId, holding);
+      await deps.regenerateSignal(userId, holding, {
+        staleReasons: group.signal?.freshness.reasons ?? [],
+      });
       refreshed += 1;
     } catch (error) {
       failed.push({

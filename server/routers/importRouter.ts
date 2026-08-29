@@ -3,6 +3,7 @@ import { z } from "zod";
 import * as db from "../db";
 import { protectedProcedure, router } from "../_core/trpc";
 import { checkExecutions } from "../services/outcomeService";
+import { reconcileApprovedActionQueue } from "../services/actionQueueService";
 import {
   compareLatestMonths,
   compareMonths,
@@ -72,7 +73,10 @@ export const importRouter = router({
 
       for (const img of input.images) {
         if (!img.dataUrl.startsWith("data:image/")) {
-          throw new TRPCError({ code: "BAD_REQUEST", message: "画像ファイルを指定してください" });
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: "画像ファイルを指定してください",
+          });
         }
         const base64 = img.dataUrl.split(",")[1] ?? "";
         if (Buffer.byteLength(base64, "base64") > MAX_IMAGE_BYTES) {
@@ -89,7 +93,11 @@ export const importRouter = router({
       try {
         const first = input.images[0];
         const mime = first.dataUrl.slice(5, first.dataUrl.indexOf(";"));
-        const ext = mime.includes("png") ? "png" : mime.includes("webp") ? "webp" : "jpg";
+        const ext = mime.includes("png")
+          ? "png"
+          : mime.includes("webp")
+            ? "webp"
+            : "jpg";
         const buffer = Buffer.from(first.dataUrl.split(",")[1] ?? "", "base64");
         const stored = await storagePut(
           `${userId}-imports/${Date.now()}.${ext}`,
@@ -106,13 +114,20 @@ export const importRouter = router({
       // ここで例外を投げると、正しく読み取れていてもユーザーには失敗として見えてしまう。
       let jobId: number | null = null;
       try {
-        jobId = await db.createImportJob({ userId, fileKey, imageUrl, status: "PENDING" });
+        jobId = await db.createImportJob({
+          userId,
+          fileKey,
+          imageUrl,
+          status: "PENDING",
+        });
       } catch (error) {
         console.warn("[import] failed to create job record:", error);
       }
 
       /** ジョブが作れていた場合のみ履歴を更新する */
-      const patchJob = async (patch: Parameters<typeof db.updateImportJob>[2]) => {
+      const patchJob = async (
+        patch: Parameters<typeof db.updateImportJob>[2]
+      ) => {
         if (jobId === null) return;
         try {
           await db.updateImportJob(userId, jobId, patch);
@@ -176,7 +191,8 @@ export const importRouter = router({
         };
       } catch (error) {
         if (error instanceof TRPCError) throw error;
-        const message = error instanceof Error ? error.message : "読み取りに失敗しました";
+        const message =
+          error instanceof Error ? error.message : "読み取りに失敗しました";
         await patchJob({ status: "FAILED", errorMessage: message });
 
         // 生のエラー文（412 Precondition Failed ...）ではユーザーが対処を判断できないため変換する
@@ -227,7 +243,11 @@ export const importRouter = router({
 
       for (const row of input.rows) {
         if (row.mode === "SKIP") continue;
-        if (row.quantity === null || row.quantity <= 0 || row.avgCost === null) {
+        if (
+          row.quantity === null ||
+          row.quantity <= 0 ||
+          row.avgCost === null
+        ) {
           skipped.push(`${row.name}（株数または取得単価が未入力）`);
           continue;
         }
@@ -235,7 +255,11 @@ export const importRouter = router({
         const quote = await fetchQuote(row.symbol);
         // 同一銘柄を複数口座で保有できるため、口座まで一致した行だけを更新対象にする。
         // シンボルだけで引くと、別口座の保有を上書きして株数が消えてしまう。
-        const existing = await db.getHoldingBySymbolAndBroker(userId, row.symbol, broker);
+        const existing = await db.getHoldingBySymbolAndBroker(
+          userId,
+          row.symbol,
+          broker
+        );
 
         const priceFields = {
           currentPrice:
@@ -249,11 +273,13 @@ export const importRouter = router({
               ? String(quote.previousClose)
               : undefined,
           fiftyTwoWeekHigh:
-            quote?.fiftyTwoWeekHigh !== null && quote?.fiftyTwoWeekHigh !== undefined
+            quote?.fiftyTwoWeekHigh !== null &&
+            quote?.fiftyTwoWeekHigh !== undefined
               ? String(quote.fiftyTwoWeekHigh)
               : undefined,
           fiftyTwoWeekLow:
-            quote?.fiftyTwoWeekLow !== null && quote?.fiftyTwoWeekLow !== undefined
+            quote?.fiftyTwoWeekLow !== null &&
+            quote?.fiftyTwoWeekLow !== undefined
               ? String(quote.fiftyTwoWeekLow)
               : undefined,
           priceUpdatedAt: new Date(),
@@ -294,7 +320,9 @@ export const importRouter = router({
       }
 
       if (input.cashBalance !== null && input.cashBalance !== undefined) {
-        await db.updateSettings(userId, { cashBalance: String(input.cashBalance) });
+        await db.updateSettings(userId, {
+          cashBalance: String(input.cashBalance),
+        });
       }
 
       if (input.jobId) {
@@ -310,11 +338,21 @@ export const importRouter = router({
        * 記録されていない」提案が溜まり、AI の当否を検証できなくなる。
        * 判定の失敗で取り込みまで失敗扱いにはしない（取り込みは成功している）。
        */
-      let executionCheck: Awaited<ReturnType<typeof checkExecutions>> | null = null;
+      let executionCheck: Awaited<ReturnType<typeof checkExecutions>> | null =
+        null;
       try {
         executionCheck = await checkExecutions(userId);
       } catch (e) {
         console.error("[applyRows] 提案の実行判定に失敗", e);
+      }
+
+      let actionQueueCheck: Awaited<
+        ReturnType<typeof reconcileApprovedActionQueue>
+      > | null = null;
+      try {
+        actionQueueCheck = await reconcileApprovedActionQueue(userId);
+      } catch (e) {
+        console.error("[applyRows] アクション待ちの実行判定に失敗", e);
       }
 
       /*
@@ -328,17 +366,27 @@ export const importRouter = router({
        *
        * 記録の失敗で取り込みまで失敗扱いにはしない（取り込み自体は成功済み）。
        */
-      let snapshot: Awaited<ReturnType<typeof saveMonthlySnapshot>> | null = null;
+      let snapshot: Awaited<ReturnType<typeof saveMonthlySnapshot>> | null =
+        null;
       try {
         snapshot = await saveMonthlySnapshot(userId, { source: "import" });
       } catch (e) {
         console.error("[applyRows] 月次記録の保存に失敗", e);
       }
 
-      return { created, updated, skipped, executionCheck, snapshot } as const;
+      return {
+        created,
+        updated,
+        skipped,
+        executionCheck,
+        actionQueueCheck,
+        snapshot,
+      } as const;
     }),
 
-  history: protectedProcedure.query(async ({ ctx }) => db.listImportJobs(ctx.user.id, 12)),
+  history: protectedProcedure.query(async ({ ctx }) =>
+    db.listImportJobs(ctx.user.id, 12)
+  ),
 
   /** 記録された月の一覧（新しい順） */
   monthlyList: protectedProcedure.query(async ({ ctx }) =>
@@ -353,8 +401,14 @@ export const importRouter = router({
     .input(
       z
         .object({
-          toPeriod: z.string().regex(/^\d{4}-\d{2}$/).optional(),
-          fromPeriod: z.string().regex(/^\d{4}-\d{2}$/).optional(),
+          toPeriod: z
+            .string()
+            .regex(/^\d{4}-\d{2}$/)
+            .optional(),
+          fromPeriod: z
+            .string()
+            .regex(/^\d{4}-\d{2}$/)
+            .optional(),
         })
         .optional()
     )
@@ -374,7 +428,10 @@ export const importRouter = router({
   monthlySave: protectedProcedure
     .input(
       z.object({
-        periodYm: z.string().regex(/^\d{4}-\d{2}$/).optional(),
+        periodYm: z
+          .string()
+          .regex(/^\d{4}-\d{2}$/)
+          .optional(),
         note: z.string().max(500).optional(),
       })
     )

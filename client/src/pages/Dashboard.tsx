@@ -12,7 +12,13 @@ import {
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { trpc } from "@/lib/trpc";
 import { useBatchRun } from "@/hooks/useBatchRun";
@@ -50,6 +56,7 @@ import {
   Coins,
   Globe,
   Landmark,
+  ListChecks,
   PiggyBank,
   RefreshCw,
   ScanLine,
@@ -80,6 +87,7 @@ import { AttentionEmptyState } from "@/components/investing/AttentionEmptyState"
 export default function Dashboard() {
   const utils = trpc.useUtils();
   const overview = trpc.portfolio.overview.useQuery();
+  const actionQueue = trpc.actionQueue.summary.useQuery();
   const [busy, setBusy] = useState<null | "price">(null);
   /**
    * 表示通貨。保有一覧と同じ選択を共有するので、
@@ -92,9 +100,12 @@ export default function Dashboard() {
       await utils.portfolio.invalidate();
       // 為替レートも同時に更新しているので、更新できたときは併せて知らせる
       const fxParts: string[] = [];
-      if (res.fxRates.usdJpy !== null) fxParts.push(`${res.fxRates.usdJpy.toFixed(2)} 円/ドル`);
-      if (res.fxRates.sgdJpy !== null) fxParts.push(`${res.fxRates.sgdJpy.toFixed(2)} 円/SGD`);
-      if (res.fxRates.hkdJpy !== null) fxParts.push(`${res.fxRates.hkdJpy.toFixed(2)} 円/HKD`);
+      if (res.fxRates.usdJpy !== null)
+        fxParts.push(`${res.fxRates.usdJpy.toFixed(2)} 円/ドル`);
+      if (res.fxRates.sgdJpy !== null)
+        fxParts.push(`${res.fxRates.sgdJpy.toFixed(2)} 円/SGD`);
+      if (res.fxRates.hkdJpy !== null)
+        fxParts.push(`${res.fxRates.hkdJpy.toFixed(2)} 円/HKD`);
       const fx = fxParts.length > 0 ? `／為替 ${fxParts.join(" ・ ")}` : "";
       toast.success(
         res.failed.length > 0
@@ -131,7 +142,10 @@ export default function Dashboard() {
         );
       }
     },
-    onError: e => toast.error(e instanceof Error ? e.message : "ニュースを取得できませんでした"),
+    onError: e =>
+      toast.error(
+        e instanceof Error ? e.message : "ニュースを取得できませんでした"
+      ),
   });
 
   const signalRun = useBatchRun({
@@ -169,7 +183,8 @@ export default function Dashboard() {
    */
   const syncDividendsBatch = trpc.portfolio.syncDividends.useMutation();
   const dividendRun = useBatchRun({
-    runBatch: offset => syncDividendsBatch.mutateAsync({ offset, batchSize: 20, force: true }),
+    runBatch: offset =>
+      syncDividendsBatch.mutateAsync({ offset, batchSize: 20, force: true }),
     onDone: async results => {
       await utils.portfolio.invalidate();
       const updated = results.reduce((a, r) => a + r.updated, 0);
@@ -180,7 +195,10 @@ export default function Dashboard() {
           : `${updated} 件の配当情報を更新しました`
       );
     },
-    onError: e => toast.error(e instanceof Error ? e.message : "配当情報を取得できませんでした"),
+    onError: e =>
+      toast.error(
+        e instanceof Error ? e.message : "配当情報を取得できませんでした"
+      ),
   });
 
   const data = overview.data;
@@ -191,7 +209,10 @@ export default function Dashboard() {
    * ダッシュボードは金額が多く、「借入 −◯◯」のように記号を前置きしている
    * 箇所もあるため、要素ではなく文字列を返す形にして既存の組み立てを保つ。
    */
-  const money = (baseJpy: number | null | undefined, opts?: { compact?: boolean }) => {
+  const money = (
+    baseJpy: number | null | undefined,
+    opts?: { compact?: boolean }
+  ) => {
     const converted = display.convert(baseJpy);
     if (converted === null) {
       // LOCAL 選択時やレート未取得時は、集計値の通貨（円）でそのまま出す
@@ -207,7 +228,8 @@ export default function Dashboard() {
    */
   const moneyWithJpy = (baseJpy: number | null | undefined) => {
     const main = money(baseJpy);
-    if (display.currency === "JPY" || display.convert(baseJpy) === null) return main;
+    if (display.currency === "JPY" || display.convert(baseJpy) === null)
+      return main;
     return `${main}（${formatMoney(baseJpy, "JPY")}）`;
   };
   /**
@@ -246,14 +268,21 @@ export default function Dashboard() {
         value: Math.round(s.value),
         pct: s.pct,
         count: s.count,
-        fill: s.key === "未分類" ? "#94a3b8" : SECTOR_COLORS[i % SECTOR_COLORS.length],
+        fill:
+          s.key === "未分類"
+            ? "#94a3b8"
+            : SECTOR_COLORS[i % SECTOR_COLORS.length],
       }));
   }, [data]);
 
   const sectorCoverage = useMemo(() => {
     const groups = data?.groups ?? [];
     const classified = groups.filter(group => group.sector).length;
-    return { total: groups.length, classified, pending: groups.length - classified };
+    return {
+      total: groups.length,
+      classified,
+      pending: groups.length - classified,
+    };
   }, [data]);
 
   const trend = assetTrend.data?.points ?? [];
@@ -264,13 +293,16 @@ export default function Dashboard() {
     const counts = new Map<SignalAction, number>();
     // 同一銘柄を複数口座で持つ場合、口座ごとに数えると二重計上になるため銘柄単位で数える
     (data?.groups ?? []).forEach(p => {
-      if (p.signal) counts.set(p.signal.action, (counts.get(p.signal.action) ?? 0) + 1);
+      if (p.signal)
+        counts.set(p.signal.action, (counts.get(p.signal.action) ?? 0) + 1);
     });
     return counts;
   }, [data]);
 
   const signalStats = useMemo(() => {
-    const signals = (data?.groups ?? []).flatMap(group => (group.signal ? [group.signal] : []));
+    const signals = (data?.groups ?? []).flatMap(group =>
+      group.signal ? [group.signal] : []
+    );
     const confidenceValues = signals
       .map(signal => signal.confidence)
       .filter((value): value is number => value !== null);
@@ -280,11 +312,14 @@ export default function Dashboard() {
       stale: signals.filter(signal => signal.freshness.isStale).length,
       averageConfidence:
         confidenceValues.length > 0
-          ? confidenceValues.reduce((sum, value) => sum + value, 0) / confidenceValues.length
+          ? confidenceValues.reduce((sum, value) => sum + value, 0) /
+            confidenceValues.length
           : null,
       strong: signals.filter(signal => signal.dataQuality === "STRONG").length,
-      moderate: signals.filter(signal => signal.dataQuality === "MODERATE").length,
-      limited: signals.filter(signal => signal.dataQuality === "LIMITED").length,
+      moderate: signals.filter(signal => signal.dataQuality === "MODERATE")
+        .length,
+      limited: signals.filter(signal => signal.dataQuality === "LIMITED")
+        .length,
     };
   }, [data]);
 
@@ -304,11 +339,19 @@ export default function Dashboard() {
       ...g,
       signalAction: g.signal?.action ?? null,
     }));
-    return groupBySignal(items) as Map<SignalAction, (Group & { signalAction: SignalAction })[]>;
+    return groupBySignal(items) as Map<
+      SignalAction,
+      (Group & { signalAction: SignalAction })[]
+    >;
   }, [data]);
 
   const reviewGroups = useMemo(() => {
-    const statusRank = { OVERDUE: 0, POST_REVIEW: 1, DUE: 2, UPCOMING: 3 } as const;
+    const statusRank = {
+      OVERDUE: 0,
+      POST_REVIEW: 1,
+      DUE: 2,
+      UPCOMING: 3,
+    } as const;
     const actionRank: Record<SignalAction, number> = {
       EXIT: 0,
       REDUCE: 1,
@@ -317,15 +360,23 @@ export default function Dashboard() {
       HOLD: 4,
     };
     return (data?.groups ?? [])
-      .filter(group => group.signal && isReviewPlanInDashboardWindow(group.signal.reviewPlan))
+      .filter(
+        group =>
+          group.signal && isReviewPlanInDashboardWindow(group.signal.reviewPlan)
+      )
       .sort((a, b) => {
         const aSignal = a.signal!;
         const bSignal = b.signal!;
         const statusDelta =
-          statusRank[aSignal.reviewPlan.windowStatus as keyof typeof statusRank] -
-          statusRank[bSignal.reviewPlan.windowStatus as keyof typeof statusRank];
+          statusRank[
+            aSignal.reviewPlan.windowStatus as keyof typeof statusRank
+          ] -
+          statusRank[
+            bSignal.reviewPlan.windowStatus as keyof typeof statusRank
+          ];
         if (statusDelta !== 0) return statusDelta;
-        const actionDelta = actionRank[aSignal.action] - actionRank[bSignal.action];
+        const actionDelta =
+          actionRank[aSignal.action] - actionRank[bSignal.action];
         if (actionDelta !== 0) return actionDelta;
         return (b.marketValueBase ?? 0) - (a.marketValueBase ?? 0);
       });
@@ -337,7 +388,10 @@ export default function Dashboard() {
    * 静観（HOLD）を既定にすると、何もしなくてよいものが最初に出てしまう。
    */
   const [openSignal, setOpenSignal] = useState<SignalAction | null>(null);
-  const defaultSignal = useMemo(() => pickDefaultSignal(signalGroups), [signalGroups]);
+  const defaultSignal = useMemo(
+    () => pickDefaultSignal(signalGroups),
+    [signalGroups]
+  );
   const activeSignal = openSignal ?? defaultSignal;
 
   /**
@@ -405,7 +459,10 @@ export default function Dashboard() {
       amount,
       average,
       /** その月が年間の何割か。ツールチップで偏りを示すために持つ */
-      pct: dividends.annualIncomeBase > 0 ? (amount / dividends.annualIncomeBase) * 100 : 0,
+      pct:
+        dividends.annualIncomeBase > 0
+          ? (amount / dividends.annualIncomeBase) * 100
+          : 0,
       isPeak: dividends.peakMonth === i,
     }));
   }, [dividends]);
@@ -459,7 +516,8 @@ export default function Dashboard() {
     const coverageRatio =
       annualInterestBase > 0 ? annualDividendBase / annualInterestBase : null;
     const verdict: "POSITIVE" | "THIN" | "NEGATIVE" =
-      annualInterestBase <= 0 || (coverageRatio !== null && coverageRatio >= 1.2)
+      annualInterestBase <= 0 ||
+      (coverageRatio !== null && coverageRatio >= 1.2)
         ? "POSITIVE"
         : coverageRatio !== null && coverageRatio >= 1.0
           ? "THIN"
@@ -501,15 +559,23 @@ export default function Dashboard() {
   const attention = useMemo(
     () =>
       (data?.groups ?? [])
-        .filter(p => p.signal && ["EXIT", "REDUCE", "WATCH"].includes(p.signal.action))
+        .filter(
+          p => p.signal && ["EXIT", "REDUCE", "WATCH"].includes(p.signal.action)
+        )
         .sort((a, b) => {
-          const order: Record<string, number> = { EXIT: 0, REDUCE: 1, WATCH: 2 };
+          const order: Record<string, number> = {
+            EXIT: 0,
+            REDUCE: 1,
+            WATCH: 2,
+          };
           return order[a.signal!.action] - order[b.signal!.action];
         })
         .slice(0, 5),
     [data]
   );
-  const unjudgedSignalCount = (data?.groups ?? []).filter(group => !group.signal).length;
+  const unjudgedSignalCount = (data?.groups ?? []).filter(
+    group => !group.signal
+  ).length;
 
   if (overview.isLoading) return <DashboardSkeleton />;
 
@@ -540,7 +606,8 @@ export default function Dashboard() {
   const leveragedBrokers = (data?.brokers ?? [])
     .filter(broker => (broker.leverage?.borrowedBase ?? 0) > 0)
     .sort(
-      (a, b) => (b.leverage?.borrowedBase ?? 0) - (a.leverage?.borrowedBase ?? 0)
+      (a, b) =>
+        (b.leverage?.borrowedBase ?? 0) - (a.leverage?.borrowedBase ?? 0)
     );
   const primaryLeveragedBroker = leveragedBrokers[0] ?? null;
   const borrowingAccountLabel = primaryLeveragedBroker?.label ?? "借入口座";
@@ -549,7 +616,9 @@ export default function Dashboard() {
     <div className="mx-auto max-w-[1400px] space-y-6 pb-10">
       <header className="flex flex-wrap items-end justify-between gap-4">
         <div className="space-y-1">
-          <h1 className="text-2xl font-semibold tracking-tight">総資産ダッシュボード</h1>
+          <h1 className="text-2xl font-semibold tracking-tight">
+            総資産ダッシュボード
+          </h1>
           <p className="text-sm text-muted-foreground">
             {summary?.lastPriceSyncAt
               ? `株価最終更新: ${new Date(summary.lastPriceSyncAt).toLocaleString("ja-JP")}`
@@ -574,7 +643,9 @@ export default function Dashboard() {
               syncPrices.mutate();
             }}
           >
-            <RefreshCw className={`mr-1.5 h-3.5 w-3.5 ${busy === "price" ? "animate-spin" : ""}`} />
+            <RefreshCw
+              className={`mr-1.5 h-3.5 w-3.5 ${busy === "price" ? "animate-spin" : ""}`}
+            />
             株価更新
           </Button>
           <Button
@@ -603,7 +674,11 @@ export default function Dashboard() {
               ? `配当取得中 ${dividendRun.progress.processed}/${dividendRun.progress.total || "…"}`
               : "配当更新"}
           </Button>
-          <Button size="sm" disabled={anyBusy || isEmpty} onClick={() => void signalRun.start()}>
+          <Button
+            size="sm"
+            disabled={anyBusy || isEmpty}
+            onClick={() => void signalRun.start()}
+          >
             <Brain
               className={`mr-1.5 h-3.5 w-3.5 ${signalRun.progress.running ? "animate-pulse" : ""}`}
             />
@@ -645,7 +720,9 @@ export default function Dashboard() {
                      */}
                     {(summary?.interestAssetsBase ?? 0) > 0 && (
                       <span className="flex items-center justify-between gap-2">
-                        <span className="text-muted-foreground">現金性資産（利息で増える）</span>
+                        <span className="text-muted-foreground">
+                          現金性資産（利息で増える）
+                        </span>
                         <span className="tabular font-medium text-foreground">
                           +{money(summary?.interestAssetsBase)}
                         </span>
@@ -664,7 +741,9 @@ export default function Dashboard() {
                       </span>
                     </span>
                     <span className="flex items-center justify-between gap-2 border-t pt-1">
-                      <span className="font-medium text-foreground">純資産（実質の資産）</span>
+                      <span className="font-medium text-foreground">
+                        純資産（実質の資産）
+                      </span>
                       <span className="tabular font-semibold text-foreground">
                         {money(summary?.netAssetsBase)}
                       </span>
@@ -677,49 +756,71 @@ export default function Dashboard() {
                           </span>
                           <span className="flex items-center gap-1.5">
                             <span className="tabular text-base font-bold text-amber-700 dark:text-amber-300">
-                              {primaryLeveragedBroker.leverage.leverage?.toFixed(2) ?? "—"} 倍
+                              {primaryLeveragedBroker.leverage.leverage?.toFixed(
+                                2
+                              ) ?? "—"}{" "}
+                              倍
                             </span>
                             <Badge
                               variant="outline"
                               className={`h-5 px-1.5 text-[10px] ${MARGIN_RISK_STYLES[primaryLeveragedBroker.leverage.riskLevel]}`}
                             >
-                              {MARGIN_RISK_LABELS[primaryLeveragedBroker.leverage.riskLevel]}
+                              {
+                                MARGIN_RISK_LABELS[
+                                  primaryLeveragedBroker.leverage.riskLevel
+                                ]
+                              }
                             </Badge>
                           </span>
                         </span>
                         <span className="flex items-center justify-between gap-2">
-                          <span className="text-muted-foreground">追証までの下落余地</span>
+                          <span className="text-muted-foreground">
+                            追証までの下落余地
+                          </span>
                           <span className="tabular font-medium">
-                            {primaryLeveragedBroker.leverage.dropToMarginCallPct !== null
+                            {primaryLeveragedBroker.leverage
+                              .dropToMarginCallPct !== null
                               ? `−${primaryLeveragedBroker.leverage.dropToMarginCallPct.toFixed(1)}%`
                               : "—"}
                           </span>
                         </span>
                         <span className="flex items-center justify-between gap-2">
-                          <span className="text-muted-foreground">年間の借入利息</span>
+                          <span className="text-muted-foreground">
+                            年間の借入利息
+                          </span>
                           <span className="tabular font-medium text-loss">
-                            −{moneyWithJpy(primaryLeveragedBroker.leverage.interest?.annualInterestBase)}
+                            −
+                            {moneyWithJpy(
+                              primaryLeveragedBroker.leverage.interest
+                                ?.annualInterestBase
+                            )}
                           </span>
                         </span>
                       </>
                     ) : null}
                     <span className="flex items-center justify-between gap-2 text-[11px]">
-                      <span className="text-muted-foreground">全体レバレッジ（参考）</span>
+                      <span className="text-muted-foreground">
+                        全体レバレッジ（参考）
+                      </span>
                       <span className="tabular text-muted-foreground">
-                        {summary?.overallLeverage !== null && summary?.overallLeverage !== undefined
+                        {summary?.overallLeverage !== null &&
+                        summary?.overallLeverage !== undefined
                           ? `${summary.overallLeverage.toFixed(2)} 倍`
                           : "—"}
                       </span>
                     </span>
                   </span>
-                ) : summary?.cashBalance
-                  ? `現金 ${money(summary.cashBalance)} を含めた総資産 ${money(summary.totalAssets)}`
-                  : `${summary?.positionCount ?? 0} 銘柄${
-                      // 同一銘柄を複数口座で持つ場合は口座レコード数も添える
-                      (data?.positions.length ?? 0) > (summary?.positionCount ?? 0)
-                        ? `（${data?.positions.length} 口座分）`
-                        : ""
-                    }`
+                ) : summary?.cashBalance ? (
+                  `現金 ${money(summary.cashBalance)} を含めた総資産 ${money(summary.totalAssets)}`
+                ) : (
+                  `${summary?.positionCount ?? 0} 銘柄${
+                    // 同一銘柄を複数口座で持つ場合は口座レコード数も添える
+                    (data?.positions.length ?? 0) >
+                    (summary?.positionCount ?? 0)
+                      ? `（${data?.positions.length} 口座分）`
+                      : ""
+                  }`
+                )
               }
               icon={<Wallet className="h-4 w-4" />}
             />
@@ -753,7 +854,10 @@ export default function Dashboard() {
                   {(data?.brokers ?? []).length > 1 ? (
                     <span className="block space-y-1 border-t pt-1.5">
                       {(data?.brokers ?? []).map(b => (
-                        <span key={b.key} className="flex items-center justify-between gap-2">
+                        <span
+                          key={b.key}
+                          className="flex items-center justify-between gap-2"
+                        >
                           <BrokerBadge broker={b.key} short />
                           <span className="flex items-baseline gap-1.5 whitespace-nowrap">
                             <PnlText
@@ -804,7 +908,9 @@ export default function Dashboard() {
                     判定できません
                   </span>
                 ) : (
-                  <span className="text-2xl font-semibold text-muted-foreground">—</span>
+                  <span className="text-2xl font-semibold text-muted-foreground">
+                    —
+                  </span>
                 )
               }
               sub={
@@ -814,7 +920,9 @@ export default function Dashboard() {
                       {periodChange.gainDelta !== null ? (
                         <>
                           <PctText value={periodChange.gainPct} />
-                          <span className="text-muted-foreground">株価変動による増減</span>
+                          <span className="text-muted-foreground">
+                            株価変動による増減
+                          </span>
                         </>
                       ) : (
                         <span className="text-muted-foreground">
@@ -823,16 +931,21 @@ export default function Dashboard() {
                       )}
                     </span>
                     <span className="block text-[11px] text-muted-foreground">
-                      {new Date(periodChange.fromAt).toLocaleDateString("ja-JP", {
-                        month: "numeric",
-                        day: "numeric",
-                      })}{" "}
+                      {new Date(periodChange.fromAt).toLocaleDateString(
+                        "ja-JP",
+                        {
+                          month: "numeric",
+                          day: "numeric",
+                        }
+                      )}{" "}
                       →{" "}
                       {new Date(periodChange.toAt).toLocaleDateString("ja-JP", {
                         month: "numeric",
                         day: "numeric",
                       })}
-                      {periodChange.days > 0 ? `（${periodChange.days}日間）` : "（同日中）"}
+                      {periodChange.days > 0
+                        ? `（${periodChange.days}日間）`
+                        : "（同日中）"}
                     </span>
                     {/*
                       記録がまだ 1 週間分たまっていない場合は、その旨を書く。
@@ -859,8 +972,7 @@ export default function Dashboard() {
                           値動きと登録分を分けられません
                         </span>
                         <span className="block text-[11px] text-muted-foreground">
-                          評価額の差は{" "}
-                          {periodChange.totalDelta >= 0 ? "+" : ""}
+                          評価額の差は {periodChange.totalDelta >= 0 ? "+" : ""}
                           {money(periodChange.totalDelta)}
                           ですが、その大半は登録した銘柄の分です
                         </span>
@@ -891,13 +1003,16 @@ export default function Dashboard() {
               valueNode={
                 <DashboardDividendSummary
                   annualIncomeBase={dividends?.annualIncomeBase ?? 0}
-                  unknownCount={dividends?.unknownCount ?? (data?.groups.length ?? 0)}
+                  unknownCount={
+                    dividends?.unknownCount ?? data?.groups.length ?? 0
+                  }
                   totalSymbols={data?.groups.length ?? 0}
                   formatMoney={money}
                 />
               }
               sub={
-                dividends && dividends.unknownCount < (data?.groups.length ?? 0) ? (
+                dividends &&
+                dividends.unknownCount < (data?.groups.length ?? 0) ? (
                   <span className="block space-y-1">
                     <span className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
                       <span className="tabular font-medium">
@@ -908,13 +1023,19 @@ export default function Dashboard() {
                       </span>
                     </span>
                     <span className="flex items-center justify-between gap-2">
-                      <span className="text-muted-foreground">今の株価に対する利回り</span>
+                      <span className="text-muted-foreground">
+                        今の株価に対する利回り
+                      </span>
                       <span className="tabular font-medium">
-                        {dividends.yieldPct !== null ? `${dividends.yieldPct.toFixed(2)}%` : "—"}
+                        {dividends.yieldPct !== null
+                          ? `${dividends.yieldPct.toFixed(2)}%`
+                          : "—"}
                       </span>
                     </span>
                     <span className="flex items-center justify-between gap-2">
-                      <span className="text-muted-foreground">買った値段に対する利回り</span>
+                      <span className="text-muted-foreground">
+                        買った値段に対する利回り
+                      </span>
                       <span className="tabular font-medium text-gain">
                         {dividends.yieldOnCostPct !== null
                           ? `${dividends.yieldOnCostPct.toFixed(2)}%`
@@ -922,7 +1043,8 @@ export default function Dashboard() {
                       </span>
                     </span>
                     <span className="block border-t pt-1 text-[11px] text-muted-foreground">
-                      配当あり {dividends.payingCount} 銘柄 / 無配 {dividends.nonPayingCount} 銘柄
+                      配当あり {dividends.payingCount} 銘柄 / 無配{" "}
+                      {dividends.nonPayingCount} 銘柄
                       {` / 未取得 ${dividends.unknownCount} 銘柄`}
                     </span>
                     {/*
@@ -932,10 +1054,12 @@ export default function Dashboard() {
                     {carryTotal ? (
                       <span className="block space-y-1 border-t pt-1">
                         <span className="flex items-center justify-between gap-2">
-                          <span className="text-muted-foreground">借入の年間利息</span>
+                          <span className="text-muted-foreground">
+                            借入の年間利息
+                          </span>
                           <span className="tabular font-medium text-loss">
-                            {/* 金利は円建てで発生するので円を併記する */}
-                            −{moneyWithJpy(carryTotal.annualInterestBase)}
+                            {/* 金利は円建てで発生するので円を併記する */}−
+                            {moneyWithJpy(carryTotal.annualInterestBase)}
                           </span>
                         </span>
                         <span className="flex items-center justify-between gap-2">
@@ -944,7 +1068,9 @@ export default function Dashboard() {
                           </span>
                           <span
                             className={`tabular font-semibold ${
-                              carryTotal.netCarryBase >= 0 ? "text-gain" : "text-loss"
+                              carryTotal.netCarryBase >= 0
+                                ? "text-gain"
+                                : "text-loss"
                             }`}
                           >
                             {carryTotal.netCarryBase >= 0 ? "+" : "−"}
@@ -965,7 +1091,8 @@ export default function Dashboard() {
                           </Badge>
                           {carryTotal.coverageRatio !== null ? (
                             <span className="tabular text-[11px] text-muted-foreground">
-                              配当は利息の {carryTotal.coverageRatio.toFixed(2)} 倍
+                              配当は利息の {carryTotal.coverageRatio.toFixed(2)}{" "}
+                              倍
                             </span>
                           ) : null}
                         </span>
@@ -980,14 +1107,17 @@ export default function Dashboard() {
                     */}
                     {dividends.specialCount > 0 ? (
                       <span className="block text-[11px] text-amber-600 dark:text-amber-400">
-                        {dividends.specialCount} 銘柄に一時的な配当（特別・記念配当）が含まれます。
-                        それを除くと年間{" "}
-                        {money(dividends.recurringIncomeBase)}
+                        {dividends.specialCount}{" "}
+                        銘柄に一時的な配当（特別・記念配当）が含まれます。
+                        それを除くと年間 {money(dividends.recurringIncomeBase)}
                       </span>
                     ) : null}
                     {dividends.updatedAt ? (
                       <span className="block text-[11px] text-muted-foreground">
-                        配当情報の取得: {new Date(dividends.updatedAt).toLocaleDateString("ja-JP")}
+                        配当情報の取得:{" "}
+                        {new Date(dividends.updatedAt).toLocaleDateString(
+                          "ja-JP"
+                        )}
                       </span>
                     ) : null}
                   </span>
@@ -1014,6 +1144,37 @@ export default function Dashboard() {
                 ) : (
                   <div className="space-y-2">
                     <DashboardSignalStatsStrip stats={signalStats} />
+                    {(actionQueue.data?.pending ?? 0) > 0 ||
+                    (actionQueue.data?.approved ?? 0) > 0 ? (
+                      <Link
+                        href="/action-queue"
+                        className="flex items-center justify-between gap-3 rounded-xl border border-emerald-200 bg-emerald-50/70 p-3 transition-colors hover:bg-emerald-50"
+                      >
+                        <span className="flex min-w-0 items-center gap-2">
+                          <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-emerald-700 text-white">
+                            <ListChecks className="h-4 w-4" />
+                          </span>
+                          <span className="min-w-0">
+                            <span className="block text-xs font-semibold text-emerald-950">
+                              アクション待ち
+                            </span>
+                            <span className="block truncate text-[10px] text-emerald-900/70">
+                              現在株数・具体的な売買量・実行後構成比を確認
+                            </span>
+                          </span>
+                        </span>
+                        <span className="shrink-0 text-right">
+                          <span className="block font-mono text-lg font-semibold text-emerald-950">
+                            {actionQueue.data?.pending ?? 0} 件
+                          </span>
+                          {(actionQueue.data?.urgent ?? 0) > 0 ? (
+                            <span className="block text-[10px] font-semibold text-red-700">
+                              48時間以内 {actionQueue.data?.urgent} 件
+                            </span>
+                          ) : null}
+                        </span>
+                      </Link>
+                    ) : null}
                     {reviewGroups.length > 0 ? (
                       <div className="rounded-xl border border-amber-200 bg-amber-50/60 p-2.5">
                         <div className="flex items-center justify-between gap-2">
@@ -1044,7 +1205,9 @@ export default function Dashboard() {
                                 </span>
                               </span>
                               <span className="shrink-0">
-                                <SignalReviewPlanBadge plan={group.signal!.reviewPlan} />
+                                <SignalReviewPlanBadge
+                                  plan={group.signal!.reviewPlan}
+                                />
                               </span>
                             </Link>
                           ))}
@@ -1070,33 +1233,46 @@ export default function Dashboard() {
                     {/* 選んだシグナルの銘柄。評価額の大きい順（検討の優先度が高い順） */}
                     {activeSignal ? (
                       <div className="space-y-0.5 border-t pt-2">
-                        {(signalGroups.get(activeSignal) ?? []).slice(0, 6).map(g => (
-                          <Link
-                            key={g.symbol}
-                            href={`/holdings?symbol=${encodeURIComponent(g.symbol)}`}
-                            className="flex items-center justify-between gap-2 rounded px-1 py-1 transition-colors hover:bg-accent/50"
-                          >
-                            <span className="min-w-0">
-                              <span className="block truncate text-xs">{g.name}</span>
-                              {g.signal?.reviewTriggers[0] ? (
-                                <span className="block truncate text-[10px] text-muted-foreground">
-                                  次の確認: {g.signal.reviewTriggers[0]}
+                        {(signalGroups.get(activeSignal) ?? [])
+                          .slice(0, 6)
+                          .map(g => (
+                            <Link
+                              key={g.symbol}
+                              href={`/holdings?symbol=${encodeURIComponent(g.symbol)}`}
+                              className="flex items-center justify-between gap-2 rounded px-1 py-1 transition-colors hover:bg-accent/50"
+                            >
+                              <span className="min-w-0">
+                                <span className="block truncate text-xs">
+                                  {g.name}
                                 </span>
-                              ) : null}
-                            </span>
-                            <span className="shrink-0 text-right">
-                              <span className="block tabular text-xs text-muted-foreground">
-                                {g.marketValueBase !== null ? money(g.marketValueBase) : "—"}
+                                {g.signal?.reviewTriggers[0] ? (
+                                  <span className="block truncate text-[10px] text-muted-foreground">
+                                    次の確認: {g.signal.reviewTriggers[0]}
+                                  </span>
+                                ) : null}
                               </span>
-                              <span className={`block text-[10px] ${g.signal?.freshness.isStale ? "text-amber-700" : "text-muted-foreground"}`}>
-                                確信 {g.signal?.confidence ?? "—"}{g.signal?.freshness.isStale ? "・再分析待ち" : ""}
+                              <span className="shrink-0 text-right">
+                                <span className="block tabular text-xs text-muted-foreground">
+                                  {g.marketValueBase !== null
+                                    ? money(g.marketValueBase)
+                                    : "—"}
+                                </span>
+                                <span
+                                  className={`block text-[10px] ${g.signal?.freshness.isStale ? "text-amber-700" : "text-muted-foreground"}`}
+                                >
+                                  確信 {g.signal?.confidence ?? "—"}
+                                  {g.signal?.freshness.isStale
+                                    ? "・再分析待ち"
+                                    : ""}
+                                </span>
                               </span>
-                            </span>
-                          </Link>
-                        ))}
+                            </Link>
+                          ))}
                         {(signalGroups.get(activeSignal)?.length ?? 0) > 6 ? (
                           <p className="px-1 pt-0.5 text-[11px] text-muted-foreground">
-                            ほか {(signalGroups.get(activeSignal)?.length ?? 0) - 6} 銘柄
+                            ほか{" "}
+                            {(signalGroups.get(activeSignal)?.length ?? 0) - 6}{" "}
+                            銘柄
                           </p>
                         ) : null}
                       </div>
@@ -1181,8 +1357,8 @@ export default function Dashboard() {
                 */}
                 <p className="text-[11px] leading-relaxed text-muted-foreground">
                   区分は重なります（「買わない＋株価先行」は「未保有なら今は買わない」と
-                  「株価が中身より速い」の両方に含まれます）。
-                  合計は {buffettBreakdown.total} 銘柄になりません
+                  「株価が中身より速い」の両方に含まれます）。 合計は{" "}
+                  {buffettBreakdown.total} 銘柄になりません
                   {buffettBreakdown.unjudged > 0
                     ? `。うち ${buffettBreakdown.unjudged} 銘柄はまだ判定が入っていません`
                     : ""}
@@ -1213,7 +1389,9 @@ export default function Dashboard() {
               <CardContent className="space-y-3">
                 <div className="grid gap-3 sm:grid-cols-3">
                   <div className="rounded-lg border bg-muted/30 p-3">
-                    <p className="text-[11px] text-muted-foreground">預けている額</p>
+                    <p className="text-[11px] text-muted-foreground">
+                      預けている額
+                    </p>
                     <p className="tabular mt-0.5 text-lg font-semibold">
                       {money(summary?.interestAssetsBase)}
                     </p>
@@ -1230,9 +1408,12 @@ export default function Dashboard() {
                     </p>
                   </div>
                   <div className="rounded-lg border bg-muted/30 p-3">
-                    <p className="text-[11px] text-muted-foreground">実効の年利回り</p>
+                    <p className="text-[11px] text-muted-foreground">
+                      実効の年利回り
+                    </p>
                     <p className="tabular mt-0.5 text-lg font-semibold">
-                      {summary?.interestRatePct !== null && summary?.interestRatePct !== undefined
+                      {summary?.interestRatePct !== null &&
+                      summary?.interestRatePct !== undefined
                         ? `${summary.interestRatePct.toFixed(2)}%`
                         : "—"}
                     </p>
@@ -1251,7 +1432,9 @@ export default function Dashboard() {
                     >
                       <span className="flex min-w-0 items-center gap-2">
                         <BrokerBadge broker={a.broker} />
-                        <span className="truncate text-sm font-medium">{a.name}</span>
+                        <span className="truncate text-sm font-medium">
+                          {a.name}
+                        </span>
                       </span>
                       <span className="flex items-baseline gap-3">
                         <span className="tabular text-xs text-muted-foreground">
@@ -1262,7 +1445,9 @@ export default function Dashboard() {
                           })}
                         </span>
                         <span className="tabular text-sm font-semibold">
-                          {a.amountBase === null ? "換算できません" : money(a.amountBase)}
+                          {a.amountBase === null
+                            ? "換算できません"
+                            : money(a.amountBase)}
                         </span>
                       </span>
                       {/*
@@ -1278,7 +1463,10 @@ export default function Dashboard() {
                           })}{" "}
                           から逆算すると年 {a.impliedRatePct.toFixed(2)}%
                           {a.cumulativeIncomeBase !== null ? (
-                            <> / これまでの受取 {money(a.cumulativeIncomeBase)}</>
+                            <>
+                              {" "}
+                              / これまでの受取 {money(a.cumulativeIncomeBase)}
+                            </>
                           ) : null}
                         </span>
                       ) : null}
@@ -1298,53 +1486,56 @@ export default function Dashboard() {
                 */}
                 {borrowingRatePct !== null &&
                 summary?.interestRatePct !== null &&
-                summary?.interestRatePct !== undefined ? (
-                  (() => {
-                    const carry = computeCarrySpread(
-                      borrowingRatePct,
-                      summary.interestRatePct,
-                      summary.interestAssetsBase,
-                    );
-                    if (!carry) return null;
-                    const { favorable, spreadPct, spreadAmountBase } = carry;
-                    return (
-                      <div
-                        className={`mt-2 rounded-md border-l-2 p-2.5 text-xs leading-relaxed ${
-                          favorable
-                            ? "border-l-emerald-500 bg-emerald-50 text-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-200"
-                            : "border-l-red-500 bg-red-50 text-red-900 dark:bg-red-950/40 dark:text-red-200"
-                        }`}
-                      >
-                        <p className="font-semibold">
-                          {favorable
-                            ? "借入を返さずに現金で置いておく方が有利です"
-                            : "この現金を借入の返済に回した方が利息の負担が減ります"}
-                        </p>
-                        <p className="mt-1">
-                          借入の実効金利は年{" "}
-                          <span className="tabular font-semibold">
-                            {borrowingRatePct.toFixed(2)}%
-                          </span>
-                          、現金性資産の利回りは年{" "}
-                          <span className="tabular font-semibold">
-                            {summary.interestRatePct.toFixed(2)}%
-                          </span>
-                          。差は{" "}
-                          <span className="tabular font-semibold">
-                            {spreadPct >= 0 ? "+" : "−"}
-                            {Math.abs(spreadPct).toFixed(2)}%
-                          </span>
-                          で、預けている {money(summary.interestAssetsBase)} に対して年{" "}
-                          <span className="tabular font-semibold">
-                            {spreadPct >= 0 ? "+" : "−"}
-                            {money(Math.abs(spreadAmountBase))}
-                          </span>
-                          {favorable ? " の得になります。" : " の損になります。"}
-                        </p>
-                      </div>
-                    );
-                  })()
-                ) : null}
+                summary?.interestRatePct !== undefined
+                  ? (() => {
+                      const carry = computeCarrySpread(
+                        borrowingRatePct,
+                        summary.interestRatePct,
+                        summary.interestAssetsBase
+                      );
+                      if (!carry) return null;
+                      const { favorable, spreadPct, spreadAmountBase } = carry;
+                      return (
+                        <div
+                          className={`mt-2 rounded-md border-l-2 p-2.5 text-xs leading-relaxed ${
+                            favorable
+                              ? "border-l-emerald-500 bg-emerald-50 text-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-200"
+                              : "border-l-red-500 bg-red-50 text-red-900 dark:bg-red-950/40 dark:text-red-200"
+                          }`}
+                        >
+                          <p className="font-semibold">
+                            {favorable
+                              ? "借入を返さずに現金で置いておく方が有利です"
+                              : "この現金を借入の返済に回した方が利息の負担が減ります"}
+                          </p>
+                          <p className="mt-1">
+                            借入の実効金利は年{" "}
+                            <span className="tabular font-semibold">
+                              {borrowingRatePct.toFixed(2)}%
+                            </span>
+                            、現金性資産の利回りは年{" "}
+                            <span className="tabular font-semibold">
+                              {summary.interestRatePct.toFixed(2)}%
+                            </span>
+                            。差は{" "}
+                            <span className="tabular font-semibold">
+                              {spreadPct >= 0 ? "+" : "−"}
+                              {Math.abs(spreadPct).toFixed(2)}%
+                            </span>
+                            で、預けている {money(summary.interestAssetsBase)}{" "}
+                            に対して年{" "}
+                            <span className="tabular font-semibold">
+                              {spreadPct >= 0 ? "+" : "−"}
+                              {money(Math.abs(spreadAmountBase))}
+                            </span>
+                            {favorable
+                              ? " の得になります。"
+                              : " の損になります。"}
+                          </p>
+                        </div>
+                      );
+                    })()
+                  : null}
               </CardContent>
             </Card>
           ) : null}
@@ -1400,7 +1591,11 @@ export default function Dashboard() {
                             compact
                             className="text-xs"
                           />
-                          <PctText value={m.pnlPct} costValue={m.cost} className="text-xs" />
+                          <PctText
+                            value={m.pnlPct}
+                            costValue={m.cost}
+                            className="text-xs"
+                          />
                         </span>
                         <span className="tabular text-xs text-muted-foreground">
                           全体の {m.pct.toFixed(1)}%
@@ -1415,23 +1610,34 @@ export default function Dashboard() {
                           {m.currency} ベース{" "}
                           <span className="tabular font-medium">
                             {m.localPnl >= 0 ? "+" : "−"}
-                            {Math.abs(Math.round(m.localPnl)).toLocaleString()} {m.currency}
+                            {Math.abs(
+                              Math.round(m.localPnl)
+                            ).toLocaleString()}{" "}
+                            {m.currency}
                           </span>{" "}
                           <span className="tabular">
-                            ({m.localPnlPct !== null ? `${m.localPnlPct >= 0 ? "+" : ""}${m.localPnlPct.toFixed(2)}%` : "-"})
+                            (
+                            {m.localPnlPct !== null
+                              ? `${m.localPnlPct >= 0 ? "+" : ""}${m.localPnlPct.toFixed(2)}%`
+                              : "-"}
+                            )
                           </span>
                         </div>
                       ) : null}
                       {/* その市場から年間いくら配当が入るか。長期保有では重要な収入源 */}
                       {m.dividendIncomeBase > 0 ? (
                         <div className="mt-1.5 flex items-baseline justify-between gap-2 border-t pt-1.5 text-xs">
-                          <span className="text-muted-foreground">年間配当</span>
+                          <span className="text-muted-foreground">
+                            年間配当
+                          </span>
                           <span className="flex items-baseline gap-1.5">
                             <span className="tabular font-medium text-gain">
                               {money(m.dividendIncomeBase)}
                             </span>
                             <span className="tabular text-muted-foreground">
-                              {m.dividendYieldPct !== null ? `${m.dividendYieldPct.toFixed(2)}%` : ""}
+                              {m.dividendYieldPct !== null
+                                ? `${m.dividendYieldPct.toFixed(2)}%`
+                                : ""}
                             </span>
                           </span>
                         </div>
@@ -1442,17 +1648,21 @@ export default function Dashboard() {
                       */}
                       {(() => {
                         const monthly = m.dividendMonthlyBase ?? [];
-                        if (monthly.length !== 12 || m.dividendIncomeBase <= 0) return null;
+                        if (monthly.length !== 12 || m.dividendIncomeBase <= 0)
+                          return null;
                         const peak = monthly.reduce(
                           (best, v, i) => (v > monthly[best] ? i : best),
                           0
                         );
-                        const peakPct = (monthly[peak] / m.dividendIncomeBase) * 100;
+                        const peakPct =
+                          (monthly[peak] / m.dividendIncomeBase) * 100;
                         // 均等なら 1 か月あたり 8.3%。倍以上なら偏りとみなす
                         const concentrated = peakPct >= 16.7;
                         return (
                           <div className="mt-1 flex items-baseline justify-between gap-2 text-[11px]">
-                            <span className="text-muted-foreground">配当が多い月</span>
+                            <span className="text-muted-foreground">
+                              配当が多い月
+                            </span>
                             <span className="tabular text-muted-foreground">
                               {peak + 1}月に {peakPct.toFixed(0)}%
                               {concentrated ? "（偏りあり）" : "（分散）"}
@@ -1548,13 +1758,17 @@ export default function Dashboard() {
                       {/* その口座から年間いくら配当が入るか */}
                       {b.dividendIncomeBase > 0 ? (
                         <div className="mt-2 flex items-baseline justify-between gap-2 border-t pt-1.5 text-xs">
-                          <span className="text-muted-foreground">年間配当</span>
+                          <span className="text-muted-foreground">
+                            年間配当
+                          </span>
                           <span className="flex items-baseline gap-1.5">
                             <span className="tabular font-medium text-gain">
                               {money(b.dividendIncomeBase)}
                             </span>
                             <span className="tabular text-muted-foreground">
-                              {b.dividendYieldPct !== null ? `${b.dividendYieldPct.toFixed(2)}%` : ""}
+                              {b.dividendYieldPct !== null
+                                ? `${b.dividendYieldPct.toFixed(2)}%`
+                                : ""}
                             </span>
                           </span>
                         </div>
@@ -1580,7 +1794,9 @@ export default function Dashboard() {
                             </span>
                           </div>
                           <div className="flex items-center justify-between gap-2">
-                            <span className="text-muted-foreground">レバレッジ</span>
+                            <span className="text-muted-foreground">
+                              レバレッジ
+                            </span>
                             <span className="tabular">
                               {b.leverage.leverage !== null
                                 ? `${b.leverage.leverage.toFixed(2)} 倍`
@@ -1588,7 +1804,9 @@ export default function Dashboard() {
                             </span>
                           </div>
                           <div className="flex items-center justify-between gap-2">
-                            <span className="text-muted-foreground">証拠金余力</span>
+                            <span className="text-muted-foreground">
+                              証拠金余力
+                            </span>
                             <span className="tabular">
                               {b.leverage.marginCushionBase !== null
                                 ? money(b.leverage.marginCushionBase)
@@ -1596,7 +1814,9 @@ export default function Dashboard() {
                             </span>
                           </div>
                           <div className="flex items-center justify-between gap-2">
-                            <span className="text-muted-foreground">追証までの下落余地</span>
+                            <span className="text-muted-foreground">
+                              追証までの下落余地
+                            </span>
                             <span className="flex items-center gap-1.5">
                               <span className="tabular">
                                 {b.leverage.dropToMarginCallPct !== null
@@ -1620,10 +1840,17 @@ export default function Dashboard() {
                             <div className="mt-1.5 space-y-1 border-t pt-1.5">
                               <div className="flex items-center justify-between gap-2">
                                 <span className="text-muted-foreground">
-                                  年間の利息（{b.leverage.interest.effectiveRatePct.toFixed(2)}%）
+                                  年間の利息（
+                                  {b.leverage.interest.effectiveRatePct.toFixed(
+                                    2
+                                  )}
+                                  %）
                                 </span>
                                 <span className="tabular text-loss">
-                                  −{moneyWithJpy(b.leverage.interest.annualInterestBase)}
+                                  −
+                                  {moneyWithJpy(
+                                    b.leverage.interest.annualInterestBase
+                                  )}
                                 </span>
                               </div>
                               <div className="flex items-center justify-between gap-2">
@@ -1632,15 +1859,23 @@ export default function Dashboard() {
                                 </span>
                                 <span
                                   className={`tabular font-semibold ${
-                                    b.leverage.carry.netCarryBase >= 0 ? "text-gain" : "text-loss"
+                                    b.leverage.carry.netCarryBase >= 0
+                                      ? "text-gain"
+                                      : "text-loss"
                                   }`}
                                 >
-                                  {b.leverage.carry.netCarryBase >= 0 ? "+" : "−"}
-                                  {money(Math.abs(b.leverage.carry.netCarryBase))}
+                                  {b.leverage.carry.netCarryBase >= 0
+                                    ? "+"
+                                    : "−"}
+                                  {money(
+                                    Math.abs(b.leverage.carry.netCarryBase)
+                                  )}
                                 </span>
                               </div>
                               <div className="flex items-center justify-between gap-2">
-                                <span className="text-muted-foreground">配当は利息の</span>
+                                <span className="text-muted-foreground">
+                                  配当は利息の
+                                </span>
                                 <span className="flex items-center gap-1.5">
                                   <span className="tabular">
                                     {b.leverage.carry.coverageRatio !== null
@@ -1651,7 +1886,11 @@ export default function Dashboard() {
                                     variant="outline"
                                     className={`h-4 px-1 text-[10px] ${CARRY_VERDICT_STYLES[b.leverage.carry.verdict]}`}
                                   >
-                                    {CARRY_VERDICT_LABELS[b.leverage.carry.verdict]}
+                                    {
+                                      CARRY_VERDICT_LABELS[
+                                        b.leverage.carry.verdict
+                                      ]
+                                    }
                                   </Badge>
                                 </span>
                               </div>
@@ -1680,10 +1919,16 @@ export default function Dashboard() {
                 >
                   <AlertTriangle className="h-4 w-4" />
                   <AlertTitle className="text-sm">
-                    {a.kind === "POSITION" ? "銘柄集中" : a.kind === "SECTOR" ? "業種集中" : "通貨集中"}
+                    {a.kind === "POSITION"
+                      ? "銘柄集中"
+                      : a.kind === "SECTOR"
+                        ? "業種集中"
+                        : "通貨集中"}
                     アラート
                   </AlertTitle>
-                  <AlertDescription className="text-xs">{a.message}</AlertDescription>
+                  <AlertDescription className="text-xs">
+                    {a.message}
+                  </AlertDescription>
                 </Alert>
               ))}
             </div>
@@ -1692,9 +1937,12 @@ export default function Dashboard() {
           {summary && summary.missingPriceCount > 0 ? (
             <Alert>
               <AlertTriangle className="h-4 w-4" />
-              <AlertTitle className="text-sm">株価が未取得の銘柄があります</AlertTitle>
+              <AlertTitle className="text-sm">
+                株価が未取得の銘柄があります
+              </AlertTitle>
               <AlertDescription className="text-xs">
-                {summary.missingPriceCount} 銘柄の現在値が取得できていません。「株価更新」を実行しても解消しない場合、銘柄コードをご確認ください。
+                {summary.missingPriceCount}{" "}
+                銘柄の現在値が取得できていません。「株価更新」を実行しても解消しない場合、銘柄コードをご確認ください。
               </AlertDescription>
             </Alert>
           ) : null}
@@ -1710,22 +1958,28 @@ export default function Dashboard() {
                       {assetTrend.data && assetTrend.data.snapshotCount > 0 ? (
                         <>
                           記録 {assetTrend.data.snapshotCount} 件
-                          {assetTrend.data.firstAt && assetTrend.data.lastAt && (
-                            <>
-                              （
-                              {new Date(assetTrend.data.firstAt).toLocaleDateString("ja-JP", {
-                                month: "numeric",
-                                day: "numeric",
-                              })}
-                              〜
-                              {new Date(assetTrend.data.lastAt).toLocaleDateString("ja-JP", {
-                                month: "numeric",
-                                day: "numeric",
-                              })}
-                              ）
-                            </>
-                          )}
-                          {assetTrend.data.fellBack && " ・ 同じ月の記録のみなので日次で表示中"}
+                          {assetTrend.data.firstAt &&
+                            assetTrend.data.lastAt && (
+                              <>
+                                （
+                                {new Date(
+                                  assetTrend.data.firstAt
+                                ).toLocaleDateString("ja-JP", {
+                                  month: "numeric",
+                                  day: "numeric",
+                                })}
+                                〜
+                                {new Date(
+                                  assetTrend.data.lastAt
+                                ).toLocaleDateString("ja-JP", {
+                                  month: "numeric",
+                                  day: "numeric",
+                                })}
+                                ）
+                              </>
+                            )}
+                          {assetTrend.data.fellBack &&
+                            " ・ 同じ月の記録のみなので日次で表示中"}
                           {" ・ 日本時間の1日につき最新1点"}
                         </>
                       ) : (
@@ -1735,12 +1989,10 @@ export default function Dashboard() {
                   </div>
                   {/* 長期の傾向を見たいときは月次、直近の動きを見たいときは日次 */}
                   <div className="flex overflow-hidden rounded-md border">
-                    {(
-                      [
-                        { key: "month" as const, label: "月次" },
-                        { key: "day" as const, label: "日次" },
-                      ]
-                    ).map(opt => (
+                    {[
+                      { key: "month" as const, label: "月次" },
+                      { key: "day" as const, label: "日次" },
+                    ].map(opt => (
                       <button
                         key={opt.key}
                         type="button"
@@ -1771,11 +2023,28 @@ export default function Dashboard() {
                   </div>
                 ) : (
                   <ResponsiveContainer width="100%" height={260}>
-                    <AreaChart data={trend} margin={{ left: 4, right: 8, top: 8, bottom: 0 }}>
+                    <AreaChart
+                      data={trend}
+                      margin={{ left: 4, right: 8, top: 8, bottom: 0 }}
+                    >
                       <defs>
-                        <linearGradient id="valueFill" x1="0" y1="0" x2="0" y2="1">
-                          <stop offset="0%" stopColor="var(--chart-1)" stopOpacity={0.28} />
-                          <stop offset="100%" stopColor="var(--chart-1)" stopOpacity={0.02} />
+                        <linearGradient
+                          id="valueFill"
+                          x1="0"
+                          y1="0"
+                          x2="0"
+                          y2="1"
+                        >
+                          <stop
+                            offset="0%"
+                            stopColor="var(--chart-1)"
+                            stopOpacity={0.28}
+                          />
+                          <stop
+                            offset="100%"
+                            stopColor="var(--chart-1)"
+                            stopOpacity={0.02}
+                          />
                         </linearGradient>
                       </defs>
                       <XAxis
@@ -1808,10 +2077,7 @@ export default function Dashboard() {
                         }}
                         formatter={(v: number, name): [string, string] => {
                           if (name === "netAssets") {
-                            return [
-                              money(v),
-                              "純資産（借入を引いた額）",
-                            ];
+                            return [money(v), "純資産（借入を引いた額）"];
                           }
                           return [
                             money(v),
@@ -1819,7 +2085,9 @@ export default function Dashboard() {
                           ];
                         }}
                         labelFormatter={(label, payload) => {
-                          const p = payload?.[0]?.payload as (typeof trend)[number] | undefined;
+                          const p = payload?.[0]?.payload as
+                            | (typeof trend)[number]
+                            | undefined;
                           if (!p) return label;
                           // 銘柄数が変わった期間は「増えた理由」が登録作業なので明示する
                           if (p.positionChanged) {
@@ -1925,7 +2193,9 @@ export default function Dashboard() {
                                     : "font-medium text-red-600 dark:text-red-400"
                                 }
                               >
-                                {assetTrend.data.priceOnlyChange >= 0 ? " +" : " "}
+                                {assetTrend.data.priceOnlyChange >= 0
+                                  ? " +"
+                                  : " "}
                                 {money(assetTrend.data.priceOnlyChange)}
                               </span>
                               です。
@@ -1943,7 +2213,8 @@ export default function Dashboard() {
               <CardHeader>
                 <CardTitle className="text-base">業種別分布</CardTitle>
                 <CardDescription className="text-xs">
-                  評価額ベースの構成比 ・ {sectorCoverage.classified}/{sectorCoverage.total} 銘柄を分類済み
+                  評価額ベースの構成比 ・ {sectorCoverage.classified}/
+                  {sectorCoverage.total} 銘柄を分類済み
                 </CardDescription>
               </CardHeader>
               <CardContent>
@@ -1951,7 +2222,8 @@ export default function Dashboard() {
                   <div className="space-y-2 py-14 text-center">
                     <p className="text-sm font-medium">業種情報を取得中です</p>
                     <p className="text-xs leading-relaxed text-muted-foreground">
-                      現在 {sectorCoverage.pending} 銘柄が未取得です。Yahoo の企業情報を小分けで補完し、
+                      現在 {sectorCoverage.pending} 銘柄が未取得です。Yahoo
+                      の企業情報を小分けで補完し、
                       ETF・投資信託は実際の金融商品種別で分類します。
                     </p>
                   </div>
@@ -1990,13 +2262,20 @@ export default function Dashboard() {
                     </ResponsiveContainer>
                     <ul className="mt-3 space-y-1.5">
                       {sectorChart.slice(0, 6).map(s => (
-                        <li key={s.name} className="flex items-center gap-2 text-xs">
+                        <li
+                          key={s.name}
+                          className="flex items-center gap-2 text-xs"
+                        >
                           <span
                             className="h-2.5 w-2.5 shrink-0 rounded-sm"
                             style={{ background: s.fill }}
                           />
-                          <span className="min-w-0 flex-1 truncate">{s.name}</span>
-                          <span className="tabular text-muted-foreground">{s.count}銘柄</span>
+                          <span className="min-w-0 flex-1 truncate">
+                            {s.name}
+                          </span>
+                          <span className="tabular text-muted-foreground">
+                            {s.count}銘柄
+                          </span>
                           <span className="tabular w-12 text-right font-medium">
                             {s.pct.toFixed(1)}%
                           </span>
@@ -2005,7 +2284,8 @@ export default function Dashboard() {
                     </ul>
                     {sectorCoverage.pending > 0 && (
                       <p className="mt-3 border-t pt-2 text-[11px] leading-relaxed text-muted-foreground">
-                        未取得 {sectorCoverage.pending} 銘柄を自動補完中です。「未分類」は安全性や業種を
+                        未取得 {sectorCoverage.pending}{" "}
+                        銘柄を自動補完中です。「未分類」は安全性や業種を
                         推定した結果ではなく、外部資料をまだ取得できていない状態です。
                       </p>
                     )}
@@ -2016,7 +2296,9 @@ export default function Dashboard() {
           </div>
 
           {/* 配当の受取月 */}
-          {dividendMonthly.length === 12 && dividends && dividends.annualIncomeBase > 0 ? (
+          {dividendMonthly.length === 12 &&
+          dividends &&
+          dividends.annualIncomeBase > 0 ? (
             <Card>
               <CardHeader>
                 <div className="flex flex-wrap items-start justify-between gap-2">
@@ -2063,13 +2345,11 @@ export default function Dashboard() {
                         key={m.monthIndex}
                         type="button"
                         disabled={empty}
-                        onClick={() =>
-                          {
-                            setSelectedDivMonth(active ? null : m.monthIndex);
-                            // 月を切り替えたら折りたたみ状態を戻す
-                            setDivShowAll(false);
-                          }
-                        }
+                        onClick={() => {
+                          setSelectedDivMonth(active ? null : m.monthIndex);
+                          // 月を切り替えたら折りたたみ状態を戻す
+                          setDivShowAll(false);
+                        }}
                         className={`min-h-8 rounded-md border px-2 py-1 text-xs transition-all duration-150 active:scale-[0.97] ${
                           active
                             ? "border-primary bg-primary text-primary-foreground"
@@ -2135,7 +2415,8 @@ export default function Dashboard() {
                         if (name === "average") {
                           return [money(v), "月あたり平均"];
                         }
-                        const pct = (item?.payload as { pct: number })?.pct ?? 0;
+                        const pct =
+                          (item?.payload as { pct: number })?.pct ?? 0;
                         return [
                           `${money(v)}（年間の ${pct.toFixed(1)}%）`,
                           "受取額",
@@ -2212,90 +2493,98 @@ export default function Dashboard() {
                       </p>
                     ) : (
                       <>
-                      <ul className="space-y-1">
-                        {(divShowAll
-                          ? selectedDivDetail.entries
-                          : selectedDivDetail.entries.slice(0, DIV_PREVIEW_COUNT)
-                        ).map(e => (
-                          <li
-                            key={`${e.holdingId}-${e.symbol}`}
-                            className="flex items-center justify-between gap-2 rounded-md bg-background/60 px-2 py-1.5"
-                          >
-                            <div className="flex min-w-0 items-center gap-1.5">
-                              <BrokerBadge broker={e.broker} short className="text-[10px]" />
-                              <Link
-                                href={`/holdings/${e.holdingId}`}
-                                className="truncate text-xs hover:underline"
-                              >
-                                {e.name}
-                              </Link>
-                              <span className="tabular shrink-0 text-[10px] text-muted-foreground">
-                                {e.tickerCode}
-                              </span>
-                              {e.hasSpecial ? (
-                                <span
-                                  className="shrink-0 text-[10px] text-warning"
-                                  title="特別配当が含まれるため、来期も同額とは限りません"
+                        <ul className="space-y-1">
+                          {(divShowAll
+                            ? selectedDivDetail.entries
+                            : selectedDivDetail.entries.slice(
+                                0,
+                                DIV_PREVIEW_COUNT
+                              )
+                          ).map(e => (
+                            <li
+                              key={`${e.holdingId}-${e.symbol}`}
+                              className="flex items-center justify-between gap-2 rounded-md bg-background/60 px-2 py-1.5"
+                            >
+                              <div className="flex min-w-0 items-center gap-1.5">
+                                <BrokerBadge
+                                  broker={e.broker}
+                                  short
+                                  className="text-[10px]"
+                                />
+                                <Link
+                                  href={`/holdings/${e.holdingId}`}
+                                  className="truncate text-xs hover:underline"
                                 >
-                                  特別配当
+                                  {e.name}
+                                </Link>
+                                <span className="tabular shrink-0 text-[10px] text-muted-foreground">
+                                  {e.tickerCode}
                                 </span>
-                              ) : null}
-                            </div>
-                            <div className="shrink-0 text-right">
-                              <div className="tabular text-xs font-medium">
-                                {money(e.amountBase)}
+                                {e.hasSpecial ? (
+                                  <span
+                                    className="shrink-0 text-[10px] text-warning"
+                                    title="特別配当が含まれるため、来期も同額とは限りません"
+                                  >
+                                    特別配当
+                                  </span>
+                                ) : null}
                               </div>
-                              {/*
+                              <div className="shrink-0 text-right">
+                                <div className="tabular text-xs font-medium">
+                                  {money(e.amountBase)}
+                                </div>
+                                {/*
                                 表示通貨と違う通貨の銘柄は現地通貨も出す。
                                 為替の影響を切り分けられるようにするため。
                               */}
-                              {display.showLocalHint(e.currency) ? (
-                                <div className="tabular text-[10px] text-muted-foreground">
-                                  {e.currency}{" "}
-                                  {e.amount.toLocaleString(undefined, {
-                                    maximumFractionDigits: 2,
-                                  })}
-                                </div>
-                              ) : null}
-                            </div>
-                          </li>
-                        ))}
-                      </ul>
-                      {/*
+                                {display.showLocalHint(e.currency) ? (
+                                  <div className="tabular text-[10px] text-muted-foreground">
+                                    {e.currency}{" "}
+                                    {e.amount.toLocaleString(undefined, {
+                                      maximumFractionDigits: 2,
+                                    })}
+                                  </div>
+                                ) : null}
+                              </div>
+                            </li>
+                          ))}
+                        </ul>
+                        {/*
                         件数が多い月（3 月は 85 件）はスマホで延々とスクロールする
                         ことになるため、既定では上位のみ出す。上位が占める割合を
                         添えて「主要な銘柄がどれか」が分かるようにする。
                       */}
-                      {selectedDivDetail.entries.length > DIV_PREVIEW_COUNT ? (
-                        <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
-                          {!divShowAll ? (
-                            <span className="text-[11px] text-muted-foreground">
-                              上位 {DIV_PREVIEW_COUNT} 件でこの月の{" "}
-                              {(
-                                (selectedDivDetail.entries
-                                  .slice(0, DIV_PREVIEW_COUNT)
-                                  .reduce((acc, e) => acc + e.amountBase, 0) /
-                                  selectedDivDetail.totalBase) *
-                                100
-                              ).toFixed(0)}
-                              % を占めます
-                            </span>
-                          ) : (
-                            <span className="text-[11px] text-muted-foreground">
-                              全 {selectedDivDetail.entries.length} 件を表示中
-                            </span>
-                          )}
-                          <button
-                            type="button"
-                            onClick={() => setDivShowAll(v => !v)}
-                            className="min-h-8 rounded-md border px-2.5 py-1 text-xs transition-all duration-150 hover:bg-accent hover:text-accent-foreground active:scale-[0.97]"
-                          >
-                            {divShowAll
-                              ? "上位のみ表示"
-                              : `残り ${selectedDivDetail.entries.length - DIV_PREVIEW_COUNT} 件を表示`}
-                          </button>
-                        </div>
-                      ) : null}
+                        {selectedDivDetail.entries.length >
+                        DIV_PREVIEW_COUNT ? (
+                          <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
+                            {!divShowAll ? (
+                              <span className="text-[11px] text-muted-foreground">
+                                上位 {DIV_PREVIEW_COUNT} 件でこの月の{" "}
+                                {(
+                                  (selectedDivDetail.entries
+                                    .slice(0, DIV_PREVIEW_COUNT)
+                                    .reduce((acc, e) => acc + e.amountBase, 0) /
+                                    selectedDivDetail.totalBase) *
+                                  100
+                                ).toFixed(0)}
+                                % を占めます
+                              </span>
+                            ) : (
+                              <span className="text-[11px] text-muted-foreground">
+                                全 {selectedDivDetail.entries.length} 件を表示中
+                              </span>
+                            )}
+                            <button
+                              type="button"
+                              onClick={() => setDivShowAll(v => !v)}
+                              className="min-h-8 rounded-md border px-2.5 py-1 text-xs transition-all duration-150 hover:bg-accent hover:text-accent-foreground active:scale-[0.97]"
+                            >
+                              {divShowAll
+                                ? "上位のみ表示"
+                                : `残り ${selectedDivDetail.entries.length - DIV_PREVIEW_COUNT} 件を表示`}
+                            </button>
+                          </div>
+                        ) : null}
                       </>
                     )}
                   </div>
@@ -2342,7 +2631,9 @@ export default function Dashboard() {
               </CardHeader>
               <CardContent className="space-y-2">
                 {attention.length === 0 ? (
-                  <AttentionEmptyState unjudgedSignalCount={unjudgedSignalCount} />
+                  <AttentionEmptyState
+                    unjudgedSignalCount={unjudgedSignalCount}
+                  />
                 ) : (
                   attention.map(p => (
                     <Link
@@ -2354,7 +2645,9 @@ export default function Dashboard() {
                         <div className="min-w-0 flex-1">
                           <div className="flex items-center gap-2">
                             <SignalBadge action={p.signal!.action} />
-                            <span className="truncate font-medium">{p.name}</span>
+                            <span className="truncate font-medium">
+                              {p.name}
+                            </span>
                             <span className="tabular shrink-0 text-xs text-muted-foreground">
                               {p.tickerCode}
                             </span>
@@ -2372,10 +2665,18 @@ export default function Dashboard() {
                           <p className="text-[10px] text-muted-foreground">
                             {pnlLabel(p.pnlPct)}
                           </p>
-                          <PctText value={p.pnlPct} costValue={p.costValue} className="text-sm" />
-                          <p className="mt-1 text-[10px] text-muted-foreground">構成比</p>
+                          <PctText
+                            value={p.pnlPct}
+                            costValue={p.costValue}
+                            className="text-sm"
+                          />
+                          <p className="mt-1 text-[10px] text-muted-foreground">
+                            構成比
+                          </p>
                           <p className="tabular text-xs text-muted-foreground">
-                            {p.weightPct !== null ? `${p.weightPct.toFixed(1)}%` : "—"}
+                            {p.weightPct !== null
+                              ? `${p.weightPct.toFixed(1)}%`
+                              : "—"}
                           </p>
                         </div>
                       </div>
@@ -2424,7 +2725,10 @@ export default function Dashboard() {
                 <CardContent className="space-y-2">
                   {/* 構成比は口座をまたいだ合計で見る */}
                   {(data?.groups ?? []).slice(0, 5).map(p => (
-                    <div key={p.symbol} className="flex items-center justify-between gap-2 text-xs">
+                    <div
+                      key={p.symbol}
+                      className="flex items-center justify-between gap-2 text-xs"
+                    >
                       <span className="min-w-0 flex-1 truncate">{p.name}</span>
                       <MoneyText
                         value={p.marketValueBase}
@@ -2432,8 +2736,13 @@ export default function Dashboard() {
                         compact
                         className="text-muted-foreground"
                       />
-                      <Badge variant="secondary" className="tabular w-14 justify-center">
-                        {p.weightPct !== null ? `${p.weightPct.toFixed(1)}%` : "—"}
+                      <Badge
+                        variant="secondary"
+                        className="tabular w-14 justify-center"
+                      >
+                        {p.weightPct !== null
+                          ? `${p.weightPct.toFixed(1)}%`
+                          : "—"}
                       </Badge>
                     </div>
                   ))}
@@ -2471,7 +2780,11 @@ function StatCard({
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-1 pt-0">
-        {valueNode ?? <p className="tabular text-2xl font-semibold tracking-tight">{value}</p>}
+        {valueNode ?? (
+          <p className="tabular text-2xl font-semibold tracking-tight">
+            {value}
+          </p>
+        )}
         <div className="text-xs text-muted-foreground">{sub}</div>
       </CardContent>
     </Card>
@@ -2486,7 +2799,9 @@ function EmptyState() {
           <ScanLine className="h-7 w-7 text-primary" />
         </div>
         <div className="space-y-2">
-          <h2 className="text-lg font-semibold">まずは保有銘柄を登録しましょう</h2>
+          <h2 className="text-lg font-semibold">
+            まずは保有銘柄を登録しましょう
+          </h2>
           <p className="mx-auto max-w-md text-sm leading-relaxed text-muted-foreground">
             証券会社アプリの保有一覧のスクリーンショットをアップロードすると、銘柄コード・株数・取得単価を自動で読み取ります。手入力での追加も可能です。
           </p>

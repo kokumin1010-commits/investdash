@@ -907,7 +907,9 @@ export const portfolioRouter = router({
           message: "銘柄が見つかりません",
         });
       try {
-        return await regenerateSignal(ctx.user.id, holding);
+        return await regenerateSignal(ctx.user.id, holding, {
+          triggerType: "MANUAL_ANALYSIS",
+        });
       } catch (error) {
         // 生の LLM エラーを返すと「押しても何も起きない」と受け取られてしまうため変換する
         throw toFriendlyAiError(error, "シグナルの生成に失敗しました");
@@ -954,7 +956,9 @@ export const portfolioRouter = router({
 
       for (const h of batch) {
         try {
-          await regenerateSignal(ctx.user.id, h);
+          await regenerateSignal(ctx.user.id, h, {
+            triggerType: "MANUAL_ANALYSIS",
+          });
           ok += 1;
         } catch (error) {
           console.warn(`[portfolio] signal failed for ${h.symbol}:`, error);
