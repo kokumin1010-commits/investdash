@@ -931,6 +931,16 @@ const FACTOR_LABELS: Record<string, string> = {
   thesisIntegrity: "投資ロジックの健全性",
 };
 
+function compactJpyAmount(value: number | null): string {
+  if (value === null || !Number.isFinite(value)) return "—";
+  if (Math.abs(value) < 10_000) return formatMoney(value, "JPY");
+  const man = value / 10_000;
+  return `¥${man.toLocaleString("ja-JP", {
+    minimumFractionDigits: man >= 100 ? 0 : 1,
+    maximumFractionDigits: man >= 100 ? 0 : 1,
+  })}万`;
+}
+
 function HoldingActionSummary({
   action,
   plan,
@@ -1009,12 +1019,21 @@ function HoldingActionSummary({
         <div className="min-w-0 border-l pl-2">
           <p className="text-[10px] text-muted-foreground">概算金額</p>
           {shares > 0 ? (
-            <MoneyText
-              value={amountLocal}
-              currency={currency}
-              baseValue={amountBase}
-              className="block truncate text-sm font-semibold"
-            />
+            <>
+              <p
+                className="tabular truncate text-sm font-semibold"
+                title={`${compactJpyAmount(amountBase)} / ${formatMoney(amountLocal, currency)}`}
+              >
+                {amountBase === null
+                  ? formatMoney(amountLocal, currency)
+                  : compactJpyAmount(amountBase)}
+              </p>
+              {currency !== "JPY" ? (
+                <p className="tabular truncate text-[10px] text-muted-foreground">
+                  現地 {formatMoney(amountLocal, currency)}
+                </p>
+              ) : null}
+            </>
           ) : (
             <p className="text-sm font-semibold">売買なし</p>
           )}

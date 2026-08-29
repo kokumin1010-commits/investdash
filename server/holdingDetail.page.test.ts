@@ -250,4 +250,23 @@ describe("HoldingDetail actual page", () => {
     const reference = screen.getByText(/参考視点/).closest("details");
     expect(reference?.open).toBe(false);
   });
+
+  it("shows a compact JPY execution amount for REDUCE without truncating the decision", () => {
+    const data = detailData(false);
+    data.view.signal.action = "REDUCE";
+    data.actionPlan = {
+      ...data.actionPlan,
+      direction: "SELL",
+      shares: 500,
+      amountLocal: 1369000,
+      amountBase: 1369000,
+      afterQuantity: 7600,
+      afterWeightPct: 2.72,
+      rationale: "保有合計の25%を一部売却する初回目安です",
+    };
+    mocks.detail.mockReturnValue({ data, isLoading: false, error: null });
+    render(React.createElement(HoldingDetail, { params: { id: "1" } }));
+    expect(screen.getByText("500株の一部売却を検討")).toBeTruthy();
+    expect(screen.getByText("¥137万")).toBeTruthy();
+  });
 });
