@@ -1,6 +1,8 @@
 import { Badge } from "@/components/ui/badge";
 import type { HoldingDurationView } from "@shared/holdingDuration";
 import type { SignalFreshness } from "@shared/signalFreshness";
+import { buildSignalReviewPlan, type SignalReviewPlan } from "@shared/signalReviewPlan";
+import { SignalReviewPlanCard } from "./SignalReviewPlan";
 
 function durationText(days: number): string {
   if (days < 31) return `${days}日`;
@@ -47,6 +49,7 @@ export type DecisionMetaSignal = {
   validUntil: Date | string | null;
   reviewTriggers: string[];
   riskFlags: string[];
+  reviewPlan?: SignalReviewPlan;
 };
 
 export function SignalQualityBadges({ signal }: { signal: DecisionMetaSignal }) {
@@ -66,6 +69,10 @@ export function SignalQualityBadges({ signal }: { signal: DecisionMetaSignal }) 
 }
 
 export function SignalDecisionMeta({ signal }: { signal: DecisionMetaSignal }) {
+  const reviewPlan = signal.reviewPlan ?? buildSignalReviewPlan({
+    validUntil: signal.validUntil,
+    reviewTriggers: signal.reviewTriggers,
+  });
   return (
     <>
       {signal.freshness.isStale ? (
@@ -73,28 +80,15 @@ export function SignalDecisionMeta({ signal }: { signal: DecisionMetaSignal }) {
           <span className="font-medium">再分析が必要です。</span>{" "}
           {signal.freshness.reasons.map(reason => STALE_REASON[reason]).join("・")}
         </div>
-      ) : signal.validUntil ? (
-        <p className="text-xs text-muted-foreground">
-          通常の再確認期限: {new Date(signal.validUntil).toLocaleDateString("ja-JP")}
-        </p>
       ) : null}
-      {signal.reviewTriggers.length > 0 || signal.riskFlags.length > 0 ? (
-        <div className="grid gap-3 sm:grid-cols-2">
-          <div className="rounded-lg border bg-muted/20 p-3">
-            <p className="mb-2 text-xs font-medium">次に見直す条件</p>
-            {signal.reviewTriggers.length > 0 ? (
-              <ul className="space-y-1 text-xs leading-relaxed text-muted-foreground">
-                {signal.reviewTriggers.map((item, index) => <li key={`${item}-${index}`}>・{item}</li>)}
-              </ul>
-            ) : <p className="text-xs text-muted-foreground">次回分析で生成します</p>}
-          </div>
+      <SignalReviewPlanCard plan={reviewPlan} />
+      {signal.riskFlags.length > 0 ? (
+        <div className="grid gap-3">
           <div className="rounded-lg border bg-muted/20 p-3">
             <p className="mb-2 text-xs font-medium">確認中のリスク</p>
-            {signal.riskFlags.length > 0 ? (
-              <ul className="space-y-1 text-xs leading-relaxed text-muted-foreground">
-                {signal.riskFlags.map((item, index) => <li key={`${item}-${index}`}>・{item}</li>)}
-              </ul>
-            ) : <p className="text-xs text-muted-foreground">入力資料上の重大リスクなし</p>}
+            <ul className="space-y-1 text-xs leading-relaxed text-muted-foreground">
+              {signal.riskFlags.map((item, index) => <li key={`${item}-${index}`}>・{item}</li>)}
+            </ul>
           </div>
         </div>
       ) : null}

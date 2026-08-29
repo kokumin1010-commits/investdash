@@ -198,4 +198,16 @@
 - [x] 为桌面表格与移动卡片的 ADD/HOLD/WATCH/REDUCE/EXIT 文案补充 DOM 测试
 - [x] 完整运行 Vitest、TypeScript 与生产构建（125 文件、1035 项），并部署 Railway 67bf948
 - [x] 在正式入口验证截图所示多账户持仓及其他行动样本，不再出现“未保有なら”（390px/1280px passed）
-- [ ] 更新问题审计、同步 GitHub 并保存最终 checkpoint
+- [x] 更新问题审计、同步 GitHub 并保存最终 checkpoint
+- [x] 审计 holdingSignals 的 nextReviewConditions、有效期、决算日字段、现有提醒/调度与通知数据链路
+- [x] 设计次回確認日的確定日/予定日/AI目安/未発表四种可信度与日文标识
+- [x] 设计决算前 7 日、当日、决算后 1 日的确认窗口、期限状态和检查事项
+- [x] 为每个持仓信号派生 nextReviewDate、dateSource、dateConfidence、windowStatus 与 before/after checklist
+- [x] 在 Dashboard AI シグナル内訳增加“今週確認する銘柄”与期限超過汇总
+- [x] 在持仓详情与列表显示次回确认日、距离天数、前后检查事项和未发表示状态
+- [x] 实现 JST 日次到期提醒、同一銘柄/窗口去重与送达运行记录，不伪造未公布日期
+- [x] 为确定/予定/AI目安/未発表、跨年/JST、7日前/当日/翌日/超期和提醒去重补充单元测试
+- [x] 为 Dashboard、保有一覧、HoldingDetail 的次回确认状态补充桌面/390px DOM 测试
+- [ ] 完整运行 Vitest、TypeScript 与生产构建，并部署 Railway（本地 128 文件、1047 项及构建通过，待部署）
+- [ ] 在正式入口用真实决算日期样本及日程未発表样本完成无写入生产验收
+- [ ] 更新次回确认审计与运维文档、同步 GitHub 并保存最终 checkpoint

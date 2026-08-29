@@ -3,6 +3,7 @@ import {
   getNewsBatchForUtcDate,
   RAILWAY_NEWS_SCHEDULE,
   RAILWAY_DATA_BACKFILL_CRON,
+  RAILWAY_REVIEW_REMINDER_CRON,
   DATA_BACKFILL_STAGE_ORDER,
   canRunStaleSignalRefresh,
   summarizeDividendBackfill,
@@ -49,6 +50,10 @@ describe("Railway news schedule", () => {
 
   it("runs data completeness checks every 20 minutes outside the news window", () => {
     expect(RAILWAY_DATA_BACKFILL_CRON).toBe("0,20,40 1-21 * * *");
+  });
+
+  it("runs one review reminder digest daily at 09:00 JST", () => {
+    expect(RAILWAY_REVIEW_REMINDER_CRON).toBe("0 0 * * *");
   });
 
   it("contains rejected cron tasks so the HTTP process can keep running", async () => {

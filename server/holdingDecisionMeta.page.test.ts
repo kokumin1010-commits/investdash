@@ -35,7 +35,9 @@ describe("HoldingDetail 保有期間・AI シグナル", () => {
     expect(screen.getByText("材料充足")).toBeTruthy();
     expect(screen.getByText("再分析待ち")).toBeTruthy();
     expect(screen.getByText(/分析後に新しいニュースあり/)).toBeTruthy();
-    expect(screen.getByText(/次回決算で通期見通しを確認/)).toBeTruthy();
+    expect(screen.getAllByText(/次回決算で通期見通しを確認/).length).toBeGreaterThanOrEqual(1);
+    expect(screen.getByText("次回確認")).toBeTruthy();
+    expect(screen.getByText("AI目安")).toBeTruthy();
     expect(screen.getByText(/株価が52週高値圏/)).toBeTruthy();
   });
 
@@ -48,6 +50,8 @@ describe("HoldingDetail 保有期間・AI シグナル", () => {
       riskFlags: [],
     };
     render(React.createElement(SignalDecisionMeta, { signal }));
-    expect(screen.getByText(/通常の再確認期限/)).toBeTruthy();
+    expect(screen.getByText("次回確認")).toBeTruthy();
+    expect(screen.getByText("AI目安")).toBeTruthy();
+    expect(screen.getByText(/会社の決算発表予定日を示すものではありません/)).toBeTruthy();
   });
 });

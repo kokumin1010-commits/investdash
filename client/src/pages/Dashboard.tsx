@@ -3,6 +3,7 @@ import { BrokerBadge } from "@/components/investing/BrokerBadge";
 import { CurrencyToggle } from "@/components/investing/CurrencyToggle";
 import { DisclaimerNote } from "@/components/investing/DisclaimerNote";
 import { SignalBadge } from "@/components/investing/SignalBadge";
+import { SignalReviewPlanBadge } from "@/components/investing/SignalReviewPlan";
 import {
   DashboardDividendSummary,
   DashboardSignalActionSelector,
@@ -31,6 +32,7 @@ import {
 import { pnlLabel } from "@shared/pnlLabel";
 import { computeCarrySpread } from "@shared/carrySpread";
 import { groupBySignal, pickDefaultSignal } from "@shared/signalGroups";
+import { isReviewPlanInDashboardWindow } from "@shared/signalReviewPlan";
 import {
   BUFFETT_FILTER_LABELS,
   countBuffettBreakdown,
@@ -43,6 +45,7 @@ import {
   AlertTriangle,
   ArrowUpRight,
   Brain,
+  CalendarClock,
   ChevronRight,
   Coins,
   Globe,
@@ -302,6 +305,30 @@ export default function Dashboard() {
       signalAction: g.signal?.action ?? null,
     }));
     return groupBySignal(items) as Map<SignalAction, (Group & { signalAction: SignalAction })[]>;
+  }, [data]);
+
+  const reviewGroups = useMemo(() => {
+    const statusRank = { OVERDUE: 0, POST_REVIEW: 1, DUE: 2, UPCOMING: 3 } as const;
+    const actionRank: Record<SignalAction, number> = {
+      EXIT: 0,
+      REDUCE: 1,
+      WATCH: 2,
+      ADD: 3,
+      HOLD: 4,
+    };
+    return (data?.groups ?? [])
+      .filter(group => group.signal && isReviewPlanInDashboardWindow(group.signal.reviewPlan))
+      .sort((a, b) => {
+        const aSignal = a.signal!;
+        const bSignal = b.signal!;
+        const statusDelta =
+          statusRank[aSignal.reviewPlan.windowStatus as keyof typeof statusRank] -
+          statusRank[bSignal.reviewPlan.windowStatus as keyof typeof statusRank];
+        if (statusDelta !== 0) return statusDelta;
+        const actionDelta = actionRank[aSignal.action] - actionRank[bSignal.action];
+        if (actionDelta !== 0) return actionDelta;
+        return (b.marketValueBase ?? 0) - (a.marketValueBase ?? 0);
+      });
   }, [data]);
 
   /**
@@ -987,6 +1014,48 @@ export default function Dashboard() {
                 ) : (
                   <div className="space-y-2">
                     <DashboardSignalStatsStrip stats={signalStats} />
+                    {reviewGroups.length > 0 ? (
+                      <div className="rounded-xl border border-amber-200 bg-amber-50/60 p-2.5">
+                        <div className="flex items-center justify-between gap-2">
+                          <p className="flex items-center gap-1.5 text-xs font-semibold text-amber-950">
+                            <CalendarClock className="h-4 w-4" />
+                            今週確認する銘柄
+                          </p>
+                          <Badge
+                            variant="outline"
+                            className="border-amber-300 bg-white/70 text-[10px] text-amber-900"
+                          >
+                            {reviewGroups.length} 銘柄
+                          </Badge>
+                        </div>
+                        <div className="mt-2 space-y-1">
+                          {reviewGroups.slice(0, 5).map(group => (
+                            <Link
+                              key={group.symbol}
+                              href={`/holdings?symbol=${encodeURIComponent(group.symbol)}`}
+                              className="flex items-start justify-between gap-2 rounded-lg bg-white/70 px-2 py-1.5 transition-colors hover:bg-white"
+                            >
+                              <span className="min-w-0">
+                                <span className="block truncate text-xs font-medium text-foreground">
+                                  {group.name}
+                                </span>
+                                <span className="block truncate text-[10px] text-muted-foreground">
+                                  {group.signal!.reviewPlan.primaryCheck}
+                                </span>
+                              </span>
+                              <span className="shrink-0">
+                                <SignalReviewPlanBadge plan={group.signal!.reviewPlan} />
+                              </span>
+                            </Link>
+                          ))}
+                        </div>
+                        {reviewGroups.length > 5 ? (
+                          <p className="mt-1.5 text-[10px] text-amber-900/70">
+                            ほか {reviewGroups.length - 5} 銘柄
+                          </p>
+                        ) : null}
+                      </div>
+                    ) : null}
                     {/*
                       件数のバッジはタブとして機能させる。
                       以前は数字だけで押しても何も起きず、どの銘柄が ADD なのか

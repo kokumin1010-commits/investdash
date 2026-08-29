@@ -7,6 +7,7 @@ import { AddAmountLine } from "@/components/investing/AddAmountLine";
 import { HoldingSignalStatus } from "@/components/investing/HoldingSignalStatus";
 import { SignalBody } from "@/components/investing/SignalBody";
 import { SignalGuide } from "@/components/investing/SignalGuide";
+import { SignalReviewPlanBadge } from "@/components/investing/SignalReviewPlan";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -686,6 +687,7 @@ export default function Holdings() {
                     </Link>
                     <div className="flex shrink-0 flex-col items-end gap-1">
                       <HoldingSignalStatus action={p.signal?.action} surface="mobile" />
+                      {p.signal ? <SignalReviewPlanBadge plan={p.signal.reviewPlan} /> : null}
                       {/* 複数口座にまたがる場合はすべてのバッジを並べる */}
                       <div className="flex flex-wrap justify-end gap-1">
                         {p.brokers.map(b => (
@@ -1125,8 +1127,9 @@ export default function Holdings() {
                       {p.signal ? (
                         <Tooltip>
                           <TooltipTrigger asChild>
-                            <div className="cursor-help">
+                            <div className="cursor-help space-y-1.5">
                               <HoldingSignalStatus action={p.signal.action} surface="desktop" />
+                              <SignalReviewPlanBadge plan={p.signal.reviewPlan} />
                             </div>
                           </TooltipTrigger>
                           <TooltipContent className="max-w-sm">

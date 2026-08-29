@@ -39,6 +39,7 @@ vi.mock("recharts", () => {
 });
 
 import Dashboard from "../client/src/pages/Dashboard";
+import { buildSignalReviewPlan } from "../shared/signalReviewPlan";
 
 function overviewData(unknownCount: number) {
   const signal = {
@@ -53,6 +54,11 @@ function overviewData(unknownCount: number) {
     reviewTriggers: ["次回決算を確認"],
     riskFlags: ["高値圏"],
     validUntil: new Date("2026-09-05T00:00:00Z"),
+    reviewPlan: buildSignalReviewPlan({
+      validUntil: new Date("2026-09-05T00:00:00Z"),
+      reviewTriggers: ["次回決算を確認"],
+      now: new Date("2026-08-29T00:00:00Z"),
+    }),
     freshness: { isStale: true, reasons: ["NEW_NEWS"], priceMovePct: 1 },
     createdAt: new Date("2026-08-28T00:00:00Z"),
   };
@@ -137,6 +143,10 @@ describe("Dashboard actual page", () => {
     expect(screen.getByText("判定済み 1/1")).toBeTruthy();
     expect(screen.getByText("平均確信度 68")).toBeTruthy();
     expect(screen.getByText("再分析待ち 1")).toBeTruthy();
+    expect(screen.getByText("今週確認する銘柄")).toBeTruthy();
+    expect(screen.getByText("あと7日で確認")).toBeTruthy();
+    expect(screen.getByText("AI目安")).toBeTruthy();
+    expect(screen.getByText("次回決算を確認")).toBeTruthy();
     const signalCard = screen.getByText("AI シグナル内訳").closest("[data-slot='card']");
     expect(signalCard?.querySelectorAll("button")).toHaveLength(5);
   });

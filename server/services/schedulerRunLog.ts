@@ -132,5 +132,6 @@ export const SCHEDULER_RUN_KINDS = [
   "price_band_plan_backfill",
   "investment_card_backfill",
   "band_check_backfill",
+  "review_reminder",
   "monthly_snapshot",
 ] as const;

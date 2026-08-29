@@ -18,6 +18,10 @@ import {
   syncPrices,
 } from "./services/portfolio";
 import { syncSymbolNotes } from "./services/symbolNoteService";
+import {
+  deliverReviewReminderDigest,
+  hasSuccessfulReviewReminderRun,
+} from "./services/reviewReminder";
 
 const NEWS_BATCH_SIZE = 4;
 const NEWS_BATCH_COUNT = 31;
@@ -27,8 +31,10 @@ const NEWS_INTERVAL_MINUTES = 5;
 let priceRunActive = false;
 let newsRunActive = false;
 let backfillRunActive = false;
+let reviewReminderRunActive = false;
 const profileOffsets = new Map<number, number>();
 export const RAILWAY_DATA_BACKFILL_CRON = "0,20,40 1-21 * * *";
+export const RAILWAY_REVIEW_REMINDER_CRON = "0 0 * * *";
 export const DATA_BACKFILL_STAGE_ORDER = [
   "profile_backfill",
   "dividend_backfill",
@@ -509,6 +515,53 @@ export async function runRailwayDataBackfill() {
   }
 }
 
+export async function runRailwayReviewReminders(now: Date = new Date()) {
+  if (reviewReminderRunActive) {
+    console.warn("[Railway scheduler] review reminder skipped: previous run active");
+    return;
+  }
+  reviewReminderRunActive = true;
+  try {
+    const userIds = await db.listAllUserIds();
+    for (const userId of userIds) {
+      try {
+        if (await hasSuccessfulReviewReminderRun(userId, now)) {
+          console.log(`[Railway scheduler] review reminder user=${userId} skipped: already sent`);
+          continue;
+        }
+        const result = await withSchedulerRunLog({
+          userId,
+          kind: "review_reminder",
+          trigger: "SCHEDULED",
+          run: () => deliverReviewReminderDigest(userId, now),
+          summarize: value => ({
+            processed: value.items.length,
+            succeeded: value.sent ? value.items.length : 0,
+            failed: 0,
+            skipped: value.sent ? 0 : 1,
+            detail: {
+              dateKey: value.dateKey,
+              sent: value.sent,
+              symbols: value.items.map(item => item.symbol),
+              windows: value.items.reduce<Record<string, number>>((counts, item) => {
+                counts[item.reminderWindow] = (counts[item.reminderWindow] ?? 0) + 1;
+                return counts;
+              }, {}),
+            },
+          }),
+        });
+        console.log(
+          `[Railway scheduler] review reminder user=${userId} items=${result.items.length} sent=${result.sent}`
+        );
+      } catch (error) {
+        console.error(`[Railway scheduler] review reminder user=${userId} failed:`, error);
+      }
+    }
+  } finally {
+    reviewReminderRunActive = false;
+  }
+}
+
 function scheduleNewsBatchWindow(expression: string) {
   cron.schedule(
     expression,
@@ -565,9 +618,17 @@ export function startRailwayScheduler(): boolean {
       ),
     { timezone: "UTC", noOverlap: true }
   );
+  cron.schedule(
+    RAILWAY_REVIEW_REMINDER_CRON,
+    () =>
+      void runRailwayScheduledTaskSafely("review reminder", () =>
+        runRailwayReviewReminders()
+      ),
+    { timezone: "UTC", noOverlap: true }
+  );
 
   console.log(
-    "[Railway scheduler] enabled: prices 06:30/21:30 UTC weekdays; news 22:00-00:30 UTC daily; data backfill every 20m 01:00-21:40 UTC"
+    "[Railway scheduler] enabled: prices 06:30/21:30 UTC weekdays; news 22:00-00:30 UTC daily; review reminders 00:00 UTC daily; data backfill every 20m 01:00-21:40 UTC"
   );
   return true;
 }

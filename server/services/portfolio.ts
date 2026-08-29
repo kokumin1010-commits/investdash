@@ -45,6 +45,10 @@ import {
   evaluateSignalFreshness,
   type SignalFreshness,
 } from "../../shared/signalFreshness";
+import {
+  buildSignalReviewPlan,
+  type SignalReviewPlan,
+} from "../../shared/signalReviewPlan";
 import { buildAddReason } from "../../shared/addReason";
 import { fillMissingSectors } from "./sectorFill";
 import { buildMarketSlices, type MarketSlice } from "./marketSlices";
@@ -138,6 +142,7 @@ export type PositionView = {
     validUntil: Date | null;
     schemaVersion: number;
     freshness: SignalFreshness;
+    reviewPlan: SignalReviewPlan;
   } | null;
   newsCount: number;
   negativeNewsCount: number;
@@ -636,6 +641,14 @@ export async function buildPortfolio(userId: number): Promise<{
             validUntil: sig.validUntil,
             schemaVersion: sig.schemaVersion,
             freshness: signalFreshness!,
+            reviewPlan: buildSignalReviewPlan({
+              validUntil: sig.validUntil,
+              reviewTriggers: Array.isArray(sig.reviewTriggers)
+                ? sig.reviewTriggers.filter(
+                    (item): item is string => typeof item === "string"
+                  )
+                : [],
+            }),
           }
         : null,
       newsCount: newsStat.total,

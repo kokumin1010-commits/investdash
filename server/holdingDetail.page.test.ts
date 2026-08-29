@@ -225,7 +225,13 @@ describe("HoldingDetail actual page", () => {
     expect(screen.getByText("材料充足")).toBeTruthy();
     expect(screen.getByText("再分析待ち")).toBeTruthy();
     expect(screen.getByText(/分析後に新しいニュースあり/)).toBeTruthy();
-    expect(screen.getByText(/次回決算で営業利益率を確認/)).toBeTruthy();
+    expect(
+      screen.getAllByText(/次回決算で営業利益率を確認/).length
+    ).toBeGreaterThanOrEqual(1);
+    expect(screen.getByText("次回確認")).toBeTruthy();
+    expect(screen.getByText("AI目安")).toBeTruthy();
+    expect(screen.getByText("確認前に見ること")).toBeTruthy();
+    expect(screen.getByText("確認後に見ること")).toBeTruthy();
     expect(screen.getByText(/為替感応度が高い/)).toBeTruthy();
   });
 
@@ -236,7 +242,11 @@ describe("HoldingDetail actual page", () => {
       error: null,
     });
     render(React.createElement(HoldingDetail, { params: { id: "1" } }));
-    expect(screen.getByText(/通常の再確認期限/)).toBeTruthy();
+    expect(screen.getByText("次回確認")).toBeTruthy();
+    expect(screen.getByText("AI目安")).toBeTruthy();
+    expect(
+      screen.getByText(/会社の決算発表予定日を示すものではありません/)
+    ).toBeTruthy();
   });
 
   it("renders real dividend metrics and an actual-holding action before the reference lens", () => {
