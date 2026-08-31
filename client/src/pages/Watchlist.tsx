@@ -49,6 +49,7 @@ import {
 import {
   WATCHLIST_SORT_KEYS,
   WATCHLIST_SORT_LABELS,
+  filterWatchlistRows,
   sortWatchlistRows,
   type WatchlistSortKey,
 } from "@shared/watchlistSort";
@@ -240,6 +241,7 @@ export default function Watchlist() {
   const [picked, setPicked] = useState<Set<string>>(new Set());
   const [highlightedWatchId, setHighlightedWatchId] = useState<number | null>(null);
   const [sortKey, setSortKey] = useState<WatchlistSortKey>("NEWEST");
+  const [watchQuery, setWatchQuery] = useState("");
   const focusTimerRef = useRef<number | null>(null);
 
   const focusWatchId = useMemo(() => {
@@ -360,24 +362,32 @@ export default function Watchlist() {
   });
 
   const rows = (list.data ?? []) as unknown as WatchRow[];
-  const sortedRows = useMemo(
-    () => sortWatchlistRows(rows, sortKey),
-    [rows, sortKey]
+  const filteredRows = useMemo(
+    () => filterWatchlistRows(rows, watchQuery),
+    [rows, watchQuery]
   );
-  const reached = sortedRows.filter(r => r.reachedTarget);
+  const sortedRows = useMemo(
+    () => sortWatchlistRows(filteredRows, sortKey),
+    [filteredRows, sortKey]
+  );
+  const reached = rows.filter(r => r.reachedTarget);
   /*
    * 目標価格が現在値から離れすぎている銘柄。
    * 「待っている」ように見えて実際は買えない状態なので、
    * 到達した銘柄と同じ強さで目に入る位置に出す。
    */
-  const needsRework = sortedRows.filter(r => r.targetNeedsRework);
+  const needsRework = rows.filter(r => r.targetNeedsRework);
   const heldSymbols = new Set(rows.map(r => r.symbol));
 
   useEffect(() => {
     if (focusWatchId === null || list.isLoading) return;
+    if (!sortedRows.some(row => row.id === focusWatchId)) {
+      if (watchQuery.trim()) setWatchQuery("");
+      return;
+    }
     const frame = window.requestAnimationFrame(() => revealWatchCard(focusWatchId));
     return () => window.cancelAnimationFrame(frame);
-  }, [focusWatchId, list.data, list.isLoading, revealWatchCard]);
+  }, [focusWatchId, list.data, list.isLoading, revealWatchCard, sortedRows, watchQuery]);
 
   useEffect(
     () => () => {
@@ -856,31 +866,65 @@ export default function Watchlist() {
       ) : null}
 
       {rows.length > 0 ? (
-        <div className="flex flex-col gap-2 rounded-xl border bg-card/70 px-3 py-3 shadow-sm sm:flex-row sm:items-center sm:justify-between">
-          <div className="flex items-center gap-2">
-            <ArrowUpDown className="h-4 w-4 text-primary" />
-            <div>
+        <div className="grid gap-3 rounded-xl border bg-card/70 px-3 py-3 shadow-sm sm:grid-cols-[minmax(0,1fr)_220px] sm:items-end">
+          <div className="space-y-1.5">
+            <Label htmlFor="watchlist-search" className="text-sm font-semibold">
+              名称・銘柄コードで検索
+            </Label>
+            <div className="flex gap-2">
+              <div className="relative min-w-0 flex-1">
+                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                <Input
+                  id="watchlist-search"
+                  aria-label="ウォッチリストを名称または銘柄コードで検索"
+                  value={watchQuery}
+                  onChange={event => setWatchQuery(event.target.value)}
+                  placeholder="例：EIX、PayPal、9984"
+                  className="pl-9"
+                />
+              </div>
+              {watchQuery ? (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="h-9 shrink-0 bg-background"
+                  onClick={() => setWatchQuery("")}
+                >
+                  クリア
+                </Button>
+              ) : null}
+            </div>
+            <p className="text-[11px] text-muted-foreground" aria-live="polite">
+              {watchQuery.trim()
+                ? `${rows.length} 件中 ${sortedRows.length} 件を表示`
+                : `${sortedRows.length} 件を表示`}
+            </p>
+          </div>
+          <div className="space-y-1.5">
+            <div className="flex items-center gap-2">
+              <ArrowUpDown className="h-4 w-4 text-primary" />
               <Label htmlFor="watchlist-sort" className="text-sm font-semibold">
                 並び順
               </Label>
-              <p className="text-[11px] text-muted-foreground">
-                {WATCHLIST_SORT_LABELS[sortKey]}で {sortedRows.length} 件を表示
-              </p>
             </div>
+            <select
+              value={sortKey}
+              onChange={event => setSortKey(event.target.value as WatchlistSortKey)}
+              id="watchlist-sort"
+              aria-label="ウォッチリストの並び順"
+              className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-xs outline-none transition-[color,box-shadow] focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
+            >
+              {WATCHLIST_SORT_KEYS.map(key => (
+                <option key={key} value={key}>
+                  {WATCHLIST_SORT_LABELS[key]}
+                </option>
+              ))}
+            </select>
+            <p className="text-[11px] text-muted-foreground">
+              {WATCHLIST_SORT_LABELS[sortKey]}
+            </p>
           </div>
-          <select
-            value={sortKey}
-            onChange={event => setSortKey(event.target.value as WatchlistSortKey)}
-            id="watchlist-sort"
-            aria-label="ウォッチリストの並び順"
-            className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-xs outline-none transition-[color,box-shadow] focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 sm:w-[220px]"
-          >
-            {WATCHLIST_SORT_KEYS.map(key => (
-              <option key={key} value={key}>
-                {WATCHLIST_SORT_LABELS[key]}
-              </option>
-            ))}
-          </select>
         </div>
       ) : null}
 
@@ -899,6 +943,21 @@ export default function Watchlist() {
             <Button onClick={() => setAddOpen(true)}>
               <Plus className="mr-1.5 h-4 w-4" />
               銘柄を追加
+            </Button>
+          </CardContent>
+        </Card>
+      ) : sortedRows.length === 0 ? (
+        <Card className="border-dashed">
+          <CardContent className="flex flex-col items-center gap-3 py-12 text-center">
+            <Search className="h-6 w-6 text-muted-foreground" />
+            <div className="space-y-1">
+              <h2 className="font-semibold">一致する銘柄がありません</h2>
+              <p className="text-sm text-muted-foreground">
+                名称または銘柄コードを確認してください。
+              </p>
+            </div>
+            <Button variant="outline" size="sm" onClick={() => setWatchQuery("")}>
+              検索をクリア
             </Button>
           </CardContent>
         </Card>

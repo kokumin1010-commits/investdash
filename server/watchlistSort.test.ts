@@ -1,10 +1,15 @@
 import { describe, expect, it } from "vitest";
-import { sortWatchlistRows } from "../shared/watchlistSort";
+import {
+  filterWatchlistRows,
+  sortWatchlistRows,
+} from "../shared/watchlistSort";
 
 const rows = [
   {
     id: 1,
     symbol: "ALPHA",
+    tickerCode: "ALP",
+    name: "Alpha Holdings",
     priority: "HIGH" as const,
     gapPct: -20,
     reachedTarget: false,
@@ -13,6 +18,8 @@ const rows = [
   {
     id: 2,
     symbol: "BRAVO",
+    tickerCode: "BRV",
+    name: "Beta Utilities",
     priority: "LOW" as const,
     gapPct: 4,
     reachedTarget: true,
@@ -21,6 +28,8 @@ const rows = [
   {
     id: 3,
     symbol: "CHARLIE",
+    tickerCode: "285A",
+    name: "Charlie Corp",
     priority: "MEDIUM" as const,
     gapPct: -2,
     reachedTarget: false,
@@ -29,6 +38,8 @@ const rows = [
   {
     id: 4,
     symbol: "DELTA",
+    tickerCode: "DLT",
+    name: "Delta Corp",
     priority: "HIGH" as const,
     gapPct: null,
     reachedTarget: false,
@@ -37,6 +48,17 @@ const rows = [
 ];
 
 describe("watchlist sort", () => {
+  it("matches name, normalized symbol and ticker code without case or outer-space sensitivity", () => {
+    expect(filterWatchlistRows(rows, "  alpha  ").map(row => row.id)).toEqual([
+      1,
+    ]);
+    expect(filterWatchlistRows(rows, "bravo").map(row => row.id)).toEqual([2]);
+    expect(filterWatchlistRows(rows, "２８５ａ").map(row => row.id)).toEqual([3]);
+    expect(filterWatchlistRows(rows, "   ").map(row => row.id)).toEqual([
+      1, 2, 3, 4,
+    ]);
+  });
+
   it("sorts by real added date in both directions with stable id tie-breaking", () => {
     expect(sortWatchlistRows(rows, "NEWEST").map(row => row.id)).toEqual([
       4, 3, 2, 1,

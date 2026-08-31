@@ -17,11 +17,32 @@ export const WATCHLIST_SORT_LABELS: Record<WatchlistSortKey, string> = {
 export type WatchlistSortableRow = {
   id: number;
   symbol: string;
+  tickerCode?: string;
+  name?: string;
   priority: "HIGH" | "MEDIUM" | "LOW";
   gapPct: number | null;
   reachedTarget: boolean;
   createdAt: Date | string;
 };
+
+function normalizeWatchlistSearch(value: string): string {
+  return value.normalize("NFKC").trim().toLocaleLowerCase("ja-JP");
+}
+
+/** 名称・正規化 symbol・表示用 ticker code の部分一致検索。 */
+export function filterWatchlistRows<T extends WatchlistSortableRow>(
+  rows: readonly T[],
+  query: string
+): T[] {
+  const needle = normalizeWatchlistSearch(query);
+  if (!needle) return [...rows];
+
+  return rows.filter(row =>
+    [row.name, row.symbol, row.tickerCode].some(value =>
+      value ? normalizeWatchlistSearch(value).includes(needle) : false
+    )
+  );
+}
 
 const PRIORITY_ORDER: Record<WatchlistSortableRow["priority"], number> = {
   HIGH: 0,

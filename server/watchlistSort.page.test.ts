@@ -36,6 +36,7 @@ const mocks = vi.hoisted(() => {
         ...baseRow,
         id: 1,
         symbol: "ALPHA",
+        tickerCode: "ALP",
         name: "Alpha Corp",
         priority: "HIGH",
         gapPct: -20,
@@ -46,6 +47,7 @@ const mocks = vi.hoisted(() => {
         ...baseRow,
         id: 2,
         symbol: "BRAVO",
+        tickerCode: "BRV",
         name: "Bravo Corp",
         priority: "LOW",
         gapPct: 4,
@@ -56,6 +58,7 @@ const mocks = vi.hoisted(() => {
         ...baseRow,
         id: 3,
         symbol: "CHARLIE",
+        tickerCode: "285A",
         name: "Charlie Corp",
         priority: "MEDIUM",
         gapPct: -2,
@@ -147,7 +150,7 @@ describe.each([390, 1280])("Watchlist sort at %ipx", width => {
     const select = screen.getByLabelText("ウォッチリストの並び順");
     expect((select as HTMLSelectElement).value).toBe("NEWEST");
     expect(cardOrder()).toEqual([3, 2, 1]);
-    expect(screen.getByText("追加が新しい順で 3 件を表示")).toBeTruthy();
+    expect(screen.getByText("3 件を表示")).toBeTruthy();
 
     fireEvent.change(select, { target: { value: "OLDEST" } });
     expect(cardOrder()).toEqual([1, 2, 3]);
@@ -157,6 +160,41 @@ describe.each([390, 1280])("Watchlist sort at %ipx", width => {
 
     fireEvent.change(select, { target: { value: "TARGET_NEAREST" } });
     expect(cardOrder()).toEqual([2, 3, 1]);
-    expect(screen.getByText("目標価格に近い順で 3 件を表示")).toBeTruthy();
+    expect((select as HTMLSelectElement).value).toBe("TARGET_NEAREST");
+  });
+
+  it("searches by name/code, keeps sorting, clears and explains no results", () => {
+    Object.defineProperty(window, "innerWidth", {
+      configurable: true,
+      value: width,
+    });
+    render(React.createElement(Watchlist));
+
+    const input = screen.getByLabelText(
+      "ウォッチリストを名称または銘柄コードで検索"
+    );
+    const select = screen.getByLabelText("ウォッチリストの並び順");
+
+    fireEvent.change(input, { target: { value: "  alpha  " } });
+    expect(cardOrder()).toEqual([1]);
+    expect(screen.getByText("3 件中 1 件を表示")).toBeTruthy();
+
+    fireEvent.change(input, { target: { value: "２８５ａ" } });
+    expect(cardOrder()).toEqual([3]);
+
+    fireEvent.change(input, { target: { value: "corp" } });
+    expect(cardOrder()).toEqual([3, 2, 1]);
+    fireEvent.change(select, { target: { value: "PRIORITY" } });
+    expect(cardOrder()).toEqual([1, 3, 2]);
+
+    fireEvent.click(screen.getByRole("button", { name: "クリア" }));
+    expect((input as HTMLInputElement).value).toBe("");
+    expect(cardOrder()).toEqual([1, 3, 2]);
+
+    fireEvent.change(input, { target: { value: "not-found-symbol" } });
+    expect(cardOrder()).toEqual([]);
+    expect(screen.getByText("一致する銘柄がありません")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "検索をクリア" }));
+    expect(cardOrder()).toEqual([1, 3, 2]);
   });
 });
