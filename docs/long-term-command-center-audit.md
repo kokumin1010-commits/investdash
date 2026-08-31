@@ -93,7 +93,27 @@
 
 组合适配分以 sizing 后仓位计算：≤2% 得15，≤3% 得12，≤4% 得8，≤5% 得4，超过上限为门槛失败；处于行业阈值90%以上再扣4。流动性与杠杆分：有效可执行股数/金额得4，金额不超过可动用流动性5%再得3；IBKR SAFE 得3、CAUTION 得1、WARNING/DANGER 为门槛失败。分数最终限制在0–100。
 
-排序依次比较 eligible、总分、ADD_MAIN 优先、估值分、较低买后仓位、symbol。`rankingMonth` 使用 JST `YYYY-MM`。第一版不新增月度排名表，而是以同月确定性输入和稳定 tie-break 得到一致结果；金额随价格更新，但排序输入不使用单日涨跌，重大材料或信号变化才会改变资格和分数。若未来要保留月度历史，再增加 versioned snapshot 表，不能回改 v1 历史。
+排序依次比较 eligible、总分、ADD_MAIN 优先、估值分、较低买后仓位、symbol。`rankingMonth` 使用 JST `YYYY-MM`。实现使用 `buyPlanRankingSnapshots` 固定当月 rank、score 与 explainable breakdown；全候选共享一个重大输入 fingerprint。精确现价、金额与股数不进入 fingerprint，所以同一价格带内的日次噪音只更新 sizing；价格带、信号、核验、卡片或 IBKR/仓位风险带变化时才重算当月快照。旧月份快照不回改。
+
+## 生产实施与验收（2026-08-31）
+
+Railway `railway-migration` 已部署 commit `22386e3`。启动过程应用两份仅追加迁移：`0032_sloppy_slipstream.sql` 建立见送 review/milestone/price observation，`0033_mute_pete_wisdom.sql` 建立月度 ranking snapshot。迁移没有 `DROP`、`DELETE` 或 `TRUNCATE`。
+
+正式 `priceBandOverview` 返回 115 行，其中原始买增价格带仍为 61 行；硬门槛后可执行候选为 52 行。被排除的 9 行包括 6 个 `REDUCE` 信号冲突、1 个 `WATCH` 冲突、1 个有 3 项未照合、1 个最低交易单位超过预算（同时股数/金额为0）。这证明页面不是把61个价格带判断当成61个购买指令。
+
+| 本月顺位 | Symbol | 价格带 | 建议股数 | 概算金额 | 买后仓位 |
+|---:|---|---|---:|---:|---:|
+| 1 | 4816.T | ADD_MAIN | 500 | ¥1,537,500 | 0.293% |
+| 2 | 4661.T | ADD_MAIN | 600 | ¥1,830,000 | 0.373% |
+| 3 | 2318.HK | ADD_MAIN | 1,608 | ¥1,838,555 | 1.882% |
+| 4 | C38U.SI | ADD_MAIN | 6,210 | ¥1,839,292 | 0.544% |
+| 5 | 5801.T | ADD_MAIN | 400 | ¥1,580,400 | 0.805% |
+
+第一次请求创建 `2026-08 / buy-plan-rank-v1` 快照；第二次请求返回 `snapshotRecomputed=false` 且前5顺序不变。金额仍由现有 portfolio sizing 以真实净资产、现金性资产、市场 lot、行业上限和 IBKR `CAUTION` 计算，均为 `CASH_ONLY`，不增加借入。
+
+正式见送复盘目前为 0 条，这是刻意且诚实的初始状态：0032 上线前的 SKIPPED 历史没有日次观测，系统没有反向补造价格路径。以后点击见送时必须输入当时理由，才会开始 30/90/180 日与决算后记录。本次验收没有见送、删除或改写 14 条真实队列，也没有更改持仓或下单。
+
+无写入 Chromium 验收覆盖 `/buy-plans` 与 `/action-queue` 的 390px/1280px。四个场景均无缺失文案；移动端 `scrollWidth=clientWidth=390`，桌面端为 `1280`，没有横向溢出。Buy Plans 显示前5与具体金额，完整 115 行默认收起；见送复盘显示“暂无历史”而不是伪造旧结论。开发与 Railway 工作树均通过 133 个测试文件、1079 项测试、TypeScript 和 production build。
 
 ## References
 
