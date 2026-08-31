@@ -44,7 +44,7 @@ async function openBrowser(width, height, port) {
       "--no-sandbox",
       "--disable-gpu",
       `--remote-debugging-port=${port}`,
-      `--user-data-dir=/tmp/investdash-watch-sort-${width}`,
+      `--user-data-dir=/tmp/investdash-watch-sort-${process.pid}-${width}`,
       `--window-size=${width},${height}`,
       "about:blank",
     ],
@@ -108,6 +108,8 @@ async function openBrowser(width, height, port) {
   };
 
   await send("Page.enable");
+  await send("Network.enable");
+  await send("Network.setCacheDisabled", { cacheDisabled: true });
   await send("Emulation.setDeviceMetricsOverride", {
     width,
     height,
@@ -126,8 +128,8 @@ async function verify(width, height, port, rows) {
   const orders = {};
   try {
     await browser.waitUntil(
-      "watchlist sort control",
-      "Boolean(document.querySelector('#watchlist-sort')) && document.querySelectorAll('[data-watch-id]').length > 0"
+      "watchlist search and sort controls",
+      "Boolean(document.querySelector('#watchlist-search')) && Boolean(document.querySelector('#watchlist-sort')) && document.querySelectorAll('[data-watch-id]').length > 0"
     );
     const labels = await browser.evalValue(
       "[...document.querySelectorAll('#watchlist-sort option')].map(option => option.textContent?.trim())"
@@ -147,6 +149,57 @@ async function verify(width, height, port, rows) {
         "[...document.querySelectorAll('[data-watch-id]')].map(node => ({id:Number(node.dataset.watchId),symbol:node.textContent?.match(/[A-Z0-9]+(?:\\.[A-Z]+)?/)?.[0] ?? ''})).slice(0,5)"
       );
     }
+
+    const setSearch = async value => {
+      await browser.evalValue(`(() => {
+        const input = document.querySelector('#watchlist-search');
+        if (!input) throw new Error('missing watchlist search input');
+        const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
+        setter.call(input, ${JSON.stringify(value)});
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+      })()`);
+    };
+    const eix = rows.find(row => row.symbol === "EIX");
+    await setSearch("  eix  ");
+    await browser.waitUntil(
+      "EIX symbol search",
+      `document.querySelectorAll('[data-watch-id]').length === 1 && Number(document.querySelector('[data-watch-id]')?.dataset.watchId) === ${eix?.id ?? -1}`
+    );
+    const symbolSearch = await browser.evalValue(`({
+      value: document.querySelector('#watchlist-search')?.value ?? '',
+      countText: document.body.textContent?.includes('${rows.length} 件中 1 件を表示') ?? false,
+      eixVisible: document.querySelector('[data-watch-id]')?.textContent?.includes('EIX') ?? false,
+      clearVisible: [...document.querySelectorAll('button')].some(node => node.textContent?.trim() === 'クリア'),
+    })`);
+
+    const nameNeedle = (eix?.name ?? "Edison").split(/\s+/)[0].toLocaleLowerCase("en-US");
+    await setSearch(nameNeedle);
+    await browser.waitUntil(
+      "EIX name search",
+      `document.querySelectorAll('[data-watch-id]').length === 1 && Number(document.querySelector('[data-watch-id]')?.dataset.watchId) === ${eix?.id ?? -1}`
+    );
+    const nameSearch = await browser.evalValue(
+      `document.querySelector('[data-watch-id]')?.textContent?.includes(${JSON.stringify(eix?.name ?? "")}) ?? false`
+    );
+
+    await setSearch("not-found-symbol");
+    await browser.waitUntil(
+      "search empty state",
+      "document.querySelectorAll('[data-watch-id]').length === 0 && document.body.textContent?.includes('一致する銘柄がありません')"
+    );
+    const emptyState = await browser.evalValue(`({
+      title: document.body.textContent?.includes('一致する銘柄がありません') ?? false,
+      clearButton: [...document.querySelectorAll('button')].some(node => node.textContent?.trim() === '検索をクリア'),
+    })`);
+    await browser.evalValue(`(() => {
+      const button = [...document.querySelectorAll('button')].find(node => node.textContent?.trim() === '検索をクリア');
+      button?.click();
+    })()`);
+    await browser.waitUntil(
+      "cleared search",
+      `document.querySelectorAll('[data-watch-id]').length === ${rows.length} && document.querySelector('#watchlist-search')?.value === ''`
+    );
+
     await browser.evalValue(`(() => {
       const select = document.querySelector('#watchlist-sort');
       select.value = 'NEWEST';
@@ -157,7 +210,7 @@ async function verify(width, height, port, rows) {
     const state = await browser.evalValue(`({
       countText: document.body.textContent?.includes('購入検討中の銘柄 ${rows.length} 件') ?? false,
       selected: document.querySelector('#watchlist-sort')?.value ?? null,
-      newestSummary: document.body.textContent?.includes('追加が新しい順で ${rows.length} 件を表示') ?? false,
+      newestSummary: document.body.textContent?.includes('追加が新しい順') && document.body.textContent?.includes('${rows.length} 件を表示') || false,
       eixFirst: Number(document.querySelector('[data-watch-id]')?.dataset.watchId) === ${rows.find(row => row.symbol === "EIX")?.id ?? -1},
       eixDateVisible: [...document.querySelectorAll('[data-watch-id]')].find(node => Number(node.dataset.watchId) === ${rows.find(row => row.symbol === "EIX")?.id ?? -1})?.textContent?.includes('追加') ?? false,
       scrollWidth: document.documentElement.scrollWidth,
@@ -168,10 +221,19 @@ async function verify(width, height, port, rows) {
       width,
       labels,
       orders,
+      symbolSearch,
+      nameSearch,
+      emptyState,
       ...state,
       screenshot,
       passed:
         labels?.length === 4 &&
+        symbolSearch.countText &&
+        symbolSearch.eixVisible &&
+        symbolSearch.clearVisible &&
+        nameSearch &&
+        emptyState.title &&
+        emptyState.clearButton &&
         state.countText &&
         state.selected === "NEWEST" &&
         state.newestSummary &&
@@ -189,5 +251,5 @@ const rows = await trpcGet("watchlist.list");
 if (!rows.some(row => row.symbol === "EIX")) throw new Error("EIX must exist in production watchlist");
 const mobile = await verify(390, 844, 9390, rows);
 const desktop = await verify(1280, 900, 9391, rows);
-console.log(JSON.stringify({ version: "3c9b210", rowCount: rows.length, mobile, desktop }, null, 2));
+console.log(JSON.stringify({ version: "8c631c7", rowCount: rows.length, mobile, desktop }, null, 2));
 if (!mobile.passed || !desktop.passed) process.exitCode = 1;
