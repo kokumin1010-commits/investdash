@@ -47,6 +47,12 @@ import {
   type TargetDistanceLevel,
 } from "@shared/targetDistance";
 import {
+  WATCHLIST_SORT_KEYS,
+  WATCHLIST_SORT_LABELS,
+  sortWatchlistRows,
+  type WatchlistSortKey,
+} from "@shared/watchlistSort";
+import {
   Brain,
   CheckCircle2,
   Eye,
@@ -54,6 +60,7 @@ import {
   Plus,
   RefreshCw,
   Search,
+  ArrowUpDown,
   Target,
   Trash2,
   TrendingDown,
@@ -102,6 +109,7 @@ type WatchRow = {
   latestProposal: (WatchProposalDraftView & {
     reviewStatus: "PENDING" | "ACCEPTED" | "EDITED" | "REJECTED";
   }) | null;
+  createdAt: Date;
 };
 
 /** AI が提案した候補（実在検証を通ったもの） */
@@ -196,6 +204,17 @@ function industryJa(v: string | null): string {
   if (!v) return "";
   return INDUSTRY_JA[v] ?? v;
 }
+
+function formatWatchAddedDate(value: Date | string): string {
+  const parsed = new Date(value);
+  if (!Number.isFinite(parsed.getTime())) return "日付不明";
+  return parsed.toLocaleDateString("ja-JP", {
+    year: "numeric",
+    month: "numeric",
+    day: "numeric",
+  });
+}
+
 export default function Watchlist() {
   const utils = trpc.useUtils();
   const search = useSearch();
@@ -220,6 +239,7 @@ export default function Watchlist() {
   const [gapsOpen, setGapsOpen] = useState(false);
   const [picked, setPicked] = useState<Set<string>>(new Set());
   const [highlightedWatchId, setHighlightedWatchId] = useState<number | null>(null);
+  const [sortKey, setSortKey] = useState<WatchlistSortKey>("NEWEST");
   const focusTimerRef = useRef<number | null>(null);
 
   const focusWatchId = useMemo(() => {
@@ -340,13 +360,17 @@ export default function Watchlist() {
   });
 
   const rows = (list.data ?? []) as unknown as WatchRow[];
-  const reached = rows.filter(r => r.reachedTarget);
+  const sortedRows = useMemo(
+    () => sortWatchlistRows(rows, sortKey),
+    [rows, sortKey]
+  );
+  const reached = sortedRows.filter(r => r.reachedTarget);
   /*
    * 目標価格が現在値から離れすぎている銘柄。
    * 「待っている」ように見えて実際は買えない状態なので、
    * 到達した銘柄と同じ強さで目に入る位置に出す。
    */
-  const needsRework = rows.filter(r => r.targetNeedsRework);
+  const needsRework = sortedRows.filter(r => r.targetNeedsRework);
   const heldSymbols = new Set(rows.map(r => r.symbol));
 
   useEffect(() => {
@@ -831,6 +855,35 @@ export default function Watchlist() {
         </Card>
       ) : null}
 
+      {rows.length > 0 ? (
+        <div className="flex flex-col gap-2 rounded-xl border bg-card/70 px-3 py-3 shadow-sm sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex items-center gap-2">
+            <ArrowUpDown className="h-4 w-4 text-primary" />
+            <div>
+              <Label htmlFor="watchlist-sort" className="text-sm font-semibold">
+                並び順
+              </Label>
+              <p className="text-[11px] text-muted-foreground">
+                {WATCHLIST_SORT_LABELS[sortKey]}で {sortedRows.length} 件を表示
+              </p>
+            </div>
+          </div>
+          <select
+            value={sortKey}
+            onChange={event => setSortKey(event.target.value as WatchlistSortKey)}
+            id="watchlist-sort"
+            aria-label="ウォッチリストの並び順"
+            className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-xs outline-none transition-[color,box-shadow] focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 sm:w-[220px]"
+          >
+            {WATCHLIST_SORT_KEYS.map(key => (
+              <option key={key} value={key}>
+                {WATCHLIST_SORT_LABELS[key]}
+              </option>
+            ))}
+          </select>
+        </div>
+      ) : null}
+
       {rows.length === 0 ? (
         <Card className="border-dashed">
           <CardContent className="flex flex-col items-center gap-4 py-16 text-center">
@@ -851,7 +904,7 @@ export default function Watchlist() {
         </Card>
       ) : (
         <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-          {rows.map(r => (
+          {sortedRows.map(r => (
             <Card
               key={r.id}
               id={`watch-${r.id}`}
@@ -899,6 +952,9 @@ export default function Watchlist() {
                         既に保有
                       </Badge>
                     ) : null}
+                    <span className="tabular text-[10px] text-muted-foreground">
+                      追加 {formatWatchAddedDate(r.createdAt)}
+                    </span>
                   </div>
                 </div>
               </CardHeader>
