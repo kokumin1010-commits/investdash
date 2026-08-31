@@ -225,6 +225,20 @@
       "when": 1788007952819,
       "tag": "0031_thick_stranger",
       "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "5",
+      "when": 1788152552918,
+      "tag": "0032_sloppy_slipstream",
+      "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "5",
+      "when": 1788153214851,
+      "tag": "0033_mute_pete_wisdom",
+      "breakpoints": true
     }
   ]
 }

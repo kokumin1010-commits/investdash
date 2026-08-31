@@ -918,6 +918,11 @@ export type PlanOverviewRow = {
   needsCheck: boolean;
   /** 現在いる価格帯。自動照合はこの band だけを対象にする */
   currentBandId: number | null;
+  currentBandLowerPrice: number | null;
+  currentBandUpperPrice: number | null;
+  currentBandReason: string | null;
+  currentBandPlannedAmount: number | null;
+  currentBandCheckItems: string[];
   /** 現在の価格帯に残っている未照合項目数 */
   pendingCheckCount: number;
   /** 照合済みで懸念ありの件数 */
@@ -1118,6 +1123,11 @@ export async function listPlanOverview(userId: number): Promise<PlanOverviewRow[
       nextActionLabel: ev.nextBand?.actionLabel ?? null,
       needsCheck,
       currentBandId: current?.id ?? null,
+      currentBandLowerPrice: current?.lowerPrice ?? null,
+      currentBandUpperPrice: current?.upperPrice ?? null,
+      currentBandReason: current?.reason ?? null,
+      currentBandPlannedAmount: current?.plannedAmount ?? null,
+      currentBandCheckItems: current?.checkItems ?? [],
       pendingCheckCount,
       concernCount,
       generatedAt: plan.generatedAt,

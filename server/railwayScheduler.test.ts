@@ -4,6 +4,7 @@ import {
   RAILWAY_NEWS_SCHEDULE,
   RAILWAY_DATA_BACKFILL_CRON,
   RAILWAY_REVIEW_REMINDER_CRON,
+  RAILWAY_SKIP_DECISION_REVIEW_CRON,
   DATA_BACKFILL_STAGE_ORDER,
   canRunStaleSignalRefresh,
   summarizeDividendBackfill,
@@ -56,9 +57,15 @@ describe("Railway news schedule", () => {
     expect(RAILWAY_REVIEW_REMINDER_CRON).toBe("0 0 * * *");
   });
 
+  it("runs skipped-decision observations once daily at 09:20 JST", () => {
+    expect(RAILWAY_SKIP_DECISION_REVIEW_CRON).toBe("20 0 * * *");
+  });
+
   it("contains rejected cron tasks so the HTTP process can keep running", async () => {
     const error = new Error("temporary database disconnect");
-    const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const consoleError = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => undefined);
 
     await expect(
       runRailwayScheduledTaskSafely("data backfill", async () => {
@@ -107,18 +114,36 @@ describe("Railway news schedule", () => {
   it("executes the real dividend/signal stage flow in order and skips stale refresh on quota", async () => {
     const order: string[] = [];
     const first = await runDividendAndSignalStages({
-      dividend: async () => { order.push("dividend"); return { updated: 1 }; },
-      missingSignals: async () => { order.push("missing"); return { quotaExhausted: false }; },
-      staleSignals: async () => { order.push("stale"); return { refreshed: 1 }; },
+      dividend: async () => {
+        order.push("dividend");
+        return { updated: 1 };
+      },
+      missingSignals: async () => {
+        order.push("missing");
+        return { quotaExhausted: false };
+      },
+      staleSignals: async () => {
+        order.push("stale");
+        return { refreshed: 1 };
+      },
     });
     expect(order).toEqual(["dividend", "missing", "stale"]);
     expect(first.staleSignals).toEqual({ refreshed: 1 });
 
     order.length = 0;
     const quota = await runDividendAndSignalStages({
-      dividend: async () => { order.push("dividend"); return { updated: 1 }; },
-      missingSignals: async () => { order.push("missing"); return { quotaExhausted: true }; },
-      staleSignals: async () => { order.push("stale"); return { refreshed: 1 }; },
+      dividend: async () => {
+        order.push("dividend");
+        return { updated: 1 };
+      },
+      missingSignals: async () => {
+        order.push("missing");
+        return { quotaExhausted: true };
+      },
+      staleSignals: async () => {
+        order.push("stale");
+        return { refreshed: 1 };
+      },
     });
     expect(order).toEqual(["dividend", "missing"]);
     expect(quota.staleSignals).toBeNull();

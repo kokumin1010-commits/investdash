@@ -23,7 +23,6 @@ import {
   generateMissingHoldingPlans,
   getPlan,
   listPlanStatus,
-  listPlanOverview,
   computeOverviewStats,
   runChecksForBand,
   runMissingBandChecksBatch,
@@ -87,6 +86,7 @@ import {
   SCHEDULER_RUN_KINDS,
   withSchedulerRunLog,
 } from "../services/schedulerRunLog";
+import { buildRankedPlanOverview } from "../services/buyPlanRankingService";
 
 const decimalString = z
   .union([z.number(), z.string()])
@@ -1320,14 +1320,16 @@ export const portfolioRouter = router({
    * 買い増し圏に入っている銘柄と確認が必要な銘柄を横断で拾えるようにする。
    */
   priceBandOverview: protectedProcedure.query(async ({ ctx }) => {
-    const [rows, status] = await Promise.all([
-      listPlanOverview(ctx.user.id),
+    const [ranked, status] = await Promise.all([
+      buildRankedPlanOverview(ctx.user.id),
       listPlanStatus(ctx.user.id),
     ]);
+    const { rows, ranking } = ranked;
     const pending = status.filter(item => !item.hasPlan);
     // 構成比が多いか少ないかを判断するには全体の分布が必要なので併せて返す
     return {
       rows,
+      ranking,
       stats: computeOverviewStats(rows),
       coverage: {
         total: status.length,

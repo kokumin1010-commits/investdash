@@ -22,6 +22,7 @@ import {
   deliverReviewReminderDigest,
   hasSuccessfulReviewReminderRun,
 } from "./services/reviewReminder";
+import { runSkipDecisionReviewDaily } from "./services/skipDecisionReviewService";
 
 const NEWS_BATCH_SIZE = 4;
 const NEWS_BATCH_COUNT = 31;
@@ -32,9 +33,11 @@ let priceRunActive = false;
 let newsRunActive = false;
 let backfillRunActive = false;
 let reviewReminderRunActive = false;
+let skipDecisionReviewRunActive = false;
 const profileOffsets = new Map<number, number>();
 export const RAILWAY_DATA_BACKFILL_CRON = "0,20,40 1-21 * * *";
 export const RAILWAY_REVIEW_REMINDER_CRON = "0 0 * * *";
+export const RAILWAY_SKIP_DECISION_REVIEW_CRON = "20 0 * * *";
 export const DATA_BACKFILL_STAGE_ORDER = [
   "profile_backfill",
   "dividend_backfill",
@@ -68,7 +71,9 @@ export function summarizeDividendBackfill(value: {
   };
 }
 
-export function canRunStaleSignalRefresh(value: { quotaExhausted: boolean }): boolean {
+export function canRunStaleSignalRefresh(value: {
+  quotaExhausted: boolean;
+}): boolean {
   return !value.quotaExhausted;
 }
 
@@ -103,10 +108,16 @@ export async function runDividendAndSignalStages<
   dividend: () => Promise<TDividend>;
   missingSignals: () => Promise<TSignals>;
   staleSignals: () => Promise<TStale>;
-}): Promise<{ dividends: TDividend; signals: TSignals; staleSignals: TStale | null }> {
+}): Promise<{
+  dividends: TDividend;
+  signals: TSignals;
+  staleSignals: TStale | null;
+}> {
   const dividends = await runners.dividend();
   const signals = await runners.missingSignals();
-  const staleSignals = canRunStaleSignalRefresh(signals) ? await runners.staleSignals() : null;
+  const staleSignals = canRunStaleSignalRefresh(signals)
+    ? await runners.staleSignals()
+    : null;
   return { dividends, signals, staleSignals };
 }
 
@@ -127,13 +138,11 @@ type RailwayBackfillUserSummary = {
   error?: string;
 };
 
-let lastBackfillRun:
-  | {
-      startedAt: string;
-      finishedAt: string;
-      users: RailwayBackfillUserSummary[];
-    }
-  | null = null;
+let lastBackfillRun: {
+  startedAt: string;
+  finishedAt: string;
+  users: RailwayBackfillUserSummary[];
+} | null = null;
 
 /**
  * node-cron 不会等待异步回调。任务若在自身 try/catch 之前失败，裸 `void task()`
@@ -147,7 +156,10 @@ export async function runRailwayScheduledTaskSafely(
   try {
     await task();
   } catch (error) {
-    console.error(`[Railway scheduler] ${label} failed outside task boundary:`, error);
+    console.error(
+      `[Railway scheduler] ${label} failed outside task boundary:`,
+      error
+    );
   }
 }
 
@@ -173,7 +185,9 @@ export function getNewsBatchForUtcDate(now: Date): number | null {
 
 export async function runRailwayPriceSync(trigger: "jp-close" | "us-close") {
   if (priceRunActive) {
-    console.warn(`[Railway scheduler] price sync ${trigger} skipped: previous run active`);
+    console.warn(
+      `[Railway scheduler] price sync ${trigger} skipped: previous run active`
+    );
     return;
   }
   priceRunActive = true;
@@ -181,49 +195,64 @@ export async function runRailwayPriceSync(trigger: "jp-close" | "us-close") {
     const userIds = await db.listAllUserIds();
     for (const userId of userIds) {
       try {
-        const { result, transitions, notes, monthly } = await withSchedulerRunLog({
-          userId,
-          kind: trigger === "jp-close" ? "price_sync_jp" : "price_sync_us",
-          trigger: "SCHEDULED",
-          run: async () => {
-            const result = await syncPrices(userId);
-            const transitions = await recordTransitions(userId).catch(error => {
-              console.error(`[Railway scheduler] transition sync failed for ${userId}:`, error);
-              return { recorded: 0 };
-            });
-            const notes = await syncSymbolNotes(userId).catch(error => {
-              console.error(`[Railway scheduler] note sync failed for ${userId}:`, error);
-              return { added: 0 };
-            });
-            const monthly =
-              trigger === "us-close"
-                ? await saveMonthlySnapshot(userId, {
-                    source: "scheduled_price_sync",
-                    note: "Railway の米国市場終値同期で当月記録を更新",
-                  }).catch(error => {
-                    console.error(`[Railway scheduler] monthly snapshot failed for ${userId}:`, error);
-                    return null;
-                  })
-                : null;
-            return { result, transitions, notes, monthly };
-          },
-          summarize: value => ({
-            processed: value.result.updated + value.result.failed.length,
-            succeeded: value.result.updated,
-            failed: value.result.failed.length,
-            detail: {
-              failedSymbols: value.result.failed,
-              transitions: value.transitions.recorded,
-              notes: value.notes.added,
-              monthlyPeriod: value.monthly?.periodYm ?? null,
+        const { result, transitions, notes, monthly } =
+          await withSchedulerRunLog({
+            userId,
+            kind: trigger === "jp-close" ? "price_sync_jp" : "price_sync_us",
+            trigger: "SCHEDULED",
+            run: async () => {
+              const result = await syncPrices(userId);
+              const transitions = await recordTransitions(userId).catch(
+                error => {
+                  console.error(
+                    `[Railway scheduler] transition sync failed for ${userId}:`,
+                    error
+                  );
+                  return { recorded: 0 };
+                }
+              );
+              const notes = await syncSymbolNotes(userId).catch(error => {
+                console.error(
+                  `[Railway scheduler] note sync failed for ${userId}:`,
+                  error
+                );
+                return { added: 0 };
+              });
+              const monthly =
+                trigger === "us-close"
+                  ? await saveMonthlySnapshot(userId, {
+                      source: "scheduled_price_sync",
+                      note: "Railway の米国市場終値同期で当月記録を更新",
+                    }).catch(error => {
+                      console.error(
+                        `[Railway scheduler] monthly snapshot failed for ${userId}:`,
+                        error
+                      );
+                      return null;
+                    })
+                  : null;
+              return { result, transitions, notes, monthly };
             },
-          }),
-        });
+            summarize: value => ({
+              processed: value.result.updated + value.result.failed.length,
+              succeeded: value.result.updated,
+              failed: value.result.failed.length,
+              detail: {
+                failedSymbols: value.result.failed,
+                transitions: value.transitions.recorded,
+                notes: value.notes.added,
+                monthlyPeriod: value.monthly?.periodYm ?? null,
+              },
+            }),
+          });
         console.log(
           `[Railway scheduler] ${trigger} user=${userId} updated=${result.updated} failed=${result.failed.length} transitions=${transitions.recorded} notes=${notes.added} monthly=${monthly ? monthly.periodYm : "skipped"}`
         );
       } catch (error) {
-        console.error(`[Railway scheduler] ${trigger} user=${userId} failed:`, error);
+        console.error(
+          `[Railway scheduler] ${trigger} user=${userId} failed:`,
+          error
+        );
       }
     }
   } finally {
@@ -236,7 +265,9 @@ export async function runRailwayNewsBatch(batch: number) {
     throw new Error(`Invalid Railway news batch: ${batch}`);
   }
   if (newsRunActive) {
-    console.warn(`[Railway scheduler] news batch ${batch} skipped: previous run active`);
+    console.warn(
+      `[Railway scheduler] news batch ${batch} skipped: previous run active`
+    );
     return;
   }
   newsRunActive = true;
@@ -272,13 +303,19 @@ export async function runRailwayNewsBatch(batch: number) {
         });
         await db.pruneOldNews(userId, 90);
         await syncSymbolNotes(userId).catch(error => {
-          console.error(`[Railway scheduler] news note sync failed for ${userId}:`, error);
+          console.error(
+            `[Railway scheduler] news note sync failed for ${userId}:`,
+            error
+          );
         });
         console.log(
           `[Railway scheduler] news batch=${batch} user=${userId} fetched=${result.fetched} analyzed=${result.analyzed} unavailable=${result.analysisUnavailable}`
         );
       } catch (error) {
-        console.error(`[Railway scheduler] news batch=${batch} user=${userId} failed:`, error);
+        console.error(
+          `[Railway scheduler] news batch=${batch} user=${userId} failed:`,
+          error
+        );
       }
     }
   } finally {
@@ -292,7 +329,9 @@ export async function runRailwayNewsBatch(batch: number) {
  */
 export async function runRailwayDataBackfill() {
   if (backfillRunActive || priceRunActive || newsRunActive) {
-    console.warn("[Railway scheduler] data backfill skipped: another run active");
+    console.warn(
+      "[Railway scheduler] data backfill skipped: another run active"
+    );
     return;
   }
   backfillRunActive = true;
@@ -313,55 +352,62 @@ export async function runRailwayDataBackfill() {
             succeeded: value.updated,
             failed: value.failed.length,
             skipped: value.skipped,
-            remaining: value.nextOffset === null ? 0 : Math.max(0, value.total - value.nextOffset),
-            detail: { failedSymbols: value.failed, nextOffset: value.nextOffset },
+            remaining:
+              value.nextOffset === null
+                ? 0
+                : Math.max(0, value.total - value.nextOffset),
+            detail: {
+              failedSymbols: value.failed,
+              nextOffset: value.nextOffset,
+            },
           }),
         });
         profileOffsets.set(userId, profiles.nextOffset ?? 0);
 
-        const { dividends, signals, staleSignals } = await runDividendAndSignalStages({
-          dividend: () =>
-            withSchedulerRunLog({
-              userId,
-              kind: "dividend_backfill",
-              trigger: "SCHEDULED",
-              run: () => syncDividends(userId, { offset: 0, batchSize: 1 }),
-              summarize: summarizeDividendBackfill,
-            }),
-          missingSignals: () =>
-            withSchedulerRunLog({
-              userId,
-              kind: "signal_backfill",
-              trigger: "SCHEDULED",
-              run: () =>
-                generateMissingSignalsBatch(userId, {
-                  batchSize: 4,
-                  retryFailed: false,
-                }),
-              summarize: value => ({
-                processed: value.processed,
-                succeeded: value.generated,
-                failed: value.failed.length,
-                remaining: value.remaining,
-                detail: {
-                  failedSymbols: value.failed,
-                  quotaExhausted: value.quotaExhausted,
-                },
+        const { dividends, signals, staleSignals } =
+          await runDividendAndSignalStages({
+            dividend: () =>
+              withSchedulerRunLog({
+                userId,
+                kind: "dividend_backfill",
+                trigger: "SCHEDULED",
+                run: () => syncDividends(userId, { offset: 0, batchSize: 1 }),
+                summarize: summarizeDividendBackfill,
               }),
-            }),
-          staleSignals: () =>
-            withSchedulerRunLog({
-              userId,
-              kind: "signal_refresh",
-              trigger: "SCHEDULED",
-              run: () =>
-                refreshStaleSignalsBatch(userId, {
-                  batchSize: 1,
-                  retryFailed: false,
+            missingSignals: () =>
+              withSchedulerRunLog({
+                userId,
+                kind: "signal_backfill",
+                trigger: "SCHEDULED",
+                run: () =>
+                  generateMissingSignalsBatch(userId, {
+                    batchSize: 4,
+                    retryFailed: false,
+                  }),
+                summarize: value => ({
+                  processed: value.processed,
+                  succeeded: value.generated,
+                  failed: value.failed.length,
+                  remaining: value.remaining,
+                  detail: {
+                    failedSymbols: value.failed,
+                    quotaExhausted: value.quotaExhausted,
+                  },
                 }),
-              summarize: summarizeStaleSignalRefresh,
-            }),
-        });
+              }),
+            staleSignals: () =>
+              withSchedulerRunLog({
+                userId,
+                kind: "signal_refresh",
+                trigger: "SCHEDULED",
+                run: () =>
+                  refreshStaleSignalsBatch(userId, {
+                    batchSize: 1,
+                    retryFailed: false,
+                  }),
+                summarize: summarizeStaleSignalRefresh,
+              }),
+          });
         const plans = signals.quotaExhausted
           ? null
           : await withSchedulerRunLog({
@@ -391,7 +437,11 @@ export async function runRailwayDataBackfill() {
                 userId,
                 kind: "investment_card_backfill",
                 trigger: "SCHEDULED",
-                run: () => draftMissingCards(userId, { batchSize: 2, retryFailed: false }),
+                run: () =>
+                  draftMissingCards(userId, {
+                    batchSize: 2,
+                    retryFailed: false,
+                  }),
                 summarize: value => ({
                   processed: value.processed,
                   succeeded: value.created,
@@ -406,13 +456,19 @@ export async function runRailwayDataBackfill() {
                 }),
               });
         const bandChecks =
-          signals.quotaExhausted || plans?.quotaExhausted || cards?.quotaExhausted
+          signals.quotaExhausted ||
+          plans?.quotaExhausted ||
+          cards?.quotaExhausted
             ? null
             : await withSchedulerRunLog({
                 userId,
                 kind: "band_check_backfill",
                 trigger: "SCHEDULED",
-                run: () => runMissingBandChecksBatch(userId, { batchSize: 2, retryFailed: false }),
+                run: () =>
+                  runMissingBandChecksBatch(userId, {
+                    batchSize: 2,
+                    retryFailed: false,
+                  }),
                 summarize: value => ({
                   processed: value.processed,
                   succeeded: value.checked,
@@ -430,10 +486,18 @@ export async function runRailwayDataBackfill() {
           userId,
           kind: "news_coverage_backfill",
           trigger: "SCHEDULED",
-          run: () => syncNewsForUser(userId, { offset: 0, batchSize: 1, backlogOnly: true }),
+          run: () =>
+            syncNewsForUser(userId, {
+              offset: 0,
+              batchSize: 1,
+              backlogOnly: true,
+            }),
           summarize: value => ({
             processed: value.processed,
-            succeeded: Math.max(0, value.processed - value.failedSymbols.length),
+            succeeded: Math.max(
+              0,
+              value.processed - value.failedSymbols.length
+            ),
             failed: value.failedSymbols.length,
             remaining: value.remainingBacklog,
             detail: {
@@ -447,13 +511,17 @@ export async function runRailwayDataBackfill() {
           }),
         });
         const bandRechecks =
-          signals.quotaExhausted || plans?.quotaExhausted || cards?.quotaExhausted || bandChecks?.quotaExhausted
+          signals.quotaExhausted ||
+          plans?.quotaExhausted ||
+          cards?.quotaExhausted ||
+          bandChecks?.quotaExhausted
             ? null
             : await withSchedulerRunLog({
                 userId,
                 kind: "band_check_news_refresh",
                 trigger: "SCHEDULED",
-                run: () => runNewsTriggeredBandChecksBatch(userId, { batchSize: 2 }),
+                run: () =>
+                  runNewsTriggeredBandChecksBatch(userId, { batchSize: 2 }),
                 summarize: value => ({
                   processed: value.processed,
                   succeeded: value.checked,
@@ -486,7 +554,10 @@ export async function runRailwayDataBackfill() {
           bandCheckRemaining: bandChecks?.remaining ?? null,
         });
       } catch (error) {
-        console.error(`[Railway scheduler] data backfill user=${userId} failed:`, error);
+        console.error(
+          `[Railway scheduler] data backfill user=${userId} failed:`,
+          error
+        );
         summaries.push({
           userId,
           profilesUpdated: 0,
@@ -517,7 +588,9 @@ export async function runRailwayDataBackfill() {
 
 export async function runRailwayReviewReminders(now: Date = new Date()) {
   if (reviewReminderRunActive) {
-    console.warn("[Railway scheduler] review reminder skipped: previous run active");
+    console.warn(
+      "[Railway scheduler] review reminder skipped: previous run active"
+    );
     return;
   }
   reviewReminderRunActive = true;
@@ -526,7 +599,9 @@ export async function runRailwayReviewReminders(now: Date = new Date()) {
     for (const userId of userIds) {
       try {
         if (await hasSuccessfulReviewReminderRun(userId, now)) {
-          console.log(`[Railway scheduler] review reminder user=${userId} skipped: already sent`);
+          console.log(
+            `[Railway scheduler] review reminder user=${userId} skipped: already sent`
+          );
           continue;
         }
         const result = await withSchedulerRunLog({
@@ -543,10 +618,14 @@ export async function runRailwayReviewReminders(now: Date = new Date()) {
               dateKey: value.dateKey,
               sent: value.sent,
               symbols: value.items.map(item => item.symbol),
-              windows: value.items.reduce<Record<string, number>>((counts, item) => {
-                counts[item.reminderWindow] = (counts[item.reminderWindow] ?? 0) + 1;
-                return counts;
-              }, {}),
+              windows: value.items.reduce<Record<string, number>>(
+                (counts, item) => {
+                  counts[item.reminderWindow] =
+                    (counts[item.reminderWindow] ?? 0) + 1;
+                  return counts;
+                },
+                {}
+              ),
             },
           }),
         });
@@ -554,11 +633,62 @@ export async function runRailwayReviewReminders(now: Date = new Date()) {
           `[Railway scheduler] review reminder user=${userId} items=${result.items.length} sent=${result.sent}`
         );
       } catch (error) {
-        console.error(`[Railway scheduler] review reminder user=${userId} failed:`, error);
+        console.error(
+          `[Railway scheduler] review reminder user=${userId} failed:`,
+          error
+        );
       }
     }
   } finally {
     reviewReminderRunActive = false;
+  }
+}
+
+export async function runRailwaySkipDecisionReviews(now: Date = new Date()) {
+  if (skipDecisionReviewRunActive) {
+    console.warn(
+      "[Railway scheduler] skip decision review skipped: previous run active"
+    );
+    return;
+  }
+  skipDecisionReviewRunActive = true;
+  try {
+    const userIds = await db.listAllUserIds();
+    for (const userId of userIds) {
+      try {
+        const result = await withSchedulerRunLog({
+          userId,
+          kind: "skip_decision_review",
+          trigger: "SCHEDULED",
+          run: () => runSkipDecisionReviewDaily(userId, now),
+          summarize: value => ({
+            processed: value.observation.open + value.evaluation.completed,
+            succeeded: value.observation.observed + value.evaluation.completed,
+            failed: 0,
+            skipped: value.observation.missing.length,
+            detail: {
+              observed: value.observation.observed,
+              missingSymbols: value.observation.missing,
+              earningsMilestonesCreated: value.earnings.created,
+              completedMilestones: value.evaluation.completed,
+              closedReviews: value.evaluation.closed,
+              notificationSent: value.notification.sent,
+              notifiedMilestones: value.notification.count,
+            },
+          }),
+        });
+        console.log(
+          `[Railway scheduler] skip decision review user=${userId} observed=${result.observation.observed} completed=${result.evaluation.completed} notified=${result.notification.count}`
+        );
+      } catch (error) {
+        console.error(
+          `[Railway scheduler] skip decision review user=${userId} failed:`,
+          error
+        );
+      }
+    }
+  } finally {
+    skipDecisionReviewRunActive = false;
   }
 }
 
@@ -626,9 +756,17 @@ export function startRailwayScheduler(): boolean {
       ),
     { timezone: "UTC", noOverlap: true }
   );
+  cron.schedule(
+    RAILWAY_SKIP_DECISION_REVIEW_CRON,
+    () =>
+      void runRailwayScheduledTaskSafely("skip decision review", () =>
+        runRailwaySkipDecisionReviews()
+      ),
+    { timezone: "UTC", noOverlap: true }
+  );
 
   console.log(
-    "[Railway scheduler] enabled: prices 06:30/21:30 UTC weekdays; news 22:00-00:30 UTC daily; review reminders 00:00 UTC daily; data backfill every 20m 01:00-21:40 UTC"
+    "[Railway scheduler] enabled: prices 06:30/21:30 UTC weekdays; news 22:00-00:30 UTC daily; review reminders 00:00 UTC daily; skip decision reviews 00:20 UTC daily; data backfill every 20m 01:00-21:40 UTC"
   );
   return true;
 }

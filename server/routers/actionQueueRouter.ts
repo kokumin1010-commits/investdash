@@ -9,6 +9,7 @@ import {
   wakeSnoozedActionQueue,
 } from "../services/actionQueueService";
 import { backfillInitialActionQueue } from "../services/portfolio";
+import { listSkippedActionReviews } from "../services/skipDecisionReviewService";
 
 const viewSchema = z.enum(["ACTIVE", "PENDING", "APPROVED", "HISTORY", "ALL"]);
 const decisionSchema = z.enum([
@@ -37,6 +38,35 @@ export const actionQueueRouter = router({
   summary: protectedProcedure.query(async ({ ctx }) => {
     await wakeSnoozedActionQueue(ctx.user.id);
     return actionQueueSummary(ctx.user.id);
+  }),
+
+  skipReviews: protectedProcedure
+    .input(
+      z
+        .object({ limit: z.number().int().min(1).max(200).default(100) })
+        .default({ limit: 100 })
+    )
+    .query(({ ctx, input }) => listSkippedActionReviews(ctx.user.id, input.limit)),
+
+  skipReviewSummary: protectedProcedure.query(async ({ ctx }) => {
+    const reviews = await listSkippedActionReviews(ctx.user.id, 200);
+    return {
+      total: reviews.length,
+      open: reviews.filter(item => item.status === "OPEN").length,
+      pendingMilestones: reviews.reduce(
+        (count, item) =>
+          count + item.milestones.filter(milestone => milestone.status === "PENDING").length,
+        0
+      ),
+      completedMilestones: reviews.reduce(
+        (count, item) =>
+          count + item.milestones.filter(milestone => milestone.status === "COMPLETED").length,
+        0
+      ),
+      needsProcessImprovement: reviews.filter(
+        item => item.processQuality === "DISCIPLINE_NEEDS_IMPROVEMENT"
+      ).length,
+    };
   }),
 
   decide: protectedProcedure

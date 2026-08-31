@@ -1,6 +1,9 @@
 import { and, desc, eq, inArray, lte, or } from "drizzle-orm";
 import {
+  actionSkipPriceObservations,
   actionQueueItems,
+  skippedActionReviewMilestones,
+  skippedActionReviews,
   type ActionQueueItem,
   type InsertActionQueueItem,
 } from "../../drizzle/schema";
@@ -11,6 +14,12 @@ import {
   type ActionQueueDecision,
   type ActionQueueStatus,
 } from "../../shared/actionQueue";
+import {
+  SKIP_OUTCOME_VERSION,
+  buildSkipMilestoneSeeds,
+  evaluateSkipProcess,
+} from "../../shared/skipDecisionReview";
+import { jstDayKey } from "../../shared/jstDate";
 import { getDb } from "../db";
 import * as dbq from "../db";
 
@@ -63,6 +72,87 @@ function toView(row: ActionQueueItem, now = new Date()): ActionQueueView {
     afterQuantity: num(row.afterQuantity),
     afterWeightPct: num(row.afterWeightPct),
     pending: isPendingActionStatus(row.status, now, row.snoozedUntil),
+  };
+}
+
+export function buildSkippedActionReviewPayload(input: {
+  userId: number;
+  current: ActionQueueItem;
+  decisionNote: string | null;
+  now: Date;
+}) {
+  const { current, decisionNote, now } = input;
+  const process = evaluateSkipProcess({
+    direction: current.direction,
+    decisionNote,
+    recommendedShares: num(current.recommendedShares),
+    recommendedAmountBase: num(current.recommendedAmountBase),
+    evidence: current.evidence,
+  });
+  const snapshot = {
+    id: current.id,
+    triggerType: current.triggerType,
+    triggerKey: current.triggerKey,
+    triggerSummary: current.triggerSummary,
+    sourceNewsId: current.sourceNewsId,
+    sourceSignalId: current.sourceSignalId,
+    previousSignalId: current.previousSignalId,
+    previousAction: current.previousAction,
+    action: current.action,
+    direction: current.direction,
+    rationale: current.rationale,
+    evidence: current.evidence,
+    currentQuantity: current.currentQuantity,
+    currentPrice: current.currentPrice,
+    currentValueBase: current.currentValueBase,
+    currentWeightPct: current.currentWeightPct,
+    recommendedShares: current.recommendedShares,
+    recommendedAmountLocal: current.recommendedAmountLocal,
+    recommendedAmountBase: current.recommendedAmountBase,
+    afterQuantity: current.afterQuantity,
+    afterWeightPct: current.afterWeightPct,
+    priority: current.priority,
+    deadline: current.deadline?.toISOString() ?? null,
+    decisionNote,
+    skippedAt: now.toISOString(),
+  };
+  const baselinePrice = num(current.currentPrice);
+  return {
+    snapshot,
+    process,
+    reviewValues: {
+      userId: input.userId,
+      actionQueueItemId: current.id,
+      symbol: current.symbol,
+      name: current.name,
+      action: current.action,
+      direction: current.direction,
+      currency: current.currency,
+      decisionSnapshot: snapshot,
+      baselinePrice: current.currentPrice,
+      baselineQuantity: current.currentQuantity,
+      baselineWeightPct: current.currentWeightPct,
+      recommendedShares: current.recommendedShares,
+      recommendedAmountBase: current.recommendedAmountBase,
+      decisionNote,
+      processVersion: process.version,
+      processQuality: process.quality,
+      processReasons: process.reasons,
+      status: "OPEN" as const,
+      skippedAt: now,
+    },
+    baselineObservation:
+      baselinePrice !== null && baselinePrice > 0
+        ? {
+            userId: input.userId,
+            symbol: current.symbol,
+            currency: current.currency,
+            observedDateJst: jstDayKey(now),
+            currentPrice: baselinePrice.toFixed(4),
+            source: "QUEUE_BASELINE" as const,
+            observedAt: now,
+          }
+        : null,
   };
 }
 
@@ -204,46 +294,113 @@ export async function decideActionQueueItem(input: {
   note?: string | null;
 }): Promise<ActionQueueView> {
   const db = await requireDb();
-  const rows = await db
-    .select()
-    .from(actionQueueItems)
-    .where(
-      and(
-        eq(actionQueueItems.userId, input.userId),
-        eq(actionQueueItems.id, input.id)
-      )
-    )
-    .limit(1);
-  const current = rows[0];
-  if (!current) throw new Error("アクション待ちが見つかりませんでした");
-  const status = nextActionQueueStatus(current.status, input.decision);
-  if (!status) throw new Error("現在の状態ではこの操作を実行できません");
-
   const now = new Date();
-  const snoozedUntil =
-    input.decision === "SNOOZE"
-      ? new Date(now.getTime() + (input.snoozeDays ?? 3) * 24 * 3600_000)
-      : status === "PENDING_ACTION"
-        ? null
-        : current.snoozedUntil;
-  await db
-    .update(actionQueueItems)
-    .set({
-      status,
-      decisionNote: input.note?.trim() || current.decisionNote,
-      snoozedUntil,
-      approvedAt: status === "APPROVED" ? now : current.approvedAt,
-      skippedAt: status === "SKIPPED" ? now : current.skippedAt,
-      completedAt: status === "COMPLETED" ? now : current.completedAt,
-      updatedAt: now,
-    })
-    .where(eq(actionQueueItems.id, current.id));
-  const updated = await db
-    .select()
-    .from(actionQueueItems)
-    .where(eq(actionQueueItems.id, current.id))
-    .limit(1);
-  return toView(updated[0], now);
+  const updated = await db.transaction(async tx => {
+    const rows = await tx
+      .select()
+      .from(actionQueueItems)
+      .where(
+        and(
+          eq(actionQueueItems.userId, input.userId),
+          eq(actionQueueItems.id, input.id)
+        )
+      )
+      .limit(1)
+      .for("update");
+    const current = rows[0];
+    if (!current) throw new Error("アクション待ちが見つかりませんでした");
+    const status = nextActionQueueStatus(current.status, input.decision);
+    if (!status) throw new Error("現在の状態ではこの操作を実行できません");
+
+    const decisionNote = input.note?.trim() || current.decisionNote;
+    const snoozedUntil =
+      input.decision === "SNOOZE"
+        ? new Date(now.getTime() + (input.snoozeDays ?? 3) * 24 * 3600_000)
+        : status === "PENDING_ACTION"
+          ? null
+          : current.snoozedUntil;
+    await tx
+      .update(actionQueueItems)
+      .set({
+        status,
+        decisionNote,
+        snoozedUntil,
+        approvedAt: status === "APPROVED" ? now : current.approvedAt,
+        skippedAt: status === "SKIPPED" ? now : current.skippedAt,
+        completedAt: status === "COMPLETED" ? now : current.completedAt,
+        updatedAt: now,
+      })
+      .where(
+        and(
+          eq(actionQueueItems.userId, input.userId),
+          eq(actionQueueItems.id, current.id)
+        )
+      );
+
+    if (status === "SKIPPED") {
+      const payload = buildSkippedActionReviewPayload({
+        userId: input.userId,
+        current,
+        decisionNote,
+        now,
+      });
+      await tx
+        .insert(skippedActionReviews)
+        .values(payload.reviewValues)
+        .onDuplicateKeyUpdate({ set: { actionQueueItemId: current.id } });
+
+      const reviewRows = await tx
+        .select({ id: skippedActionReviews.id })
+        .from(skippedActionReviews)
+        .where(
+          and(
+            eq(skippedActionReviews.userId, input.userId),
+            eq(skippedActionReviews.actionQueueItemId, current.id)
+          )
+        )
+        .limit(1);
+      const reviewId = reviewRows[0]?.id;
+      if (!reviewId) throw new Error("見送り検証の保存 ID を取得できませんでした");
+
+      for (const milestone of buildSkipMilestoneSeeds(now)) {
+        await tx
+          .insert(skippedActionReviewMilestones)
+          .values({
+            userId: input.userId,
+            reviewId,
+            milestoneType: milestone.milestoneType,
+            eventKey: milestone.eventKey,
+            dueAt: milestone.dueAt,
+            status: "PENDING",
+            outcomeVersion: SKIP_OUTCOME_VERSION,
+          })
+          .onDuplicateKeyUpdate({ set: { reviewId } });
+      }
+
+      if (payload.baselineObservation) {
+        await tx
+          .insert(actionSkipPriceObservations)
+          .values({
+            ...payload.baselineObservation,
+            reviewId,
+          })
+          .onDuplicateKeyUpdate({ set: { reviewId } });
+      }
+    }
+
+    const result = await tx
+      .select()
+      .from(actionQueueItems)
+      .where(
+        and(
+          eq(actionQueueItems.userId, input.userId),
+          eq(actionQueueItems.id, current.id)
+        )
+      )
+      .limit(1);
+    return result[0];
+  });
+  return toView(updated, now);
 }
 
 /** 保有数量の変化だけを見て、承認済み提案が実行されたかを照合する。 */

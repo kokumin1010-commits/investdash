@@ -51,6 +51,11 @@ const commonRow = {
   nextActionLabel: null,
   needsCheck: false,
   currentBandId: null,
+  currentBandLowerPrice: 2_900,
+  currentBandUpperPrice: 3_100,
+  currentBandReason: "企業価値の伸びに対して価格が許容範囲",
+  currentBandPlannedAmount: null,
+  currentBandCheckItems: [],
   pendingCheckCount: 0,
   concernCount: 0,
   holdingValueJpy: 10_000_000,
@@ -63,6 +68,38 @@ const commonRow = {
   watchGapPct: null,
   watchPriority: null,
   targetTooFar: false,
+  generatedAt: new Date("2026-08-01T00:00:00Z"),
+  signalAction: "ADD",
+  signalConfidence: 85,
+  signalDataQuality: "STRONG",
+  cardConviction: 4,
+  sizing: {
+    status: "BUY",
+    amountBase: 1_540_000,
+    amountLocal: 1_540_000,
+    shares: 500,
+    currentWeightPct: 2,
+    afterWeightPct: 2.3,
+    sectorAfterPct: 12,
+    sectorLimitPct: 30,
+    ibkrRiskLevel: "SAFE",
+    reasons: ["借入は増やさず、現金性資産だけを原資にします"],
+  },
+  ranking: {
+    eligible: true,
+    rank: 1,
+    score: 88,
+    scoreVersion: "buy-plan-rank-v1",
+    breakdown: {
+      quality: 27,
+      valuation: 22,
+      fundamentals: 18,
+      portfolioFit: 12,
+      liquidityLeverage: 9,
+    },
+    gateReasons: [],
+    rationale: ["現在は小幅買い増し価格帯"],
+  },
 };
 
 const overviewData = {
@@ -111,7 +148,18 @@ const overviewData = {
       { symbol: "V", name: "Visa", hasPlan: false, generatedAt: null },
     ],
   },
+  ranking: {
+    rankingMonth: "2026-08",
+    scoreVersion: "buy-plan-rank-v1",
+    rankingFingerprint: "fixture",
+    snapshotRecomputed: false,
+    eligibleCount: 1,
+    frozenAt: new Date("2026-08-01T00:00:00Z"),
+    monthlyCandidates: [] as Array<(typeof overviewData.rows)[number]>,
+  },
 };
+
+overviewData.ranking.monthlyCandidates = [overviewData.rows[0]];
 
 const proposal = {
   id: 1,
@@ -147,6 +195,24 @@ afterEach(() => {
 });
 
 describe("BuyPlans page interactions", () => {
+  it.each([390, 1280])(
+    "%dpx 相当で本月优先候补の具体数量を表示し、全一覧は既定で閉じる",
+    width => {
+    Object.defineProperty(window, "innerWidth", {
+      value: width,
+      configurable: true,
+    });
+    render(React.createElement(BuyPlans));
+
+    expect(screen.getByText("今月の優先候補")).toBeTruthy();
+    expect(screen.getByText("500 株")).toBeTruthy();
+    expect(screen.getByText("154 万円")).toBeTruthy();
+    expect(screen.getByText("2.30%")).toBeTruthy();
+    expect(screen.queryByTestId("full-buy-plan-list")).toBeNull();
+    expect(screen.getByRole("button", { name: "全 4 銘柄を表示" })).toBeTruthy();
+    }
+  );
+
   it("shows real plan coverage and every pending holding without fake price bands", () => {
     render(React.createElement(BuyPlans));
 
@@ -167,6 +233,7 @@ describe("BuyPlans page interactions", () => {
   it("switches BUY, VERIFY, OUTSIDE and ALL result sets", async () => {
     const user = userEvent.setup();
     render(React.createElement(BuyPlans));
+    await user.click(screen.getByRole("button", { name: "全 4 銘柄を表示" }));
 
     expect(screen.getByText("トヨタ自動車", { selector: "span" })).toBeTruthy();
     expect(screen.queryByText("NVIDIA", { selector: "span" })).toBeNull();
@@ -195,6 +262,7 @@ describe("BuyPlans page interactions", () => {
   it("shows an empty search and restores the list through the clear button", async () => {
     const user = userEvent.setup();
     render(React.createElement(BuyPlans));
+    await user.click(screen.getByRole("button", { name: "全 4 銘柄を表示" }));
     await user.click(screen.getByRole("button", { name: /すべて/ }));
 
     const search = screen.getByPlaceholderText("銘柄名・ティッカー");

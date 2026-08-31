@@ -3,7 +3,12 @@ import { schedulerRunLogs, type SchedulerRunLog } from "../../drizzle/schema";
 import { getDb, readInsertId } from "../db";
 
 export type SchedulerRunTrigger = "SCHEDULED" | "MANUAL" | "STARTUP";
-export type SchedulerRunStatus = "RUNNING" | "SUCCESS" | "PARTIAL" | "FAILED" | "SKIPPED";
+export type SchedulerRunStatus =
+  | "RUNNING"
+  | "SUCCESS"
+  | "PARTIAL"
+  | "FAILED"
+  | "SKIPPED";
 
 export type SchedulerRunSummary = {
   processed: number;
@@ -15,7 +20,9 @@ export type SchedulerRunSummary = {
   status?: Exclude<SchedulerRunStatus, "RUNNING" | "FAILED">;
 };
 
-export function resolveSchedulerRunStatus(summary: SchedulerRunSummary): Exclude<SchedulerRunStatus, "RUNNING"> {
+export function resolveSchedulerRunStatus(
+  summary: SchedulerRunSummary
+): Exclude<SchedulerRunStatus, "RUNNING"> {
   return (
     summary.status ??
     (summary.failed > 0
@@ -112,7 +119,8 @@ export async function listSchedulerRuns(
   const filters = [eq(schedulerRunLogs.userId, userId)];
   if (options.kind) filters.push(eq(schedulerRunLogs.kind, options.kind));
   if (options.status) filters.push(eq(schedulerRunLogs.status, options.status));
-  if (options.trigger) filters.push(eq(schedulerRunLogs.trigger, options.trigger));
+  if (options.trigger)
+    filters.push(eq(schedulerRunLogs.trigger, options.trigger));
   if (options.from) filters.push(gte(schedulerRunLogs.startedAt, options.from));
   if (options.to) filters.push(lte(schedulerRunLogs.startedAt, options.to));
   return db
@@ -133,5 +141,6 @@ export const SCHEDULER_RUN_KINDS = [
   "investment_card_backfill",
   "band_check_backfill",
   "review_reminder",
+  "skip_decision_review",
   "monthly_snapshot",
 ] as const;

@@ -1557,6 +1557,210 @@ export type ActionQueueItem = typeof actionQueueItems.$inferSelect;
 export type InsertActionQueueItem = typeof actionQueueItems.$inferInsert;
 
 /**
+ * 「今回は見送る」と確定した時点の判断材料を固定した監査記録。
+ *
+ * actionQueueItems は後続イベントで更新され得るため、見送った時点の理由・価格・
+ * 数量・提案を JSON と主要列の両方へ保存する。後日の値動きで当時の判断を
+ * 書き換えず、プロセス品質と結果品質を分離して振り返るための基点になる。
+ */
+export const skippedActionReviews = mysqlTable(
+  "skippedActionReviews",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    userId: int("userId").notNull(),
+    actionQueueItemId: int("actionQueueItemId").notNull(),
+    symbol: varchar("symbol", { length: 24 }).notNull(),
+    name: varchar("name", { length: 255 }).notNull(),
+    action: mysqlEnum("action", ["ADD", "HOLD", "WATCH", "REDUCE", "EXIT"]),
+    direction: mysqlEnum("direction", ["BUY", "NONE", "REVIEW", "SELL", "EXIT"]),
+    currency: varchar("currency", { length: 8 }).notNull(),
+    /** 見送り時の actionQueueItems 全フィールド（後から更新しない） */
+    decisionSnapshot: json("decisionSnapshot")
+      .$type<Record<string, unknown>>()
+      .notNull(),
+    baselinePrice: decimal("baselinePrice", { precision: 20, scale: 4 }),
+    baselineQuantity: decimal("baselineQuantity", { precision: 20, scale: 4 }),
+    baselineWeightPct: decimal("baselineWeightPct", { precision: 10, scale: 4 }),
+    recommendedShares: decimal("recommendedShares", { precision: 20, scale: 4 }),
+    recommendedAmountBase: decimal("recommendedAmountBase", {
+      precision: 20,
+      scale: 2,
+    }),
+    decisionNote: text("decisionNote"),
+    processVersion: varchar("processVersion", { length: 40 }).notNull(),
+    processQuality: mysqlEnum("processQuality", [
+      "DISCIPLINE_SOUND",
+      "DISCIPLINE_NEEDS_IMPROVEMENT",
+      "PROCESS_UNCLEAR",
+    ]).notNull(),
+    processReasons: json("processReasons").$type<string[]>().notNull(),
+    status: mysqlEnum("status", ["OPEN", "CLOSED"]).default("OPEN").notNull(),
+    skippedAt: timestamp("skippedAt").notNull(),
+    closedAt: timestamp("closedAt"),
+    createdAt: timestamp("createdAt").defaultNow().notNull(),
+    updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+  },
+  table => ({
+    queueUnique: uniqueIndex("skip_review_user_queue_unique").on(
+      table.userId,
+      table.actionQueueItemId
+    ),
+    statusSkippedIdx: index("skip_review_user_status_skipped_idx").on(
+      table.userId,
+      table.status,
+      table.skippedAt
+    ),
+    symbolIdx: index("skip_review_user_symbol_idx").on(
+      table.userId,
+      table.symbol
+    ),
+  })
+);
+export type SkippedActionReview = typeof skippedActionReviews.$inferSelect;
+export type InsertSkippedActionReview = typeof skippedActionReviews.$inferInsert;
+
+/** 30/90/180 日と「次の決算後」を独立して保存する見送り検証の節目。 */
+export const skippedActionReviewMilestones = mysqlTable(
+  "skippedActionReviewMilestones",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    userId: int("userId").notNull(),
+    reviewId: int("reviewId").notNull(),
+    milestoneType: mysqlEnum("milestoneType", [
+      "DAY_30",
+      "DAY_90",
+      "DAY_180",
+      "AFTER_EARNINGS",
+    ]).notNull(),
+    /** day-30 / day-90 / day-180 / earnings-news-{id} */
+    eventKey: varchar("eventKey", { length: 191 }).notNull(),
+    dueAt: timestamp("dueAt").notNull(),
+    status: mysqlEnum("status", ["PENDING", "COMPLETED"])
+      .default("PENDING")
+      .notNull(),
+    triggerNewsId: int("triggerNewsId"),
+    currentPrice: decimal("currentPrice", { precision: 20, scale: 4 }),
+    returnPct: decimal("returnPct", { precision: 12, scale: 4 }),
+    highestPrice: decimal("highestPrice", { precision: 20, scale: 4 }),
+    lowestPrice: decimal("lowestPrice", { precision: 20, scale: 4 }),
+    maxUpsidePct: decimal("maxUpsidePct", { precision: 12, scale: 4 }),
+    maxDrawdownPct: decimal("maxDrawdownPct", { precision: 12, scale: 4 }),
+    observedTradingDays: int("observedTradingDays").default(0).notNull(),
+    signalAction: mysqlEnum("signalAction", [
+      "ADD",
+      "HOLD",
+      "WATCH",
+      "REDUCE",
+      "EXIT",
+    ]),
+    outcomeVersion: varchar("outcomeVersion", { length: 40 }).notNull(),
+    outcomeQuality: mysqlEnum("outcomeQuality", [
+      "OUTCOME_FAVORABLE",
+      "OUTCOME_UNFAVORABLE",
+      "OUTCOME_NOT_YET_CLEAR",
+    ]),
+    summary: text("summary"),
+    evaluatedAt: timestamp("evaluatedAt"),
+    notifiedAt: timestamp("notifiedAt"),
+    createdAt: timestamp("createdAt").defaultNow().notNull(),
+    updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+  },
+  table => ({
+    reviewTypeUnique: uniqueIndex("skip_milestone_review_type_unique").on(
+      table.reviewId,
+      table.milestoneType
+    ),
+    dueIdx: index("skip_milestone_user_status_due_idx").on(
+      table.userId,
+      table.status,
+      table.dueAt
+    ),
+  })
+);
+export type SkippedActionReviewMilestone =
+  typeof skippedActionReviewMilestones.$inferSelect;
+export type InsertSkippedActionReviewMilestone =
+  typeof skippedActionReviewMilestones.$inferInsert;
+
+/**
+ * 見送り後に実際に取得できた価格だけを JST 日単位で保存する。
+ * 過去を推測して補完せず、最大上昇/下落はこの記録開始後の範囲に限る。
+ */
+export const actionSkipPriceObservations = mysqlTable(
+  "actionSkipPriceObservations",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    userId: int("userId").notNull(),
+    reviewId: int("reviewId").notNull(),
+    symbol: varchar("symbol", { length: 24 }).notNull(),
+    currency: varchar("currency", { length: 8 }).notNull(),
+    observedDateJst: varchar("observedDateJst", { length: 10 }).notNull(),
+    currentPrice: decimal("currentPrice", { precision: 20, scale: 4 }).notNull(),
+    priceUpdatedAt: timestamp("priceUpdatedAt"),
+    source: mysqlEnum("source", ["HOLDING", "WATCHLIST", "QUEUE_BASELINE"])
+      .notNull(),
+    observedAt: timestamp("observedAt").notNull(),
+    createdAt: timestamp("createdAt").defaultNow().notNull(),
+  },
+  table => ({
+    reviewDateUnique: uniqueIndex("skip_price_review_date_unique").on(
+      table.reviewId,
+      table.observedDateJst
+    ),
+    userReviewIdx: index("skip_price_user_review_idx").on(
+      table.userId,
+      table.reviewId
+    ),
+  })
+);
+export type ActionSkipPriceObservation =
+  typeof actionSkipPriceObservations.$inferSelect;
+export type InsertActionSkipPriceObservation =
+  typeof actionSkipPriceObservations.$inferInsert;
+
+/**
+ * 低頻運用のために月内の買い増し順位を固定するスナップショット。
+ * 金額は画面表示時に現在値で再計算するが、順位とスコアは価格帯・シグナル・
+ * 確認事項・投資カード・レバレッジ等の重要 fingerprint が変わらない限り維持する。
+ */
+export const buyPlanRankingSnapshots = mysqlTable(
+  "buyPlanRankingSnapshots",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    userId: int("userId").notNull(),
+    rankingMonth: varchar("rankingMonth", { length: 7 }).notNull(),
+    symbol: varchar("symbol", { length: 24 }).notNull(),
+    rank: int("rank"),
+    eligible: boolean("eligible").default(false).notNull(),
+    score: int("score").default(0).notNull(),
+    scoreVersion: varchar("scoreVersion", { length: 40 }).notNull(),
+    scoreBreakdown: json("scoreBreakdown")
+      .$type<Record<string, number>>()
+      .notNull(),
+    gateReasons: json("gateReasons").$type<string[]>().notNull(),
+    rationale: json("rationale").$type<string[]>().notNull(),
+    /** 全候補共通の重要入力 fingerprint。日々の価格ノイズは含めない。 */
+    rankingFingerprint: varchar("rankingFingerprint", { length: 64 }).notNull(),
+    createdAt: timestamp("createdAt").defaultNow().notNull(),
+    updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+  },
+  table => ({
+    monthSymbolUnique: uniqueIndex("buy_rank_user_month_symbol_unique").on(
+      table.userId,
+      table.rankingMonth,
+      table.symbol
+    ),
+    monthRankIdx: index("buy_rank_user_month_rank_idx").on(
+      table.userId,
+      table.rankingMonth,
+      table.rank
+    ),
+  })
+);
+export type BuyPlanRankingSnapshot = typeof buyPlanRankingSnapshots.$inferSelect;
+export type InsertBuyPlanRankingSnapshot = typeof buyPlanRankingSnapshots.$inferInsert;
+
+/**
  * AI が挙げた新規候補銘柄の記録。
  *
  * これまで候補提案は生成するたびに画面に出るだけで残らなかった。

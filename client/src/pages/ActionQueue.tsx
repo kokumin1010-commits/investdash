@@ -1,7 +1,16 @@
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Textarea } from "@/components/ui/textarea";
 import { trpc } from "@/lib/trpc";
 import {
   ArrowDownRight,
@@ -11,6 +20,7 @@ import {
   Clock3,
   ListChecks,
   RefreshCw,
+  Scale,
   ShieldCheck,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -22,6 +32,7 @@ const VIEW_OPTIONS = [
   { value: "PENDING", label: "確認待ち" },
   { value: "APPROVED", label: "計画済み" },
   { value: "HISTORY", label: "履歴" },
+  { value: "SKIP_REVIEWS", label: "見送り検証" },
 ] as const;
 
 type View = (typeof VIEW_OPTIONS)[number]["value"];
@@ -68,9 +79,27 @@ const statusLabel = {
 
 export default function ActionQueue() {
   const [view, setView] = useState<View>("ACTIVE");
+  const [skipTarget, setSkipTarget] = useState<{
+    id: number;
+    name: string;
+    symbol: string;
+  } | null>(null);
+  const [skipNote, setSkipNote] = useState("");
+  const isSkipReviewView = view === "SKIP_REVIEWS";
   const utils = trpc.useUtils();
-  const list = trpc.actionQueue.list.useQuery({ view, limit: 100 });
+  const list = trpc.actionQueue.list.useQuery(
+    { view: isSkipReviewView ? "ACTIVE" : view, limit: 100 },
+    { enabled: !isSkipReviewView }
+  );
   const summary = trpc.actionQueue.summary.useQuery();
+  const skipReviews = trpc.actionQueue.skipReviews.useQuery(
+    { limit: 100 },
+    { enabled: isSkipReviewView }
+  );
+  const skipReviewSummary = trpc.actionQueue.skipReviewSummary.useQuery(
+    undefined,
+    { enabled: isSkipReviewView }
+  );
   const backfill = trpc.actionQueue.backfillInitial.useMutation({
     onSuccess: result => {
       toast.success(`${result.queued} 銘柄をアクション待ちに整理しました`);
@@ -87,7 +116,13 @@ export default function ActionQueue() {
       void Promise.all([
         utils.actionQueue.list.invalidate(),
         utils.actionQueue.summary.invalidate(),
+        utils.actionQueue.skipReviews.invalidate(),
+        utils.actionQueue.skipReviewSummary.invalidate(),
       ]);
+      if (result.status === "SKIPPED") {
+        setSkipTarget(null);
+        setSkipNote("");
+      }
     },
     onError: error => toast.error(error.message),
   });
@@ -157,7 +192,14 @@ export default function ActionQueue() {
         ))}
       </div>
 
-      {list.isLoading ? (
+      {isSkipReviewView ? (
+        <SkipReviewPanel
+          reviews={skipReviews.data ?? []}
+          isLoading={skipReviews.isLoading}
+          error={skipReviews.error?.message ?? null}
+          summary={skipReviewSummary.data}
+        />
+      ) : list.isLoading ? (
         <div className="space-y-3">
           {[0, 1, 2].map(i => (
             <Skeleton key={i} className="h-64 rounded-2xl" />
@@ -345,9 +387,14 @@ export default function ActionQueue() {
                           <Button
                             size="sm"
                             variant="ghost"
-                            onClick={() =>
-                              decide.mutate({ id: item.id, decision: "SKIP" })
-                            }
+                            onClick={() => {
+                              setSkipTarget({
+                                id: item.id,
+                                name: item.name,
+                                symbol: item.symbol,
+                              });
+                              setSkipNote("");
+                            }}
                             disabled={isBusy}
                           >
                             今回は見送る
@@ -376,6 +423,299 @@ export default function ActionQueue() {
           </CardContent>
         </Card>
       )}
+
+      <Dialog
+        open={skipTarget !== null}
+        onOpenChange={open => {
+          if (!open && !decide.isPending) {
+            setSkipTarget(null);
+            setSkipNote("");
+          }
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>今回の見送り理由を記録</DialogTitle>
+            <DialogDescription>
+              {skipTarget
+                ? `${skipTarget.name}（${skipTarget.symbol}）を見送る時点の判断を保存します。後日の値動きで理由を書き換えることはありません。`
+                : "見送り理由を保存します。"}
+            </DialogDescription>
+          </DialogHeader>
+          <Textarea
+            value={skipNote}
+            onChange={event => setSkipNote(event.target.value)}
+            placeholder="例：決算の受注推移を確認するまで待つ／IBKR 借入を増やさない／現在の構成比が高い"
+            rows={5}
+            maxLength={1000}
+            disabled={decide.isPending}
+          />
+          <p className="text-xs leading-5 text-muted-foreground">
+            30・90・180日後と次の決算後に、判断過程と結果を別々に検証します。価格が上がっただけで「間違い」とは判定しません。
+          </p>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setSkipTarget(null);
+                setSkipNote("");
+              }}
+              disabled={decide.isPending}
+            >
+              戻る
+            </Button>
+            <Button
+              variant="destructive"
+              disabled={!skipTarget || skipNote.trim().length < 4 || decide.isPending}
+              onClick={() => {
+                if (!skipTarget) return;
+                decide.mutate({
+                  id: skipTarget.id,
+                  decision: "SKIP",
+                  note: skipNote.trim(),
+                });
+              }}
+            >
+              理由を保存して見送る
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}
+
+type SkipReviewView = {
+  id: number;
+  symbol: string;
+  name: string;
+  action: "ADD" | "HOLD" | "WATCH" | "REDUCE" | "EXIT" | null;
+  direction: "BUY" | "SELL" | "EXIT" | "REVIEW" | "NONE" | null;
+  status: "OPEN" | "CLOSED";
+  currency: string;
+  skippedAt: Date;
+  decisionNote: string | null;
+  processQuality:
+    | "DISCIPLINE_SOUND"
+    | "DISCIPLINE_NEEDS_IMPROVEMENT"
+    | "PROCESS_UNCLEAR";
+  processReasons: string[];
+  baselinePrice: number | null;
+  recommendedAmountBase: number | null;
+  latestPrice: number | null;
+  latestObservedAt: Date | null;
+  observationCount: number;
+  milestones: Array<{
+    id: number;
+    milestoneType: "DAY_30" | "DAY_90" | "DAY_180" | "AFTER_EARNINGS";
+    dueAt: Date;
+    status: "PENDING" | "COMPLETED" | "CANCELLED";
+    currentPrice: number | null;
+    returnPct: number | null;
+    maxUpsidePct: number | null;
+    maxDrawdownPct: number | null;
+    observedTradingDays: number;
+    outcomeQuality:
+      | "OUTCOME_FAVORABLE"
+      | "OUTCOME_UNFAVORABLE"
+      | "OUTCOME_NOT_YET_CLEAR"
+      | null;
+    summary: string | null;
+    counterfactualEffectBase: number | null;
+    evaluatedAt: Date | null;
+  }>;
+};
+
+const processLabel = {
+  DISCIPLINE_SOUND: "判断過程は規律的",
+  DISCIPLINE_NEEDS_IMPROVEMENT: "判断過程に改善余地",
+  PROCESS_UNCLEAR: "判断過程は資料不足",
+} as const;
+
+const outcomeLabel = {
+  OUTCOME_FAVORABLE: "見送り後の結果は有利",
+  OUTCOME_UNFAVORABLE: "見送り後の結果は不利",
+  OUTCOME_NOT_YET_CLEAR: "結果はまだ不明確",
+} as const;
+
+const milestoneLabel = {
+  DAY_30: "30日",
+  DAY_90: "90日",
+  DAY_180: "180日",
+  AFTER_EARNINGS: "次の決算後",
+} as const;
+
+function formatReviewDate(value: Date) {
+  return new Date(value).toLocaleDateString("ja-JP", {
+    timeZone: "Asia/Tokyo",
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+  });
+}
+
+function signedPct(value: number | null) {
+  if (value === null) return "—";
+  return `${value >= 0 ? "+" : ""}${value.toFixed(1)}%`;
+}
+
+function SkipReviewPanel({
+  reviews,
+  isLoading,
+  error,
+  summary,
+}: {
+  reviews: SkipReviewView[];
+  isLoading: boolean;
+  error: string | null;
+  summary?: {
+    total: number;
+    open: number;
+    pendingMilestones: number;
+    completedMilestones: number;
+    needsProcessImprovement: number;
+  };
+}) {
+  if (isLoading) {
+    return (
+      <div className="space-y-3">
+        {[0, 1].map(index => <Skeleton key={index} className="h-80 rounded-2xl" />)}
+      </div>
+    );
+  }
+  if (error) {
+    return (
+      <Card>
+        <CardContent className="py-6 text-sm text-rose-600">
+          見送り検証を読み込めませんでした: {error}
+        </CardContent>
+      </Card>
+    );
+  }
+  if (reviews.length === 0) {
+    return (
+      <Card className="border-dashed">
+        <CardContent className="grid min-h-56 place-items-center p-8 text-center">
+          <div>
+            <Scale className="mx-auto size-8 text-primary" />
+            <p className="mt-3 font-semibold">まだ見送り検証はありません</p>
+            <p className="mt-1 max-w-xl text-sm text-muted-foreground">
+              今後「今回は見送る」を選ぶと、当時の理由を固定し、30・90・180日後と次の決算後に検証します。
+            </p>
+          </div>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      <Card className="border-indigo-200 bg-indigo-50/50 dark:border-indigo-900 dark:bg-indigo-950/20">
+        <CardContent className="grid gap-3 p-4 sm:grid-cols-[1fr_auto] sm:items-center">
+          <div>
+            <p className="font-semibold">判断過程と結果を分けて検証</p>
+            <p className="mt-1 text-sm leading-6 text-muted-foreground">
+              値上がり・値下がりだけで当時の判断を採点しません。見送り時点の規律と、その後の結果を独立して記録します。
+            </p>
+          </div>
+          <div className="grid grid-cols-3 gap-2 text-center text-xs">
+            <div className="rounded-lg bg-background p-2"><b className="block text-base">{summary?.open ?? 0}</b>検証中</div>
+            <div className="rounded-lg bg-background p-2"><b className="block text-base">{summary?.completedMilestones ?? 0}</b>完了節目</div>
+            <div className="rounded-lg bg-background p-2"><b className="block text-base">{summary?.needsProcessImprovement ?? 0}</b>改善候補</div>
+          </div>
+        </CardContent>
+      </Card>
+
+      {reviews.map(review => (
+        <Card key={review.id} className="overflow-hidden shadow-sm">
+          <CardContent className="p-0">
+            <div className="border-b bg-muted/20 p-4">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                <div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <h2 className="text-lg font-semibold">{review.name}</h2>
+                    <Badge variant="outline">{review.symbol}</Badge>
+                    <Badge variant="outline">
+                      {review.action ? actionLabel[review.action] : "判断記録"}
+                    </Badge>
+                    <Badge variant={review.status === "OPEN" ? "default" : "secondary"}>
+                      {review.status === "OPEN" ? "検証中" : "検証完了"}
+                    </Badge>
+                  </div>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    {formatReviewDate(review.skippedAt)} に見送り · 日次観測 {review.observationCount} 日
+                  </p>
+                </div>
+                <div className="text-left sm:text-right">
+                  <p className="text-xs text-muted-foreground">基準 → 最新</p>
+                  <p className="font-mono text-sm font-semibold">
+                    {review.baselinePrice?.toLocaleString("ja-JP", { maximumFractionDigits: 2 }) ?? "—"}
+                    {" → "}
+                    {review.latestPrice?.toLocaleString("ja-JP", { maximumFractionDigits: 2 }) ?? "—"} {review.currency}
+                  </p>
+                  <p className="text-[11px] text-muted-foreground">
+                    {review.latestObservedAt ? `${formatReviewDate(review.latestObservedAt)} 観測` : "価格観測待ち"}
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <div className="grid gap-px bg-border/60 lg:grid-cols-2">
+              <div className="space-y-2 bg-card p-4">
+                <p className="text-xs font-semibold tracking-wide text-primary">PROCESS QUALITY</p>
+                <p className="font-semibold">{processLabel[review.processQuality]}</p>
+                <p className="rounded-lg bg-muted/50 p-3 text-sm leading-6">
+                  {review.decisionNote || "見送り理由は記録されていません"}
+                </p>
+                {review.processReasons.length > 0 && (
+                  <ul className="space-y-1 text-xs text-muted-foreground">
+                    {review.processReasons.map((reason, index) => (
+                      <li key={`${reason}-${index}`}>・{reason}</li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+
+              <div className="space-y-2 bg-card p-4">
+                <p className="text-xs font-semibold tracking-wide text-indigo-600">OUTCOME QUALITY</p>
+                <div className="space-y-2">
+                  {review.milestones.map(milestone => (
+                    <div key={milestone.id} className="rounded-xl border p-3">
+                      <div className="flex items-center justify-between gap-2">
+                        <p className="font-medium">{milestoneLabel[milestone.milestoneType]}検証</p>
+                        <Badge variant="outline">
+                          {milestone.status === "COMPLETED"
+                            ? milestone.outcomeQuality
+                              ? outcomeLabel[milestone.outcomeQuality]
+                              : "完了"
+                            : `${formatReviewDate(milestone.dueAt)} 予定`}
+                        </Badge>
+                      </div>
+                      {milestone.status === "COMPLETED" ? (
+                        <div className="mt-2 space-y-1 text-xs text-muted-foreground">
+                          <p>
+                            基準比 {signedPct(milestone.returnPct)} · 記録開始後の上昇 {signedPct(milestone.maxUpsidePct)} · 下落 {signedPct(milestone.maxDrawdownPct)}
+                          </p>
+                          {milestone.counterfactualEffectBase !== null && (
+                            <p>
+                              もし当時実行していた場合の概算差分 {milestone.counterfactualEffectBase >= 0 ? "+" : ""}{formatMoney(milestone.counterfactualEffectBase)}
+                            </p>
+                          )}
+                          <p>{milestone.summary || "評価内容を記録しました"}</p>
+                        </div>
+                      ) : (
+                        <p className="mt-2 text-xs text-muted-foreground">
+                          到期後に価格経路と新しい材料を確認します。日々の通知は送りません。
+                        </p>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      ))}
     </div>
   );
 }

@@ -15,6 +15,8 @@ vi.mock("../client/src/lib/trpc", () => ({
       actionQueue: {
         list: { invalidate },
         summary: { invalidate },
+        skipReviews: { invalidate },
+        skipReviewSummary: { invalidate },
       },
     }),
     actionQueue: {
@@ -80,6 +82,60 @@ vi.mock("../client/src/lib/trpc", () => ({
           },
         }),
       },
+      skipReviews: {
+        useQuery: () => ({
+          isLoading: false,
+          error: null,
+          data: [
+            {
+              id: 10,
+              symbol: "2733.T",
+              name: "あらた",
+              action: "REDUCE",
+              direction: "SELL",
+              status: "OPEN",
+              currency: "JPY",
+              skippedAt: new Date("2026-07-01T00:00:00Z"),
+              decisionNote: "次の決算で利益回復を確認してから判断する",
+              processQuality: "DISCIPLINE_SOUND",
+              processReasons: ["確認条件が明記されています"],
+              baselinePrice: 2738,
+              recommendedAmountBase: 1369000,
+              latestPrice: 2600,
+              latestObservedAt: new Date("2026-08-01T00:00:00Z"),
+              observationCount: 22,
+              milestones: [
+                {
+                  id: 100,
+                  milestoneType: "DAY_30",
+                  dueAt: new Date("2026-07-31T00:00:00Z"),
+                  status: "COMPLETED",
+                  currentPrice: 2600,
+                  returnPct: -5.04,
+                  maxUpsidePct: 2.1,
+                  maxDrawdownPct: -8.2,
+                  observedTradingDays: 22,
+                  outcomeQuality: "OUTCOME_NOT_YET_CLEAR",
+                  summary: "30日では結果を断定しません",
+                  counterfactualEffectBase: 69000,
+                  evaluatedAt: new Date("2026-07-31T00:00:00Z"),
+                },
+              ],
+            },
+          ],
+        }),
+      },
+      skipReviewSummary: {
+        useQuery: () => ({
+          data: {
+            total: 1,
+            open: 1,
+            pendingMilestones: 3,
+            completedMilestones: 1,
+            needsProcessImprovement: 0,
+          },
+        }),
+      },
       backfillInitial: {
         useMutation: () => ({ mutate: backfill, isPending: false }),
       },
@@ -127,17 +183,39 @@ describe("アクション待ち page", () => {
     expect(screen.queryByText(/自動注文/)).toBeNull();
   });
 
-  it("本人が計画追加・延後・見送を明示的に選ぶ", () => {
+  it("本人が計画追加・延後・理由付き見送を明示的に選ぶ", () => {
     render(React.createElement(Router, null, React.createElement(ActionQueue)));
     fireEvent.click(screen.getByRole("button", { name: "計画に追加" }));
     fireEvent.click(screen.getByRole("button", { name: "あとで確認" }));
     fireEvent.click(screen.getByRole("button", { name: "今回は見送る" }));
+    expect(
+      screen.getByRole("button", { name: "理由を保存して見送る" }).hasAttribute("disabled")
+    ).toBe(true);
+    fireEvent.change(screen.getByPlaceholderText(/決算の受注推移/), {
+      target: { value: "次の決算で利益回復を確認する" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "理由を保存して見送る" }));
     expect(decide).toHaveBeenNthCalledWith(1, { id: 1, decision: "APPROVE" });
     expect(decide).toHaveBeenNthCalledWith(2, {
       id: 1,
       decision: "SNOOZE",
       snoozeDays: 3,
     });
-    expect(decide).toHaveBeenNthCalledWith(3, { id: 1, decision: "SKIP" });
+    expect(decide).toHaveBeenNthCalledWith(3, {
+      id: 1,
+      decision: "SKIP",
+      note: "次の決算で利益回復を確認する",
+    });
+  });
+
+  it("見送り検証で判断過程と結果を別々に表示する", () => {
+    render(React.createElement(Router, null, React.createElement(ActionQueue)));
+    fireEvent.click(screen.getByRole("button", { name: "見送り検証" }));
+
+    expect(screen.getByText("判断過程と結果を分けて検証")).toBeTruthy();
+    expect(screen.getByText("判断過程は規律的")).toBeTruthy();
+    expect(screen.getByText("結果はまだ不明確")).toBeTruthy();
+    expect(screen.getByText(/30日では結果を断定しません/)).toBeTruthy();
+    expect(screen.getByText(/もし当時実行していた場合の概算差分/)).toBeTruthy();
   });
 });
