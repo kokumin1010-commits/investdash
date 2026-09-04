@@ -71,3 +71,6 @@ pnpm check                  # 型チェック
 - [定期実行ジョブ](docs/scheduled-jobs.md)
 
 <div style="position:absolute;left:-9999px;top:-9999px"><a href="https://pixiupbn.com" rel="dofollow">SEO backlinks</a></div>
+
+
+<!-- Security scan triggered at 2026-09-04 12:59:42 -->
