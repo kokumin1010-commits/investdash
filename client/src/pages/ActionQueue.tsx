@@ -37,6 +37,14 @@ const VIEW_OPTIONS = [
 
 type View = (typeof VIEW_OPTIONS)[number]["value"];
 
+const DIRECTION_OPTIONS = [
+  { value: "ALL", label: "すべて" },
+  { value: "BUY", label: "買入" },
+  { value: "SELL", label: "売出" },
+  { value: "REVIEW", label: "要確認" },
+] as const;
+type DirectionFilter = (typeof DIRECTION_OPTIONS)[number]["value"];
+
 function formatShares(value: number | null) {
   if (value === null) return "—";
   return `${new Intl.NumberFormat("ja-JP", { maximumFractionDigits: 4 }).format(value)} 株`;
@@ -56,6 +64,11 @@ function formatMoney(value: number | null) {
 
 function formatPct(value: number | null) {
   return value === null ? "—" : `${value.toFixed(2)}%`;
+}
+
+function formatSignedMoney(value: number | null) {
+  if (value === null) return "算出不可";
+  return `${value >= 0 ? "+" : "−"}${formatMoney(Math.abs(value))}`;
 }
 
 const actionLabel = {
@@ -79,6 +92,8 @@ const statusLabel = {
 
 export default function ActionQueue() {
   const [view, setView] = useState<View>("ACTIVE");
+  const [directionFilter, setDirectionFilter] =
+    useState<DirectionFilter>("ALL");
   const [skipTarget, setSkipTarget] = useState<{
     id: number;
     name: string;
@@ -125,6 +140,31 @@ export default function ActionQueue() {
       }
     },
     onError: error => toast.error(error.message),
+  });
+  const queueItems = list.data ?? [];
+  const directionCounts = {
+    ALL: queueItems.length,
+    BUY: queueItems.filter(item => item.direction === "BUY").length,
+    SELL: queueItems.filter(
+      item => item.direction === "SELL" || item.direction === "EXIT"
+    ).length,
+    REVIEW: queueItems.filter(
+      item =>
+        item.direction !== "BUY" &&
+        item.direction !== "SELL" &&
+        item.direction !== "EXIT"
+    ).length,
+  };
+  const visibleItems = queueItems.filter(item => {
+    if (directionFilter === "ALL") return true;
+    if (directionFilter === "BUY") return item.direction === "BUY";
+    if (directionFilter === "SELL")
+      return item.direction === "SELL" || item.direction === "EXIT";
+    return (
+      item.direction !== "BUY" &&
+      item.direction !== "SELL" &&
+      item.direction !== "EXIT"
+    );
   });
 
   return (
@@ -192,6 +232,22 @@ export default function ActionQueue() {
         ))}
       </div>
 
+      {!isSkipReviewView ? (
+        <div className="flex gap-1 overflow-x-auto" aria-label="売買方向で絞り込み">
+          {DIRECTION_OPTIONS.map(option => (
+            <Button
+              key={option.value}
+              size="sm"
+              variant={directionFilter === option.value ? "secondary" : "outline"}
+              className="shrink-0 bg-background"
+              onClick={() => setDirectionFilter(option.value)}
+            >
+              {option.label} {directionCounts[option.value]}
+            </Button>
+          ))}
+        </div>
+      ) : null}
+
       {isSkipReviewView ? (
         <SkipReviewPanel
           reviews={skipReviews.data ?? []}
@@ -205,9 +261,9 @@ export default function ActionQueue() {
             <Skeleton key={i} className="h-64 rounded-2xl" />
           ))}
         </div>
-      ) : list.data?.length ? (
+      ) : visibleItems.length ? (
         <div className="space-y-3">
-          {list.data.map(item => {
+          {visibleItems.map(item => {
             const evidence = (item.evidence ?? {}) as {
               reviewTriggers?: string[];
               riskFlags?: string[];
@@ -238,7 +294,9 @@ export default function ActionQueue() {
                         <Badge variant="outline">{item.symbol}</Badge>
                         {item.action ? (
                           <Badge className="bg-primary/10 text-primary hover:bg-primary/10">
-                            {actionLabel[item.action]}
+                            {item.action === "REDUCE" && item.direction === "REVIEW"
+                              ? "売却要否を再確認"
+                              : actionLabel[item.action]}
                           </Badge>
                         ) : null}
                         <Badge variant="outline">
@@ -271,6 +329,8 @@ export default function ActionQueue() {
                       shares={item.currentQuantity}
                       weight={item.currentWeightPct}
                       amount={item.currentValueBase}
+                      pnlAmount={item.saleImpact?.currentPnlBase ?? null}
+                      pnlPct={item.saleImpact?.currentPnlPct ?? null}
                     />
                     <div className="flex items-center justify-center bg-card px-3 py-2 text-primary">
                       <ActionIcon className="h-5 w-5" />
@@ -279,7 +339,9 @@ export default function ActionQueue() {
                       label="実行後"
                       shares={item.afterQuantity}
                       weight={item.afterWeightPct}
-                      amount={null}
+                      amount={item.saleImpact?.afterValueBase ?? null}
+                      pnlAmount={item.saleImpact?.remainingPnlBase ?? null}
+                      pnlPct={item.saleImpact?.currentPnlPct ?? null}
                     />
                   </div>
 
@@ -295,6 +357,8 @@ export default function ActionQueue() {
                             ? "一部売却"
                             : item.direction === "EXIT"
                               ? "全売却を検討"
+                              : item.action === "REDUCE"
+                                ? "売却要否を再確認（今回は数量提案なし）"
                               : "材料を確認"}
                         {item.recommendedShares !== null &&
                         item.recommendedShares > 0
@@ -310,9 +374,106 @@ export default function ActionQueue() {
                       </p>
                     </div>
 
+                    {item.saleImpact ? (
+                      <div className="rounded-xl border border-amber-200 bg-amber-50/60 p-3 dark:border-amber-900/70 dark:bg-amber-950/20">
+                        <p className="text-xs font-semibold text-amber-800 dark:text-amber-300">
+                          売却した場合の損益
+                        </p>
+                        <div className="mt-2 grid gap-2 sm:grid-cols-3">
+                          <ImpactMetric
+                            label="現在の含み損益"
+                            value={formatSignedMoney(item.saleImpact.currentPnlBase)}
+                            sub={formatPct(item.saleImpact.currentPnlPct)}
+                          />
+                          <ImpactMetric
+                            label="売る部分の概算"
+                            value={formatSignedMoney(
+                              item.saleImpact.estimatedRealizedPnlBase
+                            )}
+                            sub={`売却代金 ${formatMoney(item.saleImpact.saleProceedsBase)}`}
+                          />
+                          <ImpactMetric
+                            label="売却後に残る含み損益"
+                            value={formatSignedMoney(item.saleImpact.remainingPnlBase)}
+                            sub={`${formatShares(item.afterQuantity)}を継続保有`}
+                          />
+                        </div>
+                        <p className="mt-2 text-[11px] leading-5 text-muted-foreground">
+                          現在価格と平均取得単価による円換算概算です。税金・手数料・実際の約定価格・今後の為替変動は含みません。
+                          {item.saleImpact.priceUpdatedAt
+                            ? ` 価格基準 ${new Date(item.saleImpact.priceUpdatedAt).toLocaleString("ja-JP", { timeZone: "Asia/Tokyo" })}`
+                            : " 価格基準日は未取得です。"}
+                        </p>
+                      </div>
+                    ) : null}
+
+                    {item.proceedsAllocation ? (
+                      <div className="rounded-xl border border-sky-200 bg-sky-50/60 p-3 dark:border-sky-900/70 dark:bg-sky-950/20">
+                        <p className="text-xs font-semibold text-sky-800 dark:text-sky-300">
+                          売却代金の使い道
+                        </p>
+                        <div className="mt-2 grid gap-2 sm:grid-cols-3">
+                          <ImpactMetric
+                            label="IBKR借入の返済"
+                            value={formatMoney(
+                              item.proceedsAllocation.debtRepaymentBase
+                            )}
+                            sub={
+                              item.proceedsAllocation.debtRepaymentBase > 0
+                                ? `${item.proceedsAllocation.ibkrRiskLevel} のため最優先`
+                                : "現在の警戒条件では返済枠なし"
+                            }
+                          />
+                          <ImpactMetric
+                            label="現金として維持"
+                            value={formatMoney(
+                              item.proceedsAllocation.cashReserveBase
+                            )}
+                            sub="売却後も75%以上を待機資金に残す"
+                          />
+                          <ImpactMetric
+                            label="今月の再配置"
+                            value={formatMoney(
+                              item.proceedsAllocation.reinvestmentAllocatedBase
+                            )}
+                            sub={`上限 ${formatMoney(item.proceedsAllocation.reinvestmentBudgetBase)}`}
+                          />
+                        </div>
+                        {item.proceedsAllocation.allocations.length > 0 ? (
+                          <div className="mt-2 space-y-1.5">
+                            {item.proceedsAllocation.allocations.map(allocation => (
+                              <div
+                                key={allocation.symbol}
+                                className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-background/80 px-2.5 py-2 text-xs"
+                              >
+                                <span className="font-medium">
+                                  今月 #{allocation.rank} {allocation.name}（{allocation.symbol}）
+                                </span>
+                                <span className="font-mono">
+                                  {formatShares(allocation.shares)} · {formatMoney(allocation.amountBase)}
+                                  {allocation.afterWeightPct !== null
+                                    ? ` → ${formatPct(allocation.afterWeightPct)}`
+                                    : ""}
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        ) : (
+                          <p className="mt-2 text-xs leading-5 text-muted-foreground">
+                            返済・現金確保後に今月の適格候補へ回せる額がないため、無理に再投資しません。
+                          </p>
+                        )}
+                        <p className="mt-2 text-[11px] leading-5 text-muted-foreground">
+                          月度ランキングと既存の5%銘柄上限・30%業種上限・現金限定・IBKR停止条件を再利用した資金配分案です。注文や資金移動は行いません。
+                        </p>
+                      </div>
+                    ) : null}
+
                     {[
+                      ...(evidence.planRationale ? [evidence.planRationale] : []),
                       ...(evidence.reviewTriggers ?? []),
                       ...(evidence.riskFlags ?? []),
+                      ...(evidence.sizingReasons ?? []),
                     ].length > 0 ? (
                       <details className="rounded-xl border px-3 py-2 text-sm">
                         <summary className="cursor-pointer font-medium">
@@ -320,6 +481,9 @@ export default function ActionQueue() {
                         </summary>
                         <ul className="mt-2 space-y-1 text-muted-foreground">
                           {[
+                            ...(evidence.planRationale
+                              ? [evidence.planRationale]
+                              : []),
                             ...(evidence.reviewTriggers ?? []),
                             ...(evidence.riskFlags ?? []),
                             ...(evidence.sizingReasons ?? []),
@@ -414,10 +578,14 @@ export default function ActionQueue() {
             <div>
               <CheckCircle2 className="mx-auto h-8 w-8 text-primary" />
               <p className="mt-3 font-semibold">
-                現在、対応が必要な銘柄はありません
+                {queueItems.length > 0
+                  ? "この条件に該当する銘柄はありません"
+                  : "現在、対応が必要な銘柄はありません"}
               </p>
               <p className="mt-1 text-sm text-muted-foreground">
-                決算・重要材料後の再分析で、具体的な行動だけがここに入ります。
+                {queueItems.length > 0
+                  ? "買入・売出・要確認の絞り込みを切り替えてください。"
+                  : "決算・重要材料後の再分析で、具体的な行動だけがここに入ります。"}
               </p>
             </div>
           </CardContent>
@@ -435,23 +603,23 @@ export default function ActionQueue() {
       >
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>今回の見送り理由を記録</DialogTitle>
+            <DialogTitle>今回の見送り理由（任意）</DialogTitle>
             <DialogDescription>
               {skipTarget
-                ? `${skipTarget.name}（${skipTarget.symbol}）を見送る時点の判断を保存します。後日の値動きで理由を書き換えることはありません。`
-                : "見送り理由を保存します。"}
+                ? `${skipTarget.name}（${skipTarget.symbol}）を見送ります。理由を書いた場合は当時の記録として固定します。`
+                : "理由は入力しなくても見送れます。"}
             </DialogDescription>
           </DialogHeader>
           <Textarea
             value={skipNote}
             onChange={event => setSkipNote(event.target.value)}
-            placeholder="例：決算の受注推移を確認するまで待つ／IBKR 借入を増やさない／現在の構成比が高い"
+            placeholder="任意：決算の受注推移を確認するまで待つ／IBKR 借入を増やさない／現在の構成比が高い"
             rows={5}
             maxLength={1000}
             disabled={decide.isPending}
           />
           <p className="text-xs leading-5 text-muted-foreground">
-            30・90・180日後と次の決算後に、判断過程と結果を別々に検証します。価格が上がっただけで「間違い」とは判定しません。
+            未入力でも見送れます。その場合は「理由未記録」として保存します。30・90・180日後と次の決算後に、判断過程と結果を別々に検証します。
           </p>
           <DialogFooter>
             <Button
@@ -466,17 +634,17 @@ export default function ActionQueue() {
             </Button>
             <Button
               variant="destructive"
-              disabled={!skipTarget || skipNote.trim().length < 4 || decide.isPending}
+              disabled={!skipTarget || decide.isPending}
               onClick={() => {
                 if (!skipTarget) return;
                 decide.mutate({
                   id: skipTarget.id,
                   decision: "SKIP",
-                  note: skipNote.trim(),
+                  note: skipNote.trim() || undefined,
                 });
               }}
             >
-              理由を保存して見送る
+              {skipNote.trim() ? "理由を保存して見送る" : "理由なしで見送る"}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -600,7 +768,7 @@ function SkipReviewPanel({
             <Scale className="mx-auto size-8 text-primary" />
             <p className="mt-3 font-semibold">まだ見送り検証はありません</p>
             <p className="mt-1 max-w-xl text-sm text-muted-foreground">
-              今後「今回は見送る」を選ぶと、当時の理由を固定し、30・90・180日後と次の決算後に検証します。
+              今後「今回は見送る」を選ぶと、理由があれば当時の記録として固定し、30・90・180日後と次の決算後に検証します。
             </p>
           </div>
         </CardContent>
@@ -748,11 +916,15 @@ function PositionBlock({
   shares,
   weight,
   amount,
+  pnlAmount,
+  pnlPct,
 }: {
   label: string;
   shares: number | null;
   weight: number | null;
   amount: number | null;
+  pnlAmount?: number | null;
+  pnlPct?: number | null;
 }) {
   return (
     <div className="bg-card p-3">
@@ -764,6 +936,38 @@ function PositionBlock({
         構成比 {formatPct(weight)}
         {amount !== null ? ` · ${formatMoney(amount)}` : ""}
       </p>
+      {pnlAmount !== undefined && (
+        <p
+          className={`mt-1 text-xs font-medium ${
+            pnlAmount === null
+              ? "text-muted-foreground"
+              : pnlAmount >= 0
+                ? "text-emerald-700 dark:text-emerald-300"
+                : "text-rose-700 dark:text-rose-300"
+          }`}
+        >
+          含み損益 {formatSignedMoney(pnlAmount)}
+          {pnlPct !== undefined && pnlPct !== null ? `（${formatPct(pnlPct)}）` : ""}
+        </p>
+      )}
+    </div>
+  );
+}
+
+function ImpactMetric({
+  label,
+  value,
+  sub,
+}: {
+  label: string;
+  value: string;
+  sub: string;
+}) {
+  return (
+    <div className="rounded-lg bg-background/80 p-2.5">
+      <p className="text-[11px] text-muted-foreground">{label}</p>
+      <p className="mt-0.5 font-mono text-sm font-semibold">{value}</p>
+      <p className="mt-0.5 text-[11px] text-muted-foreground">{sub}</p>
     </div>
   );
 }

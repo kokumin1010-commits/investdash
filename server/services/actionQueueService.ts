@@ -141,8 +141,8 @@ export function buildSkippedActionReviewPayload(input: {
       status: "OPEN" as const,
       skippedAt: now,
     },
-    baselineObservation:
-      baselinePrice !== null && baselinePrice > 0
+      baselineObservation:
+        baselinePrice !== null && baselinePrice > 0
         ? {
             userId: input.userId,
             symbol: current.symbol,
@@ -152,8 +152,19 @@ export function buildSkippedActionReviewPayload(input: {
             source: "QUEUE_BASELINE" as const,
             observedAt: now,
           }
-        : null,
+          : null,
   };
+}
+
+export function resolveActionQueueDecisionNote(input: {
+  decision: ActionQueueDecision;
+  note?: string | null;
+  currentDecisionNote: string | null;
+}): string | null {
+  const normalizedNote = input.note?.trim() || null;
+  return input.decision === "SKIP"
+    ? normalizedNote
+    : normalizedNote ?? input.currentDecisionNote;
 }
 
 /**
@@ -312,7 +323,11 @@ export async function decideActionQueueItem(input: {
     const status = nextActionQueueStatus(current.status, input.decision);
     if (!status) throw new Error("現在の状態ではこの操作を実行できません");
 
-    const decisionNote = input.note?.trim() || current.decisionNote;
+    const decisionNote = resolveActionQueueDecisionNote({
+      decision: input.decision,
+      note: input.note,
+      currentDecisionNote: current.decisionNote,
+    });
     const snoozedUntil =
       input.decision === "SNOOZE"
         ? new Date(now.getTime() + (input.snoozeDays ?? 3) * 24 * 3600_000)

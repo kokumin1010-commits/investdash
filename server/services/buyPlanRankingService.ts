@@ -48,11 +48,15 @@ export type RankedPlanOverviewRow = PlanOverviewRow & {
   ranking: BuyPlanRankingView;
 };
 
-export async function buildRankedPlanOverview(userId: number, now = new Date()) {
+export async function buildRankedPlanOverview(
+  userId: number,
+  now = new Date(),
+  preparedPortfolio?: Awaited<ReturnType<typeof buildPortfolio>>
+) {
   const db = await requireDb();
   const [rows, portfolio, settings, watchItems, cards, signals] = await Promise.all([
     listPlanOverview(userId),
-    buildPortfolio(userId),
+    preparedPortfolio ?? buildPortfolio(userId),
     dbq.getSettings(userId),
     dbq.listWatchlist(userId),
     dbq.listCards(userId),

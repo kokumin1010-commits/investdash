@@ -65,6 +65,75 @@ vi.mock("../client/src/lib/trpc", () => ({
               createdAt: new Date("2026-08-29T00:00:00Z"),
               updatedAt: new Date("2026-08-29T00:00:00Z"),
               pending: true,
+              saleImpact: {
+                currentPnlBase: 2_000_000,
+                currentPnlPct: 57.53,
+                saleProceedsBase: 1_369_000,
+                estimatedRealizedPnlBase: 500_000,
+                afterValueBase: 4_107_000,
+                remainingPnlBase: 1_500_000,
+                soldRatio: 0.25,
+                priceUpdatedAt: new Date("2026-08-29T01:00:00Z"),
+              },
+              proceedsAllocation: {
+                saleProceedsBase: 1_369_000,
+                debtRepaymentBase: 0,
+                cashReserveBase: 1_027_000,
+                reinvestmentBudgetBase: 342_250,
+                reinvestmentAllocatedBase: 300_000,
+                unallocatedBase: 42_250,
+                ibkrRiskLevel: "SAFE",
+                allocations: [
+                  {
+                    symbol: "MCD",
+                    name: "McDonald's",
+                    rank: 1,
+                    shares: 7,
+                    amountBase: 300_000,
+                    afterWeightPct: 1.12,
+                  },
+                ],
+              },
+            },
+            {
+              id: 2,
+              userId: 1,
+              symbol: "MCD",
+              name: "McDonald's",
+              status: "PENDING_ACTION",
+              triggerType: "SIGNAL_CHANGE",
+              triggerKey: "signal:MCD:12",
+              triggerSummary: "HOLD から ADD へ判断変更",
+              sourceNewsId: null,
+              sourceSignalId: 12,
+              previousSignalId: 11,
+              previousAction: "HOLD",
+              action: "ADD",
+              direction: "BUY",
+              currency: "USD",
+              rationale: "価格帯と資金余力を確認して買い増します",
+              evidence: {},
+              currentQuantity: 20,
+              currentPrice: 300,
+              currentValueBase: 900_000,
+              currentWeightPct: 0.1,
+              recommendedShares: 7,
+              recommendedAmountLocal: 2100,
+              recommendedAmountBase: 300_000,
+              afterQuantity: 27,
+              afterWeightPct: 0.13,
+              priority: 80,
+              deadline: new Date("2026-09-02T00:00:00Z"),
+              snoozedUntil: null,
+              decisionNote: null,
+              approvedAt: null,
+              skippedAt: null,
+              completedAt: null,
+              createdAt: new Date("2026-08-29T00:00:00Z"),
+              updatedAt: new Date("2026-08-29T00:00:00Z"),
+              pending: true,
+              saleImpact: null,
+              proceedsAllocation: null,
             },
           ],
         }),
@@ -180,18 +249,47 @@ describe("アクション待ち page", () => {
     expect(screen.getByText(/構成比 0.47%/)).toBeTruthy();
     expect(screen.getByText(/四半期決算を確認/)).toBeTruthy();
     expect(screen.getByText(/次回決算で純利益を確認/)).toBeTruthy();
+    expect(screen.getByText("売却した場合の損益")).toBeTruthy();
+    expect(screen.getByText("売却代金の使い道")).toBeTruthy();
+    expect(screen.getByText(/今月 #1 McDonald's/)).toBeTruthy();
+    expect(screen.getByText(/税金・手数料/)).toBeTruthy();
     expect(screen.queryByText(/自動注文/)).toBeNull();
   });
 
-  it("本人が計画追加・延後・理由付き見送を明示的に選ぶ", () => {
+  it.each([390, 1280])(
+    "%dpx 相当で買入・売出を件数付きで切り替える",
+    width => {
+      Object.defineProperty(window, "innerWidth", {
+        value: width,
+        configurable: true,
+      });
     render(React.createElement(Router, null, React.createElement(ActionQueue)));
-    fireEvent.click(screen.getByRole("button", { name: "計画に追加" }));
-    fireEvent.click(screen.getByRole("button", { name: "あとで確認" }));
-    fireEvent.click(screen.getByRole("button", { name: "今回は見送る" }));
+    fireEvent.click(screen.getByRole("button", { name: "買入 1" }));
+    expect(screen.getByText("McDonald's")).toBeTruthy();
+    expect(screen.queryByText("あらた")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "売出 1" }));
+    expect(screen.getByText("あらた")).toBeTruthy();
+    expect(screen.queryByText("McDonald's")).toBeNull();
+    }
+  );
+
+  it("本人が計画追加・延後・理由なし/理由付き見送を明示的に選ぶ", () => {
+    render(React.createElement(Router, null, React.createElement(ActionQueue)));
+    fireEvent.click(screen.getAllByRole("button", { name: "計画に追加" })[0]);
+    fireEvent.click(screen.getAllByRole("button", { name: "あとで確認" })[0]);
+    fireEvent.click(screen.getAllByRole("button", { name: "今回は見送る" })[0]);
     expect(
-      screen.getByRole("button", { name: "理由を保存して見送る" }).hasAttribute("disabled")
-    ).toBe(true);
-    fireEvent.change(screen.getByPlaceholderText(/決算の受注推移/), {
+      screen.getByRole("button", { name: "理由なしで見送る" }).hasAttribute("disabled")
+    ).toBe(false);
+    fireEvent.click(screen.getByRole("button", { name: "理由なしで見送る" }));
+    expect(decide).toHaveBeenNthCalledWith(3, {
+      id: 1,
+      decision: "SKIP",
+      note: undefined,
+    });
+    fireEvent.click(screen.getByRole("button", { name: "戻る" }));
+    fireEvent.click(screen.getAllByRole("button", { name: "今回は見送る" })[0]);
+    fireEvent.change(screen.getByPlaceholderText(/任意：決算の受注推移/), {
       target: { value: "次の決算で利益回復を確認する" },
     });
     fireEvent.click(screen.getByRole("button", { name: "理由を保存して見送る" }));
@@ -201,7 +299,7 @@ describe("アクション待ち page", () => {
       decision: "SNOOZE",
       snoozeDays: 3,
     });
-    expect(decide).toHaveBeenNthCalledWith(3, {
+    expect(decide).toHaveBeenNthCalledWith(4, {
       id: 1,
       decision: "SKIP",
       note: "次の決算で利益回復を確認する",

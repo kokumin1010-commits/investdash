@@ -3,6 +3,10 @@ import type { Market } from "./investing";
 
 export type HoldingSignalAction = "ADD" | "HOLD" | "WATCH" | "REDUCE" | "EXIT";
 
+/** 長期保有で売買ノイズを増やさないための最低構成比。 */
+export const MIN_PARTIAL_SELL_WEIGHT_PCT = 0.05;
+export const MIN_REMAINING_POSITION_WEIGHT_PCT = 0.1;
+
 export type HoldingActionPlan = {
   direction: "BUY" | "NONE" | "REVIEW" | "SELL" | "EXIT";
   shares: number | null;
@@ -123,6 +127,33 @@ export function buildHoldingActionPlan(
     input.currentWeightPct === null
       ? null
       : input.currentWeightPct * (1 - soldRatio);
+  const soldWeightPct =
+    input.currentWeightPct === null ? null : input.currentWeightPct * soldRatio;
+  const wouldExit = afterQuantity <= 0;
+  const leavesOddLot = lot > 1 && afterQuantity > 0 && afterQuantity < lot;
+  const tradeTooSmall =
+    soldWeightPct !== null && soldWeightPct < MIN_PARTIAL_SELL_WEIGHT_PCT;
+  const remainderTooSmall =
+    afterWeightPct !== null && afterWeightPct < MIN_REMAINING_POSITION_WEIGHT_PCT;
+
+  if (wouldExit) {
+    return noTrade(
+      input,
+      "REVIEW",
+      "REDUCE を全売却へ自動変換しません。保有が1単元のみのため、継続保有か EXIT かを改めて確認します"
+    );
+  }
+  if (leavesOddLot || tradeTooSmall || remainderTooSmall) {
+    return noTrade(
+      input,
+      "REVIEW",
+      leavesOddLot
+        ? "売却後が最低売買単位未満になるため、機械的な一部売却は行いません"
+        : tradeTooSmall
+          ? "売却量がポートフォリオの0.05%未満で効果が小さいため、長期保有では売買を増やしません"
+          : "売却後の残存比率が0.10%未満になるため、端数保有を作らず継続保有か EXIT かを確認します"
+    );
+  }
 
   return {
     direction: "SELL",

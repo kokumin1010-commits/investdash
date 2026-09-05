@@ -4,10 +4,10 @@ import { protectedProcedure, router } from "../_core/trpc";
 import {
   actionQueueSummary,
   decideActionQueueItem,
-  listActionQueue,
   reconcileApprovedActionQueue,
   wakeSnoozedActionQueue,
 } from "../services/actionQueueService";
+import { listActionQueueCommandCenter } from "../services/actionQueueCommandCenterService";
 import { backfillInitialActionQueue } from "../services/portfolio";
 import { listSkippedActionReviews } from "../services/skipDecisionReviewService";
 
@@ -32,7 +32,7 @@ export const actionQueueRouter = router({
     )
     .query(async ({ ctx, input }) => {
       await wakeSnoozedActionQueue(ctx.user.id);
-      return listActionQueue(ctx.user.id, input);
+      return listActionQueueCommandCenter(ctx.user.id, input);
     }),
 
   summary: protectedProcedure.query(async ({ ctx }) => {
