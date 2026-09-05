@@ -284,4 +284,4 @@
 - [x] 在 rebuilt 完成137个测试文件/1102项测试、TypeScript 与生产构建
 - [x] 将通过检查的版本部署 Railway（commit `ed10960`）
 - [x] 在 SalesDash 正式 Action Queue 无写入验证买入0/卖出8/要确认14、6920.T 100股降级、损益/资金用途、理由可选及390px/1280px无溢出
-- [ ] 保存本轮 Action Queue 最终 checkpoint
+- [x] 保存本轮 Action Queue 最终 checkpoint
