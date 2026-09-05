@@ -282,5 +282,6 @@
 - [x] 将“今回は見送る”的理由改为任意输入；未填写时保存为未记录，不伪造理由
 - [x] 为方向筛选、小仓位卖出、残余仓位、损益/资金用途、见送理由有/无及390px/1280px补充测试
 - [x] 在 rebuilt 完成137个测试文件/1102项测试、TypeScript 与生产构建
-- [ ] 将通过检查的版本部署 Railway
-- [ ] 在 SalesDash 正式 Action Queue 完成无写入筛选/文案验收并保存 checkpoint
+- [x] 将通过检查的版本部署 Railway（commit `ed10960`）
+- [x] 在 SalesDash 正式 Action Queue 无写入验证买入0/卖出8/要确认14、6920.T 100股降级、损益/资金用途、理由可选及390px/1280px无溢出
+- [ ] 保存本轮 Action Queue 最终 checkpoint
