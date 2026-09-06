@@ -10,6 +10,11 @@ import {
 } from "../../shared/buyPlanRanking";
 import { normalizeSymbol } from "../../shared/investing";
 import { computePortfolioPositionSizing } from "../../shared/portfolioPositionSizing";
+import {
+  BUY_PLAN_OPPORTUNITY_VERSION,
+  selectAllRankedCandidates,
+  selectUnheldQualityPriceOpportunities,
+} from "../../shared/buyPlanOpportunity";
 import { getDb } from "../db";
 import * as dbq from "../db";
 import { convertToJpy } from "./fx";
@@ -205,10 +210,8 @@ export async function buildRankedPlanOverview(
       },
     };
   });
-  const monthlyCandidates = enrichedRows
-    .filter(item => item.ranking.eligible && item.ranking.rank !== null)
-    .sort((a, b) => (a.ranking.rank ?? 999) - (b.ranking.rank ?? 999))
-    .slice(0, 5);
+  const monthlyCandidates = selectAllRankedCandidates(enrichedRows);
+  const unheldOpportunities = selectUnheldQualityPriceOpportunities(enrichedRows);
 
   return {
     rows: enrichedRows,
@@ -219,6 +222,9 @@ export async function buildRankedPlanOverview(
       snapshotRecomputed: !snapshotCurrent,
       eligibleCount: enrichedRows.filter(item => item.ranking.eligible).length,
       monthlyCandidates,
+      priorityCandidateCount: Math.min(5, monthlyCandidates.length),
+      unheldOpportunityVersion: BUY_PLAN_OPPORTUNITY_VERSION,
+      unheldOpportunities,
       frozenAt:
         activeSnapshots.length > 0
           ? activeSnapshots.reduce(

@@ -102,6 +102,36 @@ const commonRow = {
   },
 };
 
+const additionalEligibleRows = Array.from({ length: 11 }, (_, index) => ({
+  ...commonRow,
+  symbol: index === 0 ? "GOOGL" : `TEST${index + 2}`,
+  name: index === 0 ? "Alphabet" : `候補 ${index + 2}`,
+  action: index % 2 === 0 ? "ADD_MAIN" : "ADD_SMALL",
+  actionLabel: index % 2 === 0 ? "主力買い増しを検討" : "小幅に買い増し検討",
+  outsideDirection: null,
+  held: index !== 0,
+  holdingValueJpy: index === 0 ? null : 5_000_000,
+  weightPct: index === 0 ? null : 1,
+  avgCost: index === 0 ? null : 2_700,
+  pnlPct: index === 0 ? null : 14,
+  watchTargetPrice: index === 0 ? 3_100 : null,
+  watchGapPct: index === 0 ? -0.6 : null,
+  watchPriority: index === 0 ? "HIGH" : null,
+  sizing: {
+    ...commonRow.sizing,
+    shares: index === 0 ? 25 : 100 + index,
+    amountBase: index === 0 ? 770_500 : 1_000_000 + index,
+    amountLocal: index === 0 ? 5_137 : 1_000_000 + index,
+    currentWeightPct: index === 0 ? 0 : 1,
+    afterWeightPct: index === 0 ? 0.09 : 1.2,
+  },
+  ranking: {
+    ...commonRow.ranking,
+    rank: index + 2,
+    score: 86 - index,
+  },
+}));
+
 const overviewData = {
   rows: [
     {
@@ -112,6 +142,7 @@ const overviewData = {
       actionLabel: "小幅に買い増し検討",
       outsideDirection: null,
     },
+    ...additionalEligibleRows,
     {
       ...commonRow,
       symbol: "NVDA",
@@ -122,6 +153,12 @@ const overviewData = {
       needsCheck: true,
       currentBandId: 22,
       pendingCheckCount: 3,
+      ranking: {
+        ...commonRow.ranking,
+        eligible: false,
+        rank: null,
+        gateReasons: ["未照合項目があります"],
+      },
     },
     {
       ...commonRow,
@@ -130,6 +167,12 @@ const overviewData = {
       action: "HOLD",
       actionLabel: "様子見",
       outsideDirection: null,
+      ranking: {
+        ...commonRow.ranking,
+        eligible: false,
+        rank: null,
+        gateReasons: ["買い増し価格帯ではありません"],
+      },
     },
     {
       ...commonRow,
@@ -137,6 +180,12 @@ const overviewData = {
       name: "ソフトバンクグループ",
       action: null,
       outsideDirection: "ABOVE",
+      ranking: {
+        ...commonRow.ranking,
+        eligible: false,
+        rank: null,
+        gateReasons: ["価格帯の外です"],
+      },
     },
   ],
   stats: { avgWeightPct: 1.5, topAvgWeightPct: 4.2 },
@@ -153,13 +202,21 @@ const overviewData = {
     scoreVersion: "buy-plan-rank-v1",
     rankingFingerprint: "fixture",
     snapshotRecomputed: false,
-    eligibleCount: 1,
+    eligibleCount: 12,
+    priorityCandidateCount: 5,
+    unheldOpportunityVersion: "unheld-quality-price-v1",
+    unheldOpportunities: [] as Array<(typeof overviewData.rows)[number]>,
     frozenAt: new Date("2026-08-01T00:00:00Z"),
     monthlyCandidates: [] as Array<(typeof overviewData.rows)[number]>,
   },
 };
 
-overviewData.ranking.monthlyCandidates = [overviewData.rows[0]];
+overviewData.ranking.monthlyCandidates = overviewData.rows
+  .filter(row => row.ranking.eligible && row.ranking.rank !== null)
+  .sort((a, b) => (a.ranking.rank ?? 999) - (b.ranking.rank ?? 999));
+overviewData.ranking.unheldOpportunities = [
+  overviewData.rows.find(row => row.symbol === "GOOGL")!,
+];
 
 const proposal = {
   id: 1,
@@ -196,7 +253,7 @@ afterEach(() => {
 
 describe("BuyPlans page interactions", () => {
   it.each([390, 1280])(
-    "%dpx 相当で本月优先候补の具体数量を表示し、全一覧は既定で閉じる",
+    "%dpx 相当で全候補を10名ごとに表示し、上位5名を優先強調する",
     width => {
     Object.defineProperty(window, "innerWidth", {
       value: width,
@@ -204,14 +261,28 @@ describe("BuyPlans page interactions", () => {
     });
     render(React.createElement(BuyPlans));
 
-    expect(screen.getByText("今月の優先候補")).toBeTruthy();
-    expect(screen.getByText("500 株")).toBeTruthy();
-    expect(screen.getByText("154 万円")).toBeTruthy();
-    expect(screen.getByText("2.30%")).toBeTruthy();
+    expect(screen.getByText("今月の候補ランキング（全件）")).toBeTruthy();
+    expect(screen.getByText("順位 1〜10")).toBeTruthy();
+    expect(screen.getByText("順位 11〜12")).toBeTruthy();
+    expect(screen.getAllByText("今月優先")).toHaveLength(5);
+    expect(screen.getAllByText("500 株").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("154 万円").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("2.30%").length).toBeGreaterThan(0);
+    expect(screen.getByText(/表示 12 銘柄（全件）/)).toBeTruthy();
     expect(screen.queryByTestId("full-buy-plan-list")).toBeNull();
-    expect(screen.getByRole("button", { name: "全 4 銘柄を表示" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "全 15 銘柄を表示" })).toBeTruthy();
     }
   );
+
+  it("未保有で品質資料と価格条件を通過した候補を独立表示する", () => {
+    render(React.createElement(BuyPlans));
+    expect(screen.getByText("未保有・品質資料と価格条件を通過")).toBeTruthy();
+    expect(screen.getByText("初回建て候補")).toBeTruthy();
+    expect(screen.getAllByText("Alphabet").length).toBeGreaterThanOrEqual(2);
+    expect(screen.getAllByText("25 株").length).toBeGreaterThanOrEqual(2);
+    expect(screen.getAllByText("77 万円").length).toBeGreaterThanOrEqual(2);
+    expect(screen.getAllByText("0円（未保有）").length).toBeGreaterThanOrEqual(2);
+  });
 
   it("shows real plan coverage and every pending holding without fake price bands", () => {
     render(React.createElement(BuyPlans));
@@ -233,7 +304,7 @@ describe("BuyPlans page interactions", () => {
   it("switches BUY, VERIFY, OUTSIDE and ALL result sets", async () => {
     const user = userEvent.setup();
     render(React.createElement(BuyPlans));
-    await user.click(screen.getByRole("button", { name: "全 4 銘柄を表示" }));
+    await user.click(screen.getByRole("button", { name: "全 15 銘柄を表示" }));
 
     expect(screen.getByText("トヨタ自動車", { selector: "span" })).toBeTruthy();
     expect(screen.queryByText("NVIDIA", { selector: "span" })).toBeNull();
@@ -262,7 +333,7 @@ describe("BuyPlans page interactions", () => {
   it("shows an empty search and restores the list through the clear button", async () => {
     const user = userEvent.setup();
     render(React.createElement(BuyPlans));
-    await user.click(screen.getByRole("button", { name: "全 4 銘柄を表示" }));
+    await user.click(screen.getByRole("button", { name: "全 15 銘柄を表示" }));
     await user.click(screen.getByRole("button", { name: /すべて/ }));
 
     const search = screen.getByPlaceholderText("銘柄名・ティッカー");

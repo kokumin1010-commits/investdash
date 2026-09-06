@@ -36,6 +36,7 @@ import {
   formatNextBandHint,
   type BuyPlanListFilter,
 } from "@shared/buyPlanUi";
+import { groupRankedCandidates } from "@shared/buyPlanOpportunity";
 
 /**
  * 買い増しプランの一覧。
@@ -88,6 +89,12 @@ export default function BuyPlans() {
   const coverage = data?.coverage;
   const ranking = data?.ranking;
   const monthlyCandidates = ranking?.monthlyCandidates ?? [];
+  const unheldOpportunities = ranking?.unheldOpportunities ?? [];
+  const priorityCandidateCount = ranking?.priorityCandidateCount ?? Math.min(5, monthlyCandidates.length);
+  const rankedCandidateGroups = useMemo(
+    () => groupRankedCandidates(monthlyCandidates),
+    [monthlyCandidates]
+  );
 
   const pendingRows = useMemo(() => {
     const normalized = keyword.trim().toLowerCase();
@@ -281,27 +288,92 @@ export default function BuyPlans() {
       )}
 
       {!isLoading && !error && ranking && (
+        <section className="space-y-3" data-testid="unheld-quality-opportunities">
+          <div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
+            <div>
+              <p className="text-xs font-semibold tracking-[0.14em] text-sky-700 dark:text-sky-300">
+                FIRST POSITION OPPORTUNITIES
+              </p>
+              <h2 className="mt-1 text-xl font-semibold">未保有・品質資料と価格条件を通過</h2>
+              <p className="mt-1 text-sm text-muted-foreground">
+                現在の保有が0で、投資カード、資料品質、買付価格帯、未照合なし、実行可能な初回サイズをすべて確認できた候補です。
+              </p>
+            </div>
+            <div className="text-xs text-muted-foreground sm:text-right">
+              <p>{ranking.unheldOpportunityVersion}</p>
+              <p>現在 {unheldOpportunities.length} 銘柄</p>
+            </div>
+          </div>
+
+          {unheldOpportunities.length > 0 ? (
+            <div className="grid gap-3 lg:grid-cols-2">
+              {unheldOpportunities.map(row => (
+                <MonthlyCandidateCard
+                  key={`unheld-${row.symbol}`}
+                  row={row}
+                  priority
+                  unheldOpportunity
+                />
+              ))}
+            </div>
+          ) : (
+            <Card className="border-dashed border-sky-200 bg-sky-50/40 dark:border-sky-900 dark:bg-sky-950/20">
+              <CardContent className="flex min-h-32 items-center gap-3 p-5">
+                <ShieldCheck className="size-7 shrink-0 text-sky-600" />
+                <div>
+                  <p className="font-semibold">現在、条件をすべて満たす未保有候補はありません</p>
+                  <p className="mt-1 text-sm leading-6 text-muted-foreground">
+                    価格だけで候補を作らず、品質資料・確認項目・初回購入サイズが揃うまで待ちます。候補が出ればこの最上段に表示します。
+                  </p>
+                </div>
+              </CardContent>
+            </Card>
+          )}
+        </section>
+      )}
+
+      {!isLoading && !error && ranking && (
         <section className="space-y-3" data-testid="monthly-priority-candidates">
           <div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
             <div>
               <p className="text-xs font-semibold tracking-[0.14em] text-emerald-700 dark:text-emerald-300">
                 MONTHLY CAPITAL ALLOCATION
               </p>
-              <h2 className="mt-1 text-xl font-semibold">今月の優先候補</h2>
+              <h2 className="mt-1 text-xl font-semibold">今月の候補ランキング（全件）</h2>
               <p className="mt-1 text-sm text-muted-foreground">
-                実行条件を満たす上位5銘柄だけを表示します。順位は売買指示ではなく、月1回の検討順です。
+                実行条件を満たす候補をすべて順位順に表示します。上位{priorityCandidateCount}銘柄は今月優先として強調しますが、順位は売買指示ではなく月1回の検討順です。
               </p>
             </div>
             <div className="text-xs text-muted-foreground sm:text-right">
               <p>{ranking.rankingMonth} · {ranking.scoreVersion}</p>
-              <p>実行可能 {ranking.eligibleCount} 銘柄 / 表示 {monthlyCandidates.length} 銘柄</p>
+              <p>実行可能 {ranking.eligibleCount} 銘柄 / 表示 {monthlyCandidates.length} 銘柄（全件）</p>
             </div>
           </div>
 
           {monthlyCandidates.length > 0 ? (
-            <div className="grid gap-3 lg:grid-cols-2">
-              {monthlyCandidates.map(row => (
-                <MonthlyCandidateCard key={row.symbol} row={row} />
+            <div className="space-y-6" data-testid="all-ranked-candidates">
+              {rankedCandidateGroups.map((group, groupIndex) => (
+                <section
+                  key={`candidate-group-${groupIndex}`}
+                  className="space-y-3"
+                  data-testid={`ranked-candidate-group-${groupIndex + 1}`}
+                >
+                  <div className="flex items-center justify-between gap-3 border-b pb-2">
+                    <h3 className="font-semibold">
+                      順位 {group[0]?.ranking.rank}〜{group[group.length - 1]?.ranking.rank}
+                    </h3>
+                    <span className="text-xs text-muted-foreground">{group.length} 銘柄</span>
+                  </div>
+                  <div className="grid gap-3 lg:grid-cols-2">
+                    {group.map(row => (
+                      <MonthlyCandidateCard
+                        key={row.symbol}
+                        row={row}
+                        priority={(row.ranking.rank ?? 999) <= priorityCandidateCount}
+                      />
+                    ))}
+                  </div>
+                </section>
               ))}
             </div>
           ) : (
@@ -516,29 +588,71 @@ function priceBandText(row: Row): string {
   return "価格条件未取得";
 }
 
-function MonthlyCandidateCard({ row }: { row: Row }) {
+function MonthlyCandidateCard({
+  row,
+  priority = false,
+  unheldOpportunity = false,
+}: {
+  row: Row;
+  priority?: boolean;
+  unheldOpportunity?: boolean;
+}) {
   return (
-    <Card className="overflow-hidden border-emerald-200 shadow-sm dark:border-emerald-900">
-      <CardHeader className="border-b bg-gradient-to-br from-emerald-50 to-white pb-3 dark:from-emerald-950/40 dark:to-background">
+    <Card
+      className={`overflow-hidden shadow-sm ${
+        unheldOpportunity
+          ? "border-sky-300 dark:border-sky-800"
+          : priority
+            ? "border-emerald-200 dark:border-emerald-900"
+            : "border-border"
+      }`}
+    >
+      <CardHeader
+        className={`border-b pb-3 ${
+          unheldOpportunity
+            ? "bg-gradient-to-br from-sky-50 to-white dark:from-sky-950/40 dark:to-background"
+            : priority
+              ? "bg-gradient-to-br from-emerald-50 to-white dark:from-emerald-950/40 dark:to-background"
+              : "bg-muted/20"
+        }`}
+      >
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-2">
-              <Badge className="bg-emerald-700 text-white hover:bg-emerald-700">
+              <Badge
+                className={
+                  unheldOpportunity
+                    ? "bg-sky-700 text-white hover:bg-sky-700"
+                    : priority
+                      ? "bg-emerald-700 text-white hover:bg-emerald-700"
+                      : "bg-slate-700 text-white hover:bg-slate-700"
+                }
+              >
                 #{row.ranking.rank}
               </Badge>
               <CardTitle className="text-base break-words">{row.name}</CardTitle>
               <span className="text-xs text-muted-foreground">{row.symbol}</span>
               {!row.held && <Badge variant="outline">未保有</Badge>}
+              {unheldOpportunity && (
+                <Badge className="bg-sky-100 text-sky-800 hover:bg-sky-100 dark:bg-sky-950 dark:text-sky-200">
+                  初回建て候補
+                </Badge>
+              )}
+              {priority && !unheldOpportunity && (
+                <Badge className="bg-emerald-100 text-emerald-800 hover:bg-emerald-100 dark:bg-emerald-950 dark:text-emerald-200">
+                  今月優先
+                </Badge>
+              )}
             </div>
             <CardDescription className="mt-1">
               {row.actionLabel ?? (row.action ? BAND_ACTION_LABELS[row.action] : "判定待ち")}
             </CardDescription>
           </div>
           <div className="shrink-0 text-right">
-            <p className="font-mono text-2xl font-semibold text-emerald-700 dark:text-emerald-300">
+            <p className={`font-mono text-2xl font-semibold ${unheldOpportunity ? "text-sky-700 dark:text-sky-300" : "text-emerald-700 dark:text-emerald-300"}`}>
               {row.ranking.score}
             </p>
-            <p className="text-[10px] text-muted-foreground">100点・資料品質ベース</p>
+            <p className="text-[10px] text-muted-foreground">100点・構造資料ベース</p>
           </div>
         </div>
       </CardHeader>
