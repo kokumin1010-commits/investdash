@@ -219,6 +219,12 @@ export async function updateSettings(
     sectorConcentrationThreshold: number;
     cashBalance: string;
     autoNewsEnabled: boolean;
+    longTermTargetNetAssetsJpy: string | null;
+    longTermTargetDate: string | null;
+    longTermTargetAnnualDividendJpy: string | null;
+    longTermTargetAnnualInterestJpy: string | null;
+    longTermTargetAnnualNetCashJpy: string | null;
+    longTermTargetUpdatedAt: Date | null;
     lastPriceSyncAt: Date;
     lastNewsSyncAt: Date;
     fxAutoUpdate: boolean;

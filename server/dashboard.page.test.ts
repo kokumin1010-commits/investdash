@@ -1,12 +1,14 @@
 // @vitest-environment jsdom
 
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import * as React from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   overview: vi.fn(),
   assetTrend: vi.fn(),
+  settings: vi.fn(),
+  updateSettings: vi.fn(),
   mutateAsync: vi.fn(),
 }));
 
@@ -14,11 +16,21 @@ vi.mock("@/lib/trpc", () => ({
   trpc: {
     useUtils: () => ({
       invalidate: vi.fn(),
-      portfolio: { invalidate: vi.fn() },
+      portfolio: {
+        invalidate: vi.fn(),
+        settings: { invalidate: vi.fn() },
+      },
     }),
     portfolio: {
       overview: { useQuery: mocks.overview },
       assetTrend: { useQuery: mocks.assetTrend },
+      settings: { useQuery: mocks.settings },
+      updateSettings: {
+        useMutation: () => ({
+          mutate: mocks.updateSettings,
+          isPending: false,
+        }),
+      },
       dataHealth: { useQuery: () => ({ data: null, isLoading: false }) },
       syncPrices: {
         useMutation: () => ({
@@ -242,11 +254,92 @@ beforeEach(() => {
     isLoading: false,
     error: null,
   });
+  mocks.settings.mockReturnValue({
+    data: {
+      longTermTargetNetAssetsJpy: "100000000000.00",
+      longTermTargetDate: "2030-12-31",
+      longTermTargetAnnualDividendJpy: null,
+      longTermTargetAnnualInterestJpy: null,
+      longTermTargetAnnualNetCashJpy: null,
+    },
+    isLoading: false,
+  });
 });
 
 afterEach(() => cleanup());
 
 describe("Dashboard actual page", () => {
+  for (const width of [390, 1280]) {
+    it(`renders the 2030 long-term goal at ${width}px without turning it into a trade target`, () => {
+      Object.defineProperty(window, "innerWidth", {
+        configurable: true,
+        value: width,
+      });
+      mocks.overview.mockReturnValue({
+        data: borrowingOverview(),
+        isLoading: false,
+        error: null,
+      });
+
+      render(React.createElement(Dashboard));
+
+      expect(screen.getByText("長期目標")).toBeTruthy();
+      expect(screen.getByText("1,000 億円")).toBeTruthy();
+      expect(screen.getByText("2030-12-31 まで")).toBeTruthy();
+      expect(screen.getByText("高い挑戦目標")).toBeTruthy();
+      expect(screen.getByText("現在の年間配当（税引前）")).toBeTruthy();
+      expect(screen.getByText("年間利息（見込み）")).toBeTruthy();
+      expect(screen.getByText("年間純キャッシュ収入")).toBeTruthy();
+      expect(
+        screen.getByText("目標は進捗確認だけに使い、売買順位や提案を変えません。")
+      ).toBeTruthy();
+    });
+  }
+
+  it("shows an honest empty state when a long-term goal is not configured", () => {
+    mocks.settings.mockReturnValue({
+      data: {
+        longTermTargetNetAssetsJpy: null,
+        longTermTargetDate: null,
+        longTermTargetAnnualDividendJpy: null,
+        longTermTargetAnnualInterestJpy: null,
+        longTermTargetAnnualNetCashJpy: null,
+      },
+      isLoading: false,
+    });
+
+    render(React.createElement(Dashboard));
+    expect(
+      screen.getByText(
+        "目標純資産と目標日がまだ設定されていません。「目標を編集」から登録できます。"
+      )
+    ).toBeTruthy();
+  });
+
+  it("edits the asset target in oku-yen and optional income goals in man-yen", () => {
+    render(React.createElement(Dashboard));
+    fireEvent.click(screen.getByRole("button", { name: "目標を編集" }));
+
+    const targetAsset = screen.getByLabelText("目標純資産（億円）") as HTMLInputElement;
+    const targetDate = screen.getByLabelText("目標日") as HTMLInputElement;
+    const dividendTarget = screen.getByLabelText(
+      "年間配当目標（万円・任意）"
+    ) as HTMLInputElement;
+    expect(targetAsset.value).toBe("1000");
+    expect(targetDate.value).toBe("2030-12-31");
+
+    fireEvent.change(dividendTarget, { target: { value: "5000" } });
+    fireEvent.click(screen.getByRole("button", { name: "保存" }));
+
+    expect(mocks.updateSettings).toHaveBeenCalledWith({
+      longTermTargetNetAssetsJpy: 100_000_000_000,
+      longTermTargetDate: "2030-12-31",
+      longTermTargetAnnualDividendJpy: 50_000_000,
+      longTermTargetAnnualInterestJpy: null,
+      longTermTargetAnnualNetCashJpy: null,
+    });
+  });
+
   it("renders ¥0 dividend coverage and all five signal actions with stale stats", () => {
     render(React.createElement(Dashboard));
     expect(screen.getByText("年間配当（税引前）")).toBeTruthy();

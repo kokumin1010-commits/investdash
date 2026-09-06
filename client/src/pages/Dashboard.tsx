@@ -83,6 +83,7 @@ import { toast } from "sonner";
 import { Link } from "wouter";
 import { DataHealthCard } from "@/components/investing/DataHealthCard";
 import { AttentionEmptyState } from "@/components/investing/AttentionEmptyState";
+import { LongTermGoalCard } from "@/components/investing/LongTermGoalCard";
 
 export default function Dashboard() {
   const utils = trpc.useUtils();
@@ -536,6 +537,16 @@ export default function Dashboard() {
     };
   }, [data?.brokers, dividends, summary]);
 
+  const annualBorrowingInterestBase = useMemo(
+    () =>
+      (data?.brokers ?? []).reduce(
+        (total, broker) =>
+          total + (broker.leverage?.interest?.annualInterestBase ?? 0),
+        0
+      ),
+    [data?.brokers]
+  );
+
   /**
    * 借入の実効金利（年率 %）。
    *
@@ -699,6 +710,13 @@ export default function Dashboard() {
             正常なときは 1 行に収めて邪魔にならないようにする。
           */}
           <DataHealthCard showSyncButton={false} />
+
+          <LongTermGoalCard
+            currentNetAssetsJpy={summary?.netAssetsBase}
+            annualDividendJpy={dividends?.annualIncomeBase}
+            annualInterestIncomeJpy={summary?.interestIncomeBase}
+            annualBorrowingInterestJpy={annualBorrowingInterestBase}
+          />
 
           {/* サマリーカード */}
           <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">

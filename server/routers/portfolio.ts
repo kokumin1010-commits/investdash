@@ -163,6 +163,15 @@ export const portfolioRouter = router({
         cashBalance: z.number().min(0).optional(),
         autoNewsEnabled: z.boolean().optional(),
         fxAutoUpdate: z.boolean().optional(),
+        longTermTargetNetAssetsJpy: z.number().positive().nullable().optional(),
+        longTermTargetDate: z
+          .string()
+          .regex(/^\d{4}-\d{2}-\d{2}$/)
+          .nullable()
+          .optional(),
+        longTermTargetAnnualDividendJpy: z.number().min(0).nullable().optional(),
+        longTermTargetAnnualInterestJpy: z.number().min(0).nullable().optional(),
+        longTermTargetAnnualNetCashJpy: z.number().min(0).nullable().optional(),
       })
     )
     .mutation(async ({ ctx, input }) => {
@@ -181,6 +190,38 @@ export const portfolioRouter = router({
             : undefined,
         autoNewsEnabled: input.autoNewsEnabled,
         fxAutoUpdate: input.fxAutoUpdate,
+        longTermTargetNetAssetsJpy:
+          input.longTermTargetNetAssetsJpy === undefined
+            ? undefined
+            : input.longTermTargetNetAssetsJpy === null
+              ? null
+              : String(input.longTermTargetNetAssetsJpy),
+        longTermTargetDate: input.longTermTargetDate,
+        longTermTargetAnnualDividendJpy:
+          input.longTermTargetAnnualDividendJpy === undefined
+            ? undefined
+            : input.longTermTargetAnnualDividendJpy === null
+              ? null
+              : String(input.longTermTargetAnnualDividendJpy),
+        longTermTargetAnnualInterestJpy:
+          input.longTermTargetAnnualInterestJpy === undefined
+            ? undefined
+            : input.longTermTargetAnnualInterestJpy === null
+              ? null
+              : String(input.longTermTargetAnnualInterestJpy),
+        longTermTargetAnnualNetCashJpy:
+          input.longTermTargetAnnualNetCashJpy === undefined
+            ? undefined
+            : input.longTermTargetAnnualNetCashJpy === null
+              ? null
+              : String(input.longTermTargetAnnualNetCashJpy),
+        ...(input.longTermTargetNetAssetsJpy !== undefined ||
+        input.longTermTargetDate !== undefined ||
+        input.longTermTargetAnnualDividendJpy !== undefined ||
+        input.longTermTargetAnnualInterestJpy !== undefined ||
+        input.longTermTargetAnnualNetCashJpy !== undefined
+          ? { longTermTargetUpdatedAt: new Date() }
+          : {}),
         // 手動でレートを入れたときは、自動取得の時刻表示が実態と合わなくなるため消す
         ...(input.usdJpyRate !== undefined ||
         input.sgdJpyRate !== undefined ||

@@ -1,5 +1,6 @@
 import {
   boolean,
+  date,
   decimal,
   index,
   int,
@@ -653,6 +654,29 @@ export const userSettings = mysqlTable("userSettings", {
     .default("0.00")
     .notNull(),
   autoNewsEnabled: boolean("autoNewsEnabled").default(true).notNull(),
+  /** 长期目标：净资产＝股票时价＋现金性资产＋现金－借入（JPY） */
+  longTermTargetNetAssetsJpy: decimal("longTermTargetNetAssetsJpy", {
+    precision: 20,
+    scale: 2,
+  }),
+  /** 日历目标日。时间点ではなく长期目标的期限，因此 DATE 保存 */
+  longTermTargetDate: date("longTermTargetDate", { mode: "string" }),
+  /** 目标年度股息（税前、JPY）。未设置时为 null */
+  longTermTargetAnnualDividendJpy: decimal("longTermTargetAnnualDividendJpy", {
+    precision: 20,
+    scale: 2,
+  }),
+  /** 目标年度利息收入（JPY）。未设置时为 null */
+  longTermTargetAnnualInterestJpy: decimal("longTermTargetAnnualInterestJpy", {
+    precision: 20,
+    scale: 2,
+  }),
+  /** 目标年度净现金收入＝股息＋利息收入－借入利息（JPY） */
+  longTermTargetAnnualNetCashJpy: decimal("longTermTargetAnnualNetCashJpy", {
+    precision: 20,
+    scale: 2,
+  }),
+  longTermTargetUpdatedAt: timestamp("longTermTargetUpdatedAt"),
   lastPriceSyncAt: timestamp("lastPriceSyncAt"),
   lastNewsSyncAt: timestamp("lastNewsSyncAt"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
