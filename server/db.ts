@@ -224,6 +224,10 @@ export async function updateSettings(
     longTermTargetAnnualDividendJpy: string | null;
     longTermTargetAnnualInterestJpy: string | null;
     longTermTargetAnnualNetCashJpy: string | null;
+    longTermAnnualContributionJpy: string | null;
+    longTermScenarioConservativePct: string | null;
+    longTermScenarioBasePct: string | null;
+    longTermScenarioOptimisticPct: string | null;
     longTermTargetUpdatedAt: Date | null;
     lastPriceSyncAt: Date;
     lastNewsSyncAt: Date;

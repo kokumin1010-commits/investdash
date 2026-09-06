@@ -676,6 +676,24 @@ export const userSettings = mysqlTable("userSettings", {
     precision: 20,
     scale: 2,
   }),
+  /** 每年计划追加入金（JPY）。情景计算按12个月等额月末入金 */
+  longTermAnnualContributionJpy: decimal("longTermAnnualContributionJpy", {
+    precision: 20,
+    scale: 2,
+  }),
+  /** 三情景仅为用户可编辑的名义年率假设，不是收益预测 */
+  longTermScenarioConservativePct: decimal("longTermScenarioConservativePct", {
+    precision: 6,
+    scale: 2,
+  }),
+  longTermScenarioBasePct: decimal("longTermScenarioBasePct", {
+    precision: 6,
+    scale: 2,
+  }),
+  longTermScenarioOptimisticPct: decimal("longTermScenarioOptimisticPct", {
+    precision: 6,
+    scale: 2,
+  }),
   longTermTargetUpdatedAt: timestamp("longTermTargetUpdatedAt"),
   lastPriceSyncAt: timestamp("lastPriceSyncAt"),
   lastNewsSyncAt: timestamp("lastNewsSyncAt"),

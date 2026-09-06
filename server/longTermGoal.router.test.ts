@@ -45,6 +45,10 @@ describe("portfolio.updateSettings long-term goal", () => {
       longTermTargetAnnualDividendJpy: null,
       longTermTargetAnnualInterestJpy: null,
       longTermTargetAnnualNetCashJpy: 50_000_000,
+      longTermAnnualContributionJpy: 12_000_000,
+      longTermScenarioConservativePct: 4,
+      longTermScenarioBasePct: 8,
+      longTermScenarioOptimisticPct: 12,
     });
 
     expect(mocks.updateSettings).toHaveBeenCalledWith(
@@ -55,6 +59,10 @@ describe("portfolio.updateSettings long-term goal", () => {
         longTermTargetAnnualDividendJpy: null,
         longTermTargetAnnualInterestJpy: null,
         longTermTargetAnnualNetCashJpy: "50000000",
+        longTermAnnualContributionJpy: "12000000",
+        longTermScenarioConservativePct: "4",
+        longTermScenarioBasePct: "8",
+        longTermScenarioOptimisticPct: "12",
         longTermTargetUpdatedAt: expect.any(Date),
       })
     );
@@ -71,6 +79,17 @@ describe("portfolio.updateSettings long-term goal", () => {
         longTermTargetNetAssetsJpy: 0,
       })
     ).rejects.toThrow();
+    expect(mocks.updateSettings).not.toHaveBeenCalled();
+  });
+
+  it("rejects scenario assumptions that are not conservative ≤ base ≤ optimistic", async () => {
+    await expect(
+      createCaller().portfolio.updateSettings({
+        longTermScenarioConservativePct: 12,
+        longTermScenarioBasePct: 8,
+        longTermScenarioOptimisticPct: 4,
+      })
+    ).rejects.toThrow("保守 ≤ 基準 ≤ 楽観");
     expect(mocks.updateSettings).not.toHaveBeenCalled();
   });
 });

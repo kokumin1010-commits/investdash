@@ -19,7 +19,11 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { trpc } from "@/lib/trpc";
-import { buildLongTermGoalProgress } from "@shared/longTermGoal";
+import {
+  buildLongTermGoalProgress,
+  DEFAULT_LONG_TERM_SCENARIO_RATES,
+  type LongTermGoalScenario,
+} from "@shared/longTermGoal";
 import { Flag, Pencil, ShieldCheck, Target } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
@@ -58,6 +62,13 @@ function targetLabel(value: number | null) {
   return value === null ? "目標未設定" : `目標 ${yen(value)}`;
 }
 
+function parseRate(value: string) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed >= -50 && parsed <= 100
+    ? parsed
+    : null;
+}
+
 export function LongTermGoalCard(props: Props) {
   const utils = trpc.useUtils();
   const settings = trpc.portfolio.settings.useQuery();
@@ -67,6 +78,16 @@ export function LongTermGoalCard(props: Props) {
   const [dividendMan, setDividendMan] = useState("");
   const [interestMan, setInterestMan] = useState("");
   const [netCashMan, setNetCashMan] = useState("");
+  const [contributionMan, setContributionMan] = useState("");
+  const [conservativePct, setConservativePct] = useState(
+    String(DEFAULT_LONG_TERM_SCENARIO_RATES.conservative)
+  );
+  const [basePct, setBasePct] = useState(
+    String(DEFAULT_LONG_TERM_SCENARIO_RATES.base)
+  );
+  const [optimisticPct, setOptimisticPct] = useState(
+    String(DEFAULT_LONG_TERM_SCENARIO_RATES.optimistic)
+  );
 
   useEffect(() => {
     const data = settings.data;
@@ -92,6 +113,22 @@ export function LongTermGoalCard(props: Props) {
         ? String(Number(data.longTermTargetAnnualNetCashJpy) / JPY_PER_MAN)
         : ""
     );
+    setContributionMan(
+      data.longTermAnnualContributionJpy
+        ? String(Number(data.longTermAnnualContributionJpy) / JPY_PER_MAN)
+        : ""
+    );
+    setConservativePct(
+      data.longTermScenarioConservativePct ??
+        String(DEFAULT_LONG_TERM_SCENARIO_RATES.conservative)
+    );
+    setBasePct(
+      data.longTermScenarioBasePct ?? String(DEFAULT_LONG_TERM_SCENARIO_RATES.base)
+    );
+    setOptimisticPct(
+      data.longTermScenarioOptimisticPct ??
+        String(DEFAULT_LONG_TERM_SCENARIO_RATES.optimistic)
+    );
   }, [settings.data]);
 
   const progress = useMemo(
@@ -114,6 +151,24 @@ export function LongTermGoalCard(props: Props) {
         targetAnnualNetCashJpy: settings.data?.longTermTargetAnnualNetCashJpy
           ? Number(settings.data.longTermTargetAnnualNetCashJpy)
           : null,
+        annualContributionJpy: settings.data?.longTermAnnualContributionJpy
+          ? Number(settings.data.longTermAnnualContributionJpy)
+          : null,
+        conservativeReturnPct:
+          settings.data?.longTermScenarioConservativePct === null ||
+          settings.data?.longTermScenarioConservativePct === undefined
+            ? null
+            : Number(settings.data.longTermScenarioConservativePct),
+        baseReturnPct:
+          settings.data?.longTermScenarioBasePct === null ||
+          settings.data?.longTermScenarioBasePct === undefined
+            ? null
+            : Number(settings.data.longTermScenarioBasePct),
+        optimisticReturnPct:
+          settings.data?.longTermScenarioOptimisticPct === null ||
+          settings.data?.longTermScenarioOptimisticPct === undefined
+            ? null
+            : Number(settings.data.longTermScenarioOptimisticPct),
       }),
     [props, settings.data]
   );
@@ -137,12 +192,31 @@ export function LongTermGoalCard(props: Props) {
       toast.error("目標日を入力してください");
       return;
     }
+    const parsedConservative = parseRate(conservativePct);
+    const parsedBase = parseRate(basePct);
+    const parsedOptimistic = parseRate(optimisticPct);
+    if (
+      parsedConservative === null ||
+      parsedBase === null ||
+      parsedOptimistic === null
+    ) {
+      toast.error("情景年率は -50%〜100% で入力してください");
+      return;
+    }
+    if (!(parsedConservative <= parsedBase && parsedBase <= parsedOptimistic)) {
+      toast.error("情景年率は 保守 ≤ 基準 ≤ 楽観 の順にしてください");
+      return;
+    }
     update.mutate({
       longTermTargetNetAssetsJpy: parsedOku * JPY_PER_OKU,
       longTermTargetDate: targetDate,
       longTermTargetAnnualDividendJpy: optionalMan(dividendMan),
       longTermTargetAnnualInterestJpy: optionalMan(interestMan),
       longTermTargetAnnualNetCashJpy: optionalMan(netCashMan),
+      longTermAnnualContributionJpy: optionalMan(contributionMan),
+      longTermScenarioConservativePct: parsedConservative,
+      longTermScenarioBasePct: parsedBase,
+      longTermScenarioOptimisticPct: parsedOptimistic,
     });
   };
 
@@ -181,7 +255,7 @@ export function LongTermGoalCard(props: Props) {
             <DialogHeader>
               <DialogTitle>長期目標を編集</DialogTitle>
               <DialogDescription>
-                純資産は株式・現金性資産・現金から借入を差し引く口径です。収入目標は任意です。
+                純資産は株式・現金性資産・現金から借入を差し引く口径です。入金と収入目標は任意です。
               </DialogDescription>
             </DialogHeader>
             <div className="grid gap-4 py-2 sm:grid-cols-2">
@@ -204,6 +278,35 @@ export function LongTermGoalCard(props: Props) {
               <div className="space-y-2 sm:col-span-2">
                 <Label htmlFor="goal-net-cash">年間純キャッシュ収入目標（万円・任意）</Label>
                 <Input id="goal-net-cash" type="number" inputMode="decimal" min="0" value={netCashMan} onChange={event => setNetCashMan(event.target.value)} placeholder="配当＋利息－借入利息" />
+              </div>
+              <div className="space-y-2 sm:col-span-2">
+                <Label htmlFor="goal-contribution">年間追加入金計画（万円・任意）</Label>
+                <Input id="goal-contribution" type="number" inputMode="decimal" min="0" value={contributionMan} onChange={event => setContributionMan(event.target.value)} placeholder="未設定なら0円で試算" />
+                <p className="text-[11px] leading-relaxed text-muted-foreground">
+                  試算では年間額を12等分し、毎月末に入金する前提です。投資収益とは分けて表示します。
+                </p>
+              </div>
+              <div className="space-y-3 rounded-xl border bg-muted/25 p-3 sm:col-span-2">
+                <div>
+                  <p className="text-sm font-medium">達成情景の名目年率</p>
+                  <p className="text-[11px] leading-relaxed text-muted-foreground">
+                    年率は予測ではなく編集可能な試算条件です。保守 ≤ 基準 ≤ 楽観の順で設定します。
+                  </p>
+                </div>
+                <div className="grid gap-3 sm:grid-cols-3">
+                  <div className="space-y-1.5">
+                    <Label htmlFor="goal-rate-conservative">保守（%）</Label>
+                    <Input id="goal-rate-conservative" type="number" inputMode="decimal" min="-50" max="100" value={conservativePct} onChange={event => setConservativePct(event.target.value)} />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label htmlFor="goal-rate-base">基準（%）</Label>
+                    <Input id="goal-rate-base" type="number" inputMode="decimal" min="-50" max="100" value={basePct} onChange={event => setBasePct(event.target.value)} />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label htmlFor="goal-rate-optimistic">楽観（%）</Label>
+                    <Input id="goal-rate-optimistic" type="number" inputMode="decimal" min="-50" max="100" value={optimisticPct} onChange={event => setOptimisticPct(event.target.value)} />
+                  </div>
+                </div>
               </div>
             </div>
             <DialogFooter>
@@ -271,10 +374,37 @@ export function LongTermGoalCard(props: Props) {
             </div>
 
             <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
-              <IncomeBox label="現在の年間配当（税引前）" current={progress.annualDividend.currentJpy} target={progress.annualDividend.targetJpy} />
-              <IncomeBox label="年間利息（見込み）" current={progress.annualInterest.currentJpy} target={progress.annualInterest.targetJpy} />
+              <IncomeBox label="現在の年間配当（税引前）" current={progress.annualDividend.currentJpy} target={progress.annualDividend.targetJpy} progressPct={progress.annualDividend.progressPct} />
+              <IncomeBox label="年間利息（見込み）" current={progress.annualInterest.currentJpy} target={progress.annualInterest.targetJpy} progressPct={progress.annualInterest.progressPct} />
               <IncomeBox label="借入の年間利息" current={progress.annualBorrowingInterestJpy} target={null} negative />
-              <IncomeBox label="年間純キャッシュ収入" current={progress.annualNetCash.currentJpy} target={progress.annualNetCash.targetJpy} emphasized />
+              <IncomeBox label="年間純キャッシュ収入" current={progress.annualNetCash.currentJpy} target={progress.annualNetCash.targetJpy} progressPct={progress.annualNetCash.progressPct} emphasized />
+            </div>
+
+            <div className="rounded-xl border bg-background/75 p-4" data-testid="long-term-scenarios">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <p className="text-sm font-semibold">2030年末の3つの達成情景</p>
+                  <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+                    年間入金を12等分して毎月末に積み立て、名目年率で月次複利計算します。予測ではありません。
+                  </p>
+                </div>
+                <div className="text-left text-xs sm:text-right">
+                  <p className="text-muted-foreground">年間追加入金</p>
+                  <p className="tabular font-semibold">
+                    {settings.data?.longTermAnnualContributionJpy
+                      ? yen(progress.annualContributionJpy)
+                      : "未設定（0円で試算）"}
+                  </p>
+                  {progress.scenarioRatesDefaulted ? (
+                    <p className="mt-1 text-[11px] text-amber-700">標準仮定 4% / 8% / 12%</p>
+                  ) : null}
+                </div>
+              </div>
+              <div className="mt-4 grid gap-3 lg:grid-cols-3">
+                {progress.scenarios.map(scenario => (
+                  <ScenarioCard key={scenario.key} scenario={scenario} />
+                ))}
+              </div>
             </div>
 
             <p className="flex items-start gap-2 text-xs leading-relaxed text-muted-foreground">
@@ -298,12 +428,14 @@ function IncomeBox({
   target,
   negative = false,
   emphasized = false,
+  progressPct = null,
 }: {
   label: string;
   current: number | null;
   target: number | null;
   negative?: boolean;
   emphasized?: boolean;
+  progressPct?: number | null;
 }) {
   return (
     <div className={`rounded-lg border p-3 ${emphasized ? "bg-emerald-50/70 dark:bg-emerald-950/20" : "bg-background/70"}`}>
@@ -312,6 +444,55 @@ function IncomeBox({
         {negative && current !== null ? "−" : ""}{yen(current)}
       </p>
       <p className="mt-1 text-[11px] text-muted-foreground">{targetLabel(target)}</p>
+      {progressPct !== null ? (
+        <p className="tabular mt-1 text-[11px] font-medium text-emerald-700">
+          目標達成率 {progressPct.toFixed(1)}%
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
+function ScenarioCard({ scenario }: { scenario: LongTermGoalScenario }) {
+  const tone =
+    scenario.key === "BASE"
+      ? "border-emerald-300 bg-emerald-50/60 dark:border-emerald-900 dark:bg-emerald-950/20"
+      : "bg-background/80";
+  return (
+    <div className={`rounded-xl border p-3 ${tone}`}>
+      <div className="flex items-center justify-between gap-2">
+        <p className="font-semibold">{scenario.label}</p>
+        <Badge variant="outline" className="tabular">
+          年率仮定 {scenario.annualReturnPct.toFixed(1)}%
+        </Badge>
+      </div>
+      <p className="mt-3 text-[11px] text-muted-foreground">目標日の試算純資産</p>
+      <p className="tabular mt-1 text-xl font-semibold">
+        {oku(scenario.projectedNetAssetsJpy)}
+      </p>
+      <div className="mt-2 flex flex-wrap items-center justify-between gap-2 text-xs">
+        <span className="tabular font-medium">
+          目標達成率 {scenario.targetProgressPct?.toFixed(2) ?? "—"}%
+        </span>
+        <Badge variant={scenario.achievesTarget ? "default" : "secondary"}>
+          {scenario.achievesTarget ? "達成試算" : "未達試算"}
+        </Badge>
+      </div>
+      <div className="mt-3 grid grid-cols-2 gap-2 border-t pt-3 text-[11px]">
+        <div>
+          <p className="text-muted-foreground">追加入金元本</p>
+          <p className="tabular mt-0.5 font-medium">{oku(scenario.totalContributionJpy)}</p>
+        </div>
+        <div>
+          <p className="text-muted-foreground">投資増減寄与</p>
+          <p className="tabular mt-0.5 font-medium">{oku(scenario.investmentGrowthJpy)}</p>
+        </div>
+      </div>
+      {!scenario.achievesTarget ? (
+        <p className="mt-2 text-[11px] text-muted-foreground">
+          目標まで {oku(scenario.gapJpy)}
+        </p>
+      ) : null}
     </div>
   );
 }

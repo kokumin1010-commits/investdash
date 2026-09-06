@@ -37,6 +37,58 @@ describe("buildLongTermGoalProgress", () => {
     expect(result.annualDividend.targetJpy).toBeNull();
     expect(result.annualDividend.progressPct).toBeNull();
     expect(result.annualNetCash.currentJpy).toBe(350_000);
+    expect(result.scenarioRatesDefaulted).toBe(true);
+    expect(result.scenarios.map(item => item.annualReturnPct)).toEqual([4, 8, 12]);
+  });
+
+  it("adds annual contributions monthly and separates principal from investment growth", () => {
+    const result = buildLongTermGoalProgress({
+      currentNetAssetsJpy: 10_000_000,
+      targetNetAssetsJpy: 30_000_000,
+      targetDate: "2030-12-31",
+      annualDividendJpy: 0,
+      annualInterestIncomeJpy: 0,
+      annualBorrowingInterestJpy: 0,
+      annualContributionJpy: 12_000_000,
+      conservativeReturnPct: 0,
+      baseReturnPct: 0,
+      optimisticReturnPct: 0,
+      now: new Date("2029-12-31T15:00:00.000Z"),
+    });
+
+    expect(result.scenarioRatesDefaulted).toBe(false);
+    for (const scenario of result.scenarios) {
+      expect(scenario.totalContributionJpy).toBe(12_000_000);
+      expect(scenario.projectedNetAssetsJpy).toBe(22_000_000);
+      expect(scenario.investmentGrowthJpy).toBeCloseTo(0, 6);
+      expect(scenario.achievesTarget).toBe(false);
+      expect(scenario.gapJpy).toBe(8_000_000);
+    }
+  });
+
+  it("supports negative and positive scenario assumptions without presenting them as forecasts", () => {
+    const result = buildLongTermGoalProgress({
+      currentNetAssetsJpy: 12_000_000,
+      targetNetAssetsJpy: 20_000_000,
+      targetDate: "2030-12-31",
+      annualDividendJpy: 300_000,
+      annualInterestIncomeJpy: 50_000,
+      annualBorrowingInterestJpy: 0,
+      targetAnnualDividendJpy: 600_000,
+      targetAnnualInterestJpy: 100_000,
+      targetAnnualNetCashJpy: 700_000,
+      conservativeReturnPct: -10,
+      baseReturnPct: 0,
+      optimisticReturnPct: 10,
+      now: new Date("2029-12-31T15:00:00.000Z"),
+    });
+
+    expect(result.scenarios[0]?.investmentGrowthJpy).toBeLessThan(0);
+    expect(result.scenarios[1]?.projectedNetAssetsJpy).toBe(12_000_000);
+    expect(result.scenarios[2]?.investmentGrowthJpy).toBeGreaterThan(0);
+    expect(result.annualDividend.progressPct).toBe(50);
+    expect(result.annualInterest.progressPct).toBe(50);
+    expect(result.annualNetCash.progressPct).toBe(50);
   });
 
   it("does not fabricate progress when the target or a cash-flow input is missing", () => {
@@ -53,6 +105,7 @@ describe("buildLongTermGoalProgress", () => {
     expect(result.status).toBe("NOT_SET");
     expect(result.progressPct).toBeNull();
     expect(result.annualNetCash.currentJpy).toBeNull();
+    expect(result.scenarios.every(item => item.projectedNetAssetsJpy === null)).toBe(true);
   });
 
   it("marks an achieved target and an overdue target separately", () => {

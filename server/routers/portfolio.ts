@@ -172,6 +172,26 @@ export const portfolioRouter = router({
         longTermTargetAnnualDividendJpy: z.number().min(0).nullable().optional(),
         longTermTargetAnnualInterestJpy: z.number().min(0).nullable().optional(),
         longTermTargetAnnualNetCashJpy: z.number().min(0).nullable().optional(),
+        longTermAnnualContributionJpy: z.number().min(0).nullable().optional(),
+        longTermScenarioConservativePct: z.number().min(-50).max(100).nullable().optional(),
+        longTermScenarioBasePct: z.number().min(-50).max(100).nullable().optional(),
+        longTermScenarioOptimisticPct: z.number().min(-50).max(100).nullable().optional(),
+      }).superRefine((value, ctx) => {
+        const conservative = value.longTermScenarioConservativePct;
+        const base = value.longTermScenarioBasePct;
+        const optimistic = value.longTermScenarioOptimisticPct;
+        if (
+          typeof conservative === "number" &&
+          typeof base === "number" &&
+          typeof optimistic === "number" &&
+          !(conservative <= base && base <= optimistic)
+        ) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ["longTermScenarioBasePct"],
+            message: "保守 ≤ 基準 ≤ 楽観の順で入力してください",
+          });
+        }
       })
     )
     .mutation(async ({ ctx, input }) => {
@@ -215,11 +235,39 @@ export const portfolioRouter = router({
             : input.longTermTargetAnnualNetCashJpy === null
               ? null
               : String(input.longTermTargetAnnualNetCashJpy),
+        longTermAnnualContributionJpy:
+          input.longTermAnnualContributionJpy === undefined
+            ? undefined
+            : input.longTermAnnualContributionJpy === null
+              ? null
+              : String(input.longTermAnnualContributionJpy),
+        longTermScenarioConservativePct:
+          input.longTermScenarioConservativePct === undefined
+            ? undefined
+            : input.longTermScenarioConservativePct === null
+              ? null
+              : String(input.longTermScenarioConservativePct),
+        longTermScenarioBasePct:
+          input.longTermScenarioBasePct === undefined
+            ? undefined
+            : input.longTermScenarioBasePct === null
+              ? null
+              : String(input.longTermScenarioBasePct),
+        longTermScenarioOptimisticPct:
+          input.longTermScenarioOptimisticPct === undefined
+            ? undefined
+            : input.longTermScenarioOptimisticPct === null
+              ? null
+              : String(input.longTermScenarioOptimisticPct),
         ...(input.longTermTargetNetAssetsJpy !== undefined ||
         input.longTermTargetDate !== undefined ||
         input.longTermTargetAnnualDividendJpy !== undefined ||
         input.longTermTargetAnnualInterestJpy !== undefined ||
-        input.longTermTargetAnnualNetCashJpy !== undefined
+        input.longTermTargetAnnualNetCashJpy !== undefined ||
+        input.longTermAnnualContributionJpy !== undefined ||
+        input.longTermScenarioConservativePct !== undefined ||
+        input.longTermScenarioBasePct !== undefined ||
+        input.longTermScenarioOptimisticPct !== undefined
           ? { longTermTargetUpdatedAt: new Date() }
           : {}),
         // 手動でレートを入れたときは、自動取得の時刻表示が実態と合わなくなるため消す

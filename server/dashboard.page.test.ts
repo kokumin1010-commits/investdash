@@ -261,6 +261,10 @@ beforeEach(() => {
       longTermTargetAnnualDividendJpy: null,
       longTermTargetAnnualInterestJpy: null,
       longTermTargetAnnualNetCashJpy: null,
+      longTermAnnualContributionJpy: null,
+      longTermScenarioConservativePct: null,
+      longTermScenarioBasePct: null,
+      longTermScenarioOptimisticPct: null,
     },
     isLoading: false,
   });
@@ -290,6 +294,12 @@ describe("Dashboard actual page", () => {
       expect(screen.getByText("現在の年間配当（税引前）")).toBeTruthy();
       expect(screen.getByText("年間利息（見込み）")).toBeTruthy();
       expect(screen.getByText("年間純キャッシュ収入")).toBeTruthy();
+      expect(screen.getByText("2030年末の3つの達成情景")).toBeTruthy();
+      expect(screen.getByText("標準仮定 4% / 8% / 12%")).toBeTruthy();
+      expect(screen.getByText("年率仮定 4.0%")).toBeTruthy();
+      expect(screen.getByText("年率仮定 8.0%")).toBeTruthy();
+      expect(screen.getByText("年率仮定 12.0%")).toBeTruthy();
+      expect(screen.getAllByText("未達試算")).toHaveLength(3);
       expect(
         screen.getByText("目標は進捗確認だけに使い、売買順位や提案を変えません。")
       ).toBeTruthy();
@@ -304,6 +314,10 @@ describe("Dashboard actual page", () => {
         longTermTargetAnnualDividendJpy: null,
         longTermTargetAnnualInterestJpy: null,
         longTermTargetAnnualNetCashJpy: null,
+        longTermAnnualContributionJpy: null,
+        longTermScenarioConservativePct: null,
+        longTermScenarioBasePct: null,
+        longTermScenarioOptimisticPct: null,
       },
       isLoading: false,
     });
@@ -325,8 +339,18 @@ describe("Dashboard actual page", () => {
     const dividendTarget = screen.getByLabelText(
       "年間配当目標（万円・任意）"
     ) as HTMLInputElement;
+    const contributionTarget = screen.getByLabelText(
+      "年間追加入金計画（万円・任意）"
+    ) as HTMLInputElement;
+    const conservativeRate = screen.getByLabelText("保守（%）") as HTMLInputElement;
+    const baseRate = screen.getByLabelText("基準（%）") as HTMLInputElement;
+    const optimisticRate = screen.getByLabelText("楽観（%）") as HTMLInputElement;
     expect(targetAsset.value).toBe("1000");
     expect(targetDate.value).toBe("2030-12-31");
+    expect(contributionTarget.value).toBe("");
+    expect(conservativeRate.value).toBe("4");
+    expect(baseRate.value).toBe("8");
+    expect(optimisticRate.value).toBe("12");
 
     fireEvent.change(dividendTarget, { target: { value: "5000" } });
     fireEvent.click(screen.getByRole("button", { name: "保存" }));
@@ -337,6 +361,10 @@ describe("Dashboard actual page", () => {
       longTermTargetAnnualDividendJpy: 50_000_000,
       longTermTargetAnnualInterestJpy: null,
       longTermTargetAnnualNetCashJpy: null,
+      longTermAnnualContributionJpy: null,
+      longTermScenarioConservativePct: 4,
+      longTermScenarioBasePct: 8,
+      longTermScenarioOptimisticPct: 12,
     });
   });
 

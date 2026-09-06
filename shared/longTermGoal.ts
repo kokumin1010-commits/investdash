@@ -8,6 +8,14 @@ export type LongTermGoalStatus =
   | "ACHIEVED"
   | "OVERDUE";
 
+export const DEFAULT_LONG_TERM_SCENARIO_RATES = {
+  conservative: 4,
+  base: 8,
+  optimistic: 12,
+} as const;
+
+export type LongTermGoalScenarioKey = "CONSERVATIVE" | "BASE" | "OPTIMISTIC";
+
 export type LongTermGoalInput = {
   currentNetAssetsJpy: number | null | undefined;
   targetNetAssetsJpy: number | null | undefined;
@@ -18,6 +26,10 @@ export type LongTermGoalInput = {
   targetAnnualDividendJpy?: number | null;
   targetAnnualInterestJpy?: number | null;
   targetAnnualNetCashJpy?: number | null;
+  annualContributionJpy?: number | null;
+  conservativeReturnPct?: number | null;
+  baseReturnPct?: number | null;
+  optimisticReturnPct?: number | null;
   now?: Date;
 };
 
@@ -26,6 +38,18 @@ export type IncomeProgress = {
   targetJpy: number | null;
   progressPct: number | null;
   gapJpy: number | null;
+};
+
+export type LongTermGoalScenario = {
+  key: LongTermGoalScenarioKey;
+  label: string;
+  annualReturnPct: number;
+  projectedNetAssetsJpy: number | null;
+  totalContributionJpy: number | null;
+  investmentGrowthJpy: number | null;
+  targetProgressPct: number | null;
+  gapJpy: number | null;
+  achievesTarget: boolean | null;
 };
 
 export type LongTermGoalProgress = {
@@ -44,6 +68,9 @@ export type LongTermGoalProgress = {
   annualInterest: IncomeProgress;
   annualBorrowingInterestJpy: number | null;
   annualNetCash: IncomeProgress;
+  annualContributionJpy: number;
+  scenarioRatesDefaulted: boolean;
+  scenarios: LongTermGoalScenario[];
 };
 
 function finiteNonNegative(value: number | null | undefined) {
@@ -65,9 +92,78 @@ function progress(current: number | null, target: number | null): IncomeProgress
   };
 }
 
+function finiteScenarioRate(value: number | null | undefined, fallback: number) {
+  return typeof value === "number" && Number.isFinite(value) && value >= -50 && value <= 100
+    ? value
+    : fallback;
+}
+
+function buildScenario(params: {
+  key: LongTermGoalScenarioKey;
+  label: string;
+  annualReturnPct: number;
+  currentNetAssetsJpy: number | null;
+  targetNetAssetsJpy: number | null;
+  monthsRemaining: number | null;
+  annualContributionJpy: number;
+}): LongTermGoalScenario {
+  const {
+    key,
+    label,
+    annualReturnPct,
+    currentNetAssetsJpy,
+    targetNetAssetsJpy,
+    monthsRemaining,
+    annualContributionJpy,
+  } = params;
+  if (
+    currentNetAssetsJpy === null ||
+    targetNetAssetsJpy === null ||
+    targetNetAssetsJpy <= 0 ||
+    monthsRemaining === null
+  ) {
+    return {
+      key,
+      label,
+      annualReturnPct,
+      projectedNetAssetsJpy: null,
+      totalContributionJpy: null,
+      investmentGrowthJpy: null,
+      targetProgressPct: null,
+      gapJpy: null,
+      achievesTarget: null,
+    };
+  }
+
+  const monthlyRate = Math.pow(1 + annualReturnPct / 100, 1 / 12) - 1;
+  const growthFactor = Math.pow(1 + monthlyRate, monthsRemaining);
+  const monthlyContribution = annualContributionJpy / 12;
+  const contributionFutureValue =
+    Math.abs(monthlyRate) < 1e-12
+      ? monthlyContribution * monthsRemaining
+      : monthlyContribution * ((growthFactor - 1) / monthlyRate);
+  const totalContributionJpy = monthlyContribution * monthsRemaining;
+  const projectedNetAssetsJpy =
+    currentNetAssetsJpy * growthFactor + contributionFutureValue;
+  const investmentGrowthJpy =
+    projectedNetAssetsJpy - currentNetAssetsJpy - totalContributionJpy;
+
+  return {
+    key,
+    label,
+    annualReturnPct,
+    projectedNetAssetsJpy,
+    totalContributionJpy,
+    investmentGrowthJpy,
+    targetProgressPct: (projectedNetAssetsJpy / targetNetAssetsJpy) * 100,
+    gapJpy: Math.max(0, targetNetAssetsJpy - projectedNetAssetsJpy),
+    achievesTarget: projectedNetAssetsJpy >= targetNetAssetsJpy,
+  };
+}
+
 /**
  * 长期目标只做进度与安全检查，不返回买卖行动，也不进入任何 ranking 输入。
- * 目标日期按 JST 日历日终了扱い，避免浏览器时区改变剩余日数。
+ * 目标日期按 JST 日历日终了扱い。情景按名义年率月复利、年度入金12等分月末投入。
  */
 export function buildLongTermGoalProgress(
   input: LongTermGoalInput
@@ -128,6 +224,61 @@ export function buildLongTermGoalProgress(
     annualBorrowingInterest !== null
       ? annualDividend + annualInterest - annualBorrowingInterest
       : null;
+  const annualContribution = finiteNonNegative(input.annualContributionJpy) ?? 0;
+  const scenarioRatesDefaulted =
+    input.conservativeReturnPct === null ||
+    input.conservativeReturnPct === undefined ||
+    input.baseReturnPct === null ||
+    input.baseReturnPct === undefined ||
+    input.optimisticReturnPct === null ||
+    input.optimisticReturnPct === undefined;
+  const conservativeRate = finiteScenarioRate(
+    input.conservativeReturnPct,
+    DEFAULT_LONG_TERM_SCENARIO_RATES.conservative
+  );
+  const baseRate = finiteScenarioRate(
+    input.baseReturnPct,
+    DEFAULT_LONG_TERM_SCENARIO_RATES.base
+  );
+  const optimisticRate = finiteScenarioRate(
+    input.optimisticReturnPct,
+    DEFAULT_LONG_TERM_SCENARIO_RATES.optimistic
+  );
+  const monthsRemaining =
+    daysRemaining !== null && daysRemaining > 0
+      ? Math.ceil(daysRemaining / (DAYS_PER_YEAR / 12))
+      : configured && current !== null && current >= target
+        ? 0
+        : null;
+  const scenarios = [
+    buildScenario({
+      key: "CONSERVATIVE",
+      label: "保守",
+      annualReturnPct: conservativeRate,
+      currentNetAssetsJpy: current,
+      targetNetAssetsJpy: target,
+      monthsRemaining,
+      annualContributionJpy: annualContribution,
+    }),
+    buildScenario({
+      key: "BASE",
+      label: "基準",
+      annualReturnPct: baseRate,
+      currentNetAssetsJpy: current,
+      targetNetAssetsJpy: target,
+      monthsRemaining,
+      annualContributionJpy: annualContribution,
+    }),
+    buildScenario({
+      key: "OPTIMISTIC",
+      label: "楽観",
+      annualReturnPct: optimisticRate,
+      currentNetAssetsJpy: current,
+      targetNetAssetsJpy: target,
+      monthsRemaining,
+      annualContributionJpy: annualContribution,
+    }),
+  ];
 
   return {
     configured,
@@ -154,5 +305,8 @@ export function buildLongTermGoalProgress(
       annualNetCash,
       finiteNonNegative(input.targetAnnualNetCashJpy)
     ),
+    annualContributionJpy: annualContribution,
+    scenarioRatesDefaulted,
+    scenarios,
   };
 }
