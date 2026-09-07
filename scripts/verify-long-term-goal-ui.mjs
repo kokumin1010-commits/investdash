@@ -104,7 +104,7 @@ async function verify(scenario) {
     await send("Page.navigate", { url: `${baseUrl}${path}` });
     await waitUntil(
       "long-term goal",
-      "document.body?.innerText.includes('長期目標') && document.body?.innerText.includes('1,000 億円') && document.body?.innerText.includes('2030年末の3つの達成情景')"
+      "document.body?.innerText.includes('長期目標') && document.body?.innerText.includes('1,000 億円') && document.body?.innerText.includes('2030年までに必要な月次入金')"
     );
     const state = await evaluate(`(() => {
       const body = document.body.innerText;
@@ -120,18 +120,24 @@ async function verify(scenario) {
         '年間純キャッシュ収入',
         '2030年末の3つの達成情景',
         '年間追加入金',
-        '未設定（0円で試算）',
         '年率仮定 4.0%',
         '年率仮定 8.0%',
         '年率仮定 12.0%',
         '追加入金元本',
         '投資増減寄与',
+        '現在の入金計画（0.1 億円 / 月）での到達目安',
+        '2030年までに必要な月次入金',
+        '現在計画との差',
+        '到達年月と必要入金は一定年率を置いた数学試算で、収益予測ではありません。',
         '予測ではありません。',
         '目標は進捗確認だけに使い、売買順位や提案を変えません。',
       ];
       return {
         missing: required.filter(text => !body.includes(text)),
         scenarioCardCount: (body.match(/未達試算/g) ?? []).length,
+        attainmentEstimateCount: (body.match(/での到達目安/g) ?? []).length,
+        requiredContributionCount: (body.match(/2030年までに必要な月次入金/g) ?? []).length,
+        scenarioText: document.querySelector('[data-testid="long-term-scenarios"]')?.innerText ?? '',
         scrollWidth: document.documentElement.scrollWidth,
         clientWidth: document.documentElement.clientWidth,
       };
@@ -170,14 +176,16 @@ async function verify(scenario) {
       state.scrollWidth <= state.clientWidth &&
       editState.targetOku === "1000" &&
       editState.targetDate === "2030-12-31" &&
-      editState.dividendTarget === "" &&
-      editState.interestTarget === "" &&
-      editState.netCashTarget === "" &&
-      editState.contributionTarget === "" &&
+      editState.dividendTarget === "210000" &&
+      editState.interestTarget === "30000" &&
+      editState.netCashTarget === "240000" &&
+      editState.contributionTarget === "12000" &&
       editState.conservativeRate === "4.00" &&
       editState.baseRate === "8.00" &&
       editState.optimisticRate === "12.00" &&
-      state.scenarioCardCount === 3;
+      state.scenarioCardCount === 3 &&
+      state.attainmentEstimateCount === 3 &&
+      state.requiredContributionCount === 3;
     return { ...scenario, ...state, ...editState, screenshotPath, passed };
   } finally {
     socket.close();
@@ -189,5 +197,5 @@ async function verify(scenario) {
 
 const results = [];
 for (const scenario of scenarios) results.push(await verify(scenario));
-console.log(JSON.stringify({ version: "82c267e", results }, null, 2));
+console.log(JSON.stringify({ version: "febfb8a", results }, null, 2));
 if (results.some(result => !result.passed)) process.exitCode = 1;
