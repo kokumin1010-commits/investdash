@@ -315,5 +315,7 @@
 - [x] 显示追加入金本金、投资增长贡献及各情景是否达到1,000亿目标
 - [x] 目标与情景不进入买卖排名、不触发交易，并明确不会为了目标加杠杆
 - [x] 为复利、年度入金时点、负/零回报、收入目标、路由和390px/1280px补充测试
-- [x] 运行 rebuilt 完整测试（140文件/1126项）、TypeScript 与 production build；Railway 部署待同步
-- [ ] 更新验证文档、同步 GitHub 并保存最终 checkpoint
+- [x] 运行 rebuilt 与 Railway 工作树完整测试（140文件/1126项）、TypeScript 与 production build，并部署 82c267e
+- [x] 正式保存4%/8%/12%情景假设，保持年度入金和股息/利息目标未设置，不擅自填数
+- [x] 在 SalesDash 正式 Dashboard 验证三情景终值、入金/增长拆解、编辑回填及390px/1280px无溢出
+- [x] 更新验证文档、同步 GitHub 并保存最终 checkpoint

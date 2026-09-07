@@ -104,7 +104,7 @@ async function verify(scenario) {
     await send("Page.navigate", { url: `${baseUrl}${path}` });
     await waitUntil(
       "long-term goal",
-      "document.body?.innerText.includes('長期目標') && document.body?.innerText.includes('1,000 億円')"
+      "document.body?.innerText.includes('長期目標') && document.body?.innerText.includes('1,000 億円') && document.body?.innerText.includes('2030年末の3つの達成情景')"
     );
     const state = await evaluate(`(() => {
       const body = document.body.innerText;
@@ -118,10 +118,20 @@ async function verify(scenario) {
         '年間利息（見込み）',
         '借入の年間利息',
         '年間純キャッシュ収入',
+        '2030年末の3つの達成情景',
+        '年間追加入金',
+        '未設定（0円で試算）',
+        '年率仮定 4.0%',
+        '年率仮定 8.0%',
+        '年率仮定 12.0%',
+        '追加入金元本',
+        '投資増減寄与',
+        '予測ではありません。',
         '目標は進捗確認だけに使い、売買順位や提案を変えません。',
       ];
       return {
         missing: required.filter(text => !body.includes(text)),
+        scenarioCardCount: (body.match(/未達試算/g) ?? []).length,
         scrollWidth: document.documentElement.scrollWidth,
         clientWidth: document.documentElement.clientWidth,
       };
@@ -138,6 +148,10 @@ async function verify(scenario) {
       dividendTarget: document.querySelector('#goal-dividend')?.value,
       interestTarget: document.querySelector('#goal-interest')?.value,
       netCashTarget: document.querySelector('#goal-net-cash')?.value,
+      contributionTarget: document.querySelector('#goal-contribution')?.value,
+      conservativeRate: document.querySelector('#goal-rate-conservative')?.value,
+      baseRate: document.querySelector('#goal-rate-base')?.value,
+      optimisticRate: document.querySelector('#goal-rate-optimistic')?.value,
     }))()`);
     await evaluate(`(() => {
       const button = [...document.querySelectorAll('button')]
@@ -158,7 +172,12 @@ async function verify(scenario) {
       editState.targetDate === "2030-12-31" &&
       editState.dividendTarget === "" &&
       editState.interestTarget === "" &&
-      editState.netCashTarget === "";
+      editState.netCashTarget === "" &&
+      editState.contributionTarget === "" &&
+      editState.conservativeRate === "4.00" &&
+      editState.baseRate === "8.00" &&
+      editState.optimisticRate === "12.00" &&
+      state.scenarioCardCount === 3;
     return { ...scenario, ...state, ...editState, screenshotPath, passed };
   } finally {
     socket.close();
@@ -170,5 +189,5 @@ async function verify(scenario) {
 
 const results = [];
 for (const scenario of scenarios) results.push(await verify(scenario));
-console.log(JSON.stringify({ version: "c65a2a9", results }, null, 2));
+console.log(JSON.stringify({ version: "82c267e", results }, null, 2));
 if (results.some(result => !result.passed)) process.exitCode = 1;
