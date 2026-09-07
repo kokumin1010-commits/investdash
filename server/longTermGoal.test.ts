@@ -130,7 +130,74 @@ describe("buildLongTermGoalProgress", () => {
 
     expect(achieved.status).toBe("ACHIEVED");
     expect(achieved.requiredAnnualGrowthPct).toBe(0);
+    expect(achieved.scenarios[0]?.attainmentStatus).toBe("ALREADY_ACHIEVED");
+    expect(achieved.scenarios[0]?.estimatedMonthsToTarget).toBe(0);
+    expect(achieved.scenarios[0]?.requiredMonthlyContributionJpy).toBe(0);
     expect(overdue.status).toBe("OVERDUE");
     expect(overdue.requiredAnnualGrowthPct).toBeNull();
+    expect(overdue.scenarios[0]?.requiredMonthlyContributionJpy).toBeNull();
+  });
+
+  it("estimates a separate attainment month and 2030 monthly contribution for each formal scenario", () => {
+    const result = buildLongTermGoalProgress({
+      currentNetAssetsJpy: 730_822_351,
+      targetNetAssetsJpy: 100_000_000_000,
+      targetDate: "2030-12-31",
+      annualDividendJpy: 22_254_225,
+      annualInterestIncomeJpy: 3_195_330,
+      annualBorrowingInterestJpy: 3_899_093,
+      annualContributionJpy: 120_000_000,
+      conservativeReturnPct: 4,
+      baseReturnPct: 8,
+      optimisticReturnPct: 12,
+      now: new Date("2026-09-07T00:00:00.000Z"),
+    });
+
+    const [conservative, base, optimistic] = result.scenarios;
+    expect(conservative?.attainmentStatus).toBe("ESTIMATED");
+    expect(base?.attainmentStatus).toBe("ESTIMATED");
+    expect(optimistic?.attainmentStatus).toBe("ESTIMATED");
+    expect(conservative!.estimatedMonthsToTarget!).toBeGreaterThan(
+      base!.estimatedMonthsToTarget!
+    );
+    expect(base!.estimatedMonthsToTarget!).toBeGreaterThan(
+      optimistic!.estimatedMonthsToTarget!
+    );
+    expect(conservative?.estimatedTargetMonth).toMatch(/^2\d{3}-\d{2}$/);
+    expect(conservative!.requiredMonthlyContributionJpy!).toBeGreaterThan(
+      10_000_000
+    );
+    expect(conservative!.requiredMonthlyContributionJpy!).toBeGreaterThan(
+      base!.requiredMonthlyContributionJpy!
+    );
+    expect(base!.requiredMonthlyContributionJpy!).toBeGreaterThan(
+      optimistic!.requiredMonthlyContributionJpy!
+    );
+    expect(conservative!.additionalMonthlyContributionJpy!).toBeCloseTo(
+      conservative!.requiredMonthlyContributionJpy! - 10_000_000,
+      6
+    );
+  });
+
+  it("marks a zero or negative growth plan without contributions as beyond the 100-year horizon", () => {
+    const result = buildLongTermGoalProgress({
+      currentNetAssetsJpy: 10_000_000,
+      targetNetAssetsJpy: 20_000_000,
+      targetDate: "2030-12-31",
+      annualDividendJpy: 0,
+      annualInterestIncomeJpy: 0,
+      annualBorrowingInterestJpy: 0,
+      annualContributionJpy: 0,
+      conservativeReturnPct: -10,
+      baseReturnPct: 0,
+      optimisticReturnPct: 1,
+      now: new Date("2026-09-07T00:00:00.000Z"),
+    });
+
+    expect(result.scenarios[0]?.attainmentStatus).toBe("BEYOND_HORIZON");
+    expect(result.scenarios[1]?.attainmentStatus).toBe("BEYOND_HORIZON");
+    expect(result.scenarios[0]?.estimatedTargetMonth).toBeNull();
+    expect(result.scenarios[1]?.estimatedMonthsToTarget).toBeNull();
+    expect(result.scenarios[1]!.requiredMonthlyContributionJpy!).toBeGreaterThan(0);
   });
 });

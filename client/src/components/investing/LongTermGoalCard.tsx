@@ -69,6 +69,22 @@ function parseRate(value: string) {
     : null;
 }
 
+function durationLabel(months: number | null) {
+  if (months === null) return "算出不可";
+  if (months === 0) return "達成済み";
+  const years = Math.floor(months / 12);
+  const remainingMonths = months % 12;
+  if (years === 0) return `あと${remainingMonths}か月`;
+  if (remainingMonths === 0) return `あと${years}年`;
+  return `あと${years}年${remainingMonths}か月`;
+}
+
+function monthLabel(value: string | null) {
+  if (!value) return null;
+  const [year, month] = value.split("-");
+  return year && month ? `${year}年${Number(month)}月` : value;
+}
+
 export function LongTermGoalCard(props: Props) {
   const utils = trpc.useUtils();
   const settings = trpc.portfolio.settings.useQuery();
@@ -402,7 +418,11 @@ export function LongTermGoalCard(props: Props) {
               </div>
               <div className="mt-4 grid gap-3 lg:grid-cols-3">
                 {progress.scenarios.map(scenario => (
-                  <ScenarioCard key={scenario.key} scenario={scenario} />
+                  <ScenarioCard
+                    key={scenario.key}
+                    scenario={scenario}
+                    currentMonthlyContributionJpy={progress.annualContributionJpy / 12}
+                  />
                 ))}
               </div>
             </div>
@@ -453,7 +473,13 @@ function IncomeBox({
   );
 }
 
-function ScenarioCard({ scenario }: { scenario: LongTermGoalScenario }) {
+function ScenarioCard({
+  scenario,
+  currentMonthlyContributionJpy,
+}: {
+  scenario: LongTermGoalScenario;
+  currentMonthlyContributionJpy: number;
+}) {
   const tone =
     scenario.key === "BASE"
       ? "border-emerald-300 bg-emerald-50/60 dark:border-emerald-900 dark:bg-emerald-950/20"
@@ -488,11 +514,45 @@ function ScenarioCard({ scenario }: { scenario: LongTermGoalScenario }) {
           <p className="tabular mt-0.5 font-medium">{oku(scenario.investmentGrowthJpy)}</p>
         </div>
       </div>
+      <div className="mt-3 space-y-2 rounded-lg bg-muted/40 p-2.5 text-[11px]">
+        <div>
+          <p className="text-muted-foreground">
+            現在の入金計画（{oku(currentMonthlyContributionJpy)} / 月）での到達目安
+          </p>
+          {scenario.attainmentStatus === "ESTIMATED" ? (
+            <p className="tabular mt-0.5 font-semibold">
+              {monthLabel(scenario.estimatedTargetMonth)}・{durationLabel(scenario.estimatedMonthsToTarget)}
+            </p>
+          ) : scenario.attainmentStatus === "ALREADY_ACHIEVED" ? (
+            <p className="mt-0.5 font-semibold text-emerald-700">達成済み</p>
+          ) : scenario.attainmentStatus === "BEYOND_HORIZON" ? (
+            <p className="mt-0.5 font-semibold text-amber-700">100年以内に到達しない試算</p>
+          ) : (
+            <p className="mt-0.5 font-semibold text-muted-foreground">算出不可</p>
+          )}
+        </div>
+        <div className="border-t pt-2">
+          <p className="text-muted-foreground">2030年までに必要な月次入金</p>
+          <p className="tabular mt-0.5 font-semibold">
+            {scenario.requiredMonthlyContributionJpy === null
+              ? "算出不可"
+              : `${oku(scenario.requiredMonthlyContributionJpy)} / 月`}
+          </p>
+          {scenario.additionalMonthlyContributionJpy !== null ? (
+            <p className="tabular mt-0.5 text-muted-foreground">
+              現在計画との差 +{oku(scenario.additionalMonthlyContributionJpy)} / 月
+            </p>
+          ) : null}
+        </div>
+      </div>
       {!scenario.achievesTarget ? (
         <p className="mt-2 text-[11px] text-muted-foreground">
           目標まで {oku(scenario.gapJpy)}
         </p>
       ) : null}
+      <p className="mt-2 text-[10px] leading-relaxed text-muted-foreground">
+        到達年月と必要入金は一定年率を置いた数学試算で、収益予測ではありません。
+      </p>
     </div>
   );
 }

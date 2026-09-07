@@ -50,6 +50,15 @@ export type LongTermGoalScenario = {
   targetProgressPct: number | null;
   gapJpy: number | null;
   achievesTarget: boolean | null;
+  estimatedMonthsToTarget: number | null;
+  estimatedTargetMonth: string | null;
+  attainmentStatus:
+    | "ALREADY_ACHIEVED"
+    | "ESTIMATED"
+    | "BEYOND_HORIZON"
+    | "UNAVAILABLE";
+  requiredMonthlyContributionJpy: number | null;
+  additionalMonthlyContributionJpy: number | null;
 };
 
 export type LongTermGoalProgress = {
@@ -98,6 +107,127 @@ function finiteScenarioRate(value: number | null | undefined, fallback: number) 
     : fallback;
 }
 
+const MAX_ATTAINMENT_MONTHS = 1_200;
+const JST_OFFSET_MS = 9 * 60 * 60 * 1_000;
+
+function monthlyRateFromAnnualPct(annualReturnPct: number) {
+  return Math.pow(1 + annualReturnPct / 100, 1 / 12) - 1;
+}
+
+function formatJstMonthAfter(now: Date, monthsAfter: number) {
+  const jst = new Date(now.getTime() + JST_OFFSET_MS);
+  const monthIndex =
+    jst.getUTCFullYear() * 12 + jst.getUTCMonth() + monthsAfter;
+  const year = Math.floor(monthIndex / 12);
+  const month = (monthIndex % 12) + 1;
+  return `${year}-${String(month).padStart(2, "0")}`;
+}
+
+function estimateAttainment(params: {
+  currentNetAssetsJpy: number | null;
+  targetNetAssetsJpy: number | null;
+  annualReturnPct: number;
+  annualContributionJpy: number;
+  now: Date;
+}) {
+  const {
+    currentNetAssetsJpy,
+    targetNetAssetsJpy,
+    annualReturnPct,
+    annualContributionJpy,
+    now,
+  } = params;
+  if (
+    currentNetAssetsJpy === null ||
+    targetNetAssetsJpy === null ||
+    targetNetAssetsJpy <= 0
+  ) {
+    return {
+      estimatedMonthsToTarget: null,
+      estimatedTargetMonth: null,
+      attainmentStatus: "UNAVAILABLE" as const,
+    };
+  }
+  if (currentNetAssetsJpy >= targetNetAssetsJpy) {
+    return {
+      estimatedMonthsToTarget: 0,
+      estimatedTargetMonth: formatJstMonthAfter(now, 0),
+      attainmentStatus: "ALREADY_ACHIEVED" as const,
+    };
+  }
+
+  const monthlyRate = monthlyRateFromAnnualPct(annualReturnPct);
+  const monthlyContribution = annualContributionJpy / 12;
+  let balance = currentNetAssetsJpy;
+  for (let month = 1; month <= MAX_ATTAINMENT_MONTHS; month += 1) {
+    balance = balance * (1 + monthlyRate) + monthlyContribution;
+    if (balance >= targetNetAssetsJpy) {
+      return {
+        estimatedMonthsToTarget: month,
+        estimatedTargetMonth: formatJstMonthAfter(now, month),
+        attainmentStatus: "ESTIMATED" as const,
+      };
+    }
+  }
+  return {
+    estimatedMonthsToTarget: null,
+    estimatedTargetMonth: null,
+    attainmentStatus: "BEYOND_HORIZON" as const,
+  };
+}
+
+function requiredMonthlyContribution(params: {
+  currentNetAssetsJpy: number | null;
+  targetNetAssetsJpy: number | null;
+  annualReturnPct: number;
+  monthsRemaining: number | null;
+  currentMonthlyContributionJpy: number;
+}) {
+  const {
+    currentNetAssetsJpy,
+    targetNetAssetsJpy,
+    annualReturnPct,
+    monthsRemaining,
+    currentMonthlyContributionJpy,
+  } = params;
+  if (
+    currentNetAssetsJpy === null ||
+    targetNetAssetsJpy === null ||
+    targetNetAssetsJpy <= 0 ||
+    monthsRemaining === null ||
+    monthsRemaining <= 0
+  ) {
+    return {
+      requiredMonthlyContributionJpy: null,
+      additionalMonthlyContributionJpy: null,
+    };
+  }
+
+  const monthlyRate = monthlyRateFromAnnualPct(annualReturnPct);
+  const growthFactor = Math.pow(1 + monthlyRate, monthsRemaining);
+  const annuityFactor =
+    Math.abs(monthlyRate) < 1e-12
+      ? monthsRemaining
+      : (growthFactor - 1) / monthlyRate;
+  if (!Number.isFinite(annuityFactor) || annuityFactor <= 0) {
+    return {
+      requiredMonthlyContributionJpy: null,
+      additionalMonthlyContributionJpy: null,
+    };
+  }
+  const required = Math.max(
+    0,
+    (targetNetAssetsJpy - currentNetAssetsJpy * growthFactor) / annuityFactor
+  );
+  return {
+    requiredMonthlyContributionJpy: required,
+    additionalMonthlyContributionJpy: Math.max(
+      0,
+      required - currentMonthlyContributionJpy
+    ),
+  };
+}
+
 function buildScenario(params: {
   key: LongTermGoalScenarioKey;
   label: string;
@@ -106,6 +236,7 @@ function buildScenario(params: {
   targetNetAssetsJpy: number | null;
   monthsRemaining: number | null;
   annualContributionJpy: number;
+  now: Date;
 }): LongTermGoalScenario {
   const {
     key,
@@ -115,7 +246,22 @@ function buildScenario(params: {
     targetNetAssetsJpy,
     monthsRemaining,
     annualContributionJpy,
+    now,
   } = params;
+  const attainment = estimateAttainment({
+    currentNetAssetsJpy,
+    targetNetAssetsJpy,
+    annualReturnPct,
+    annualContributionJpy,
+    now,
+  });
+  const requiredContribution = requiredMonthlyContribution({
+    currentNetAssetsJpy,
+    targetNetAssetsJpy,
+    annualReturnPct,
+    monthsRemaining,
+    currentMonthlyContributionJpy: annualContributionJpy / 12,
+  });
   if (
     currentNetAssetsJpy === null ||
     targetNetAssetsJpy === null ||
@@ -132,6 +278,8 @@ function buildScenario(params: {
       targetProgressPct: null,
       gapJpy: null,
       achievesTarget: null,
+      ...attainment,
+      ...requiredContribution,
     };
   }
 
@@ -158,6 +306,8 @@ function buildScenario(params: {
     targetProgressPct: (projectedNetAssetsJpy / targetNetAssetsJpy) * 100,
     gapJpy: Math.max(0, targetNetAssetsJpy - projectedNetAssetsJpy),
     achievesTarget: projectedNetAssetsJpy >= targetNetAssetsJpy,
+    ...attainment,
+    ...requiredContribution,
   };
 }
 
@@ -259,6 +409,7 @@ export function buildLongTermGoalProgress(
       targetNetAssetsJpy: target,
       monthsRemaining,
       annualContributionJpy: annualContribution,
+      now,
     }),
     buildScenario({
       key: "BASE",
@@ -268,6 +419,7 @@ export function buildLongTermGoalProgress(
       targetNetAssetsJpy: target,
       monthsRemaining,
       annualContributionJpy: annualContribution,
+      now,
     }),
     buildScenario({
       key: "OPTIMISTIC",
@@ -277,6 +429,7 @@ export function buildLongTermGoalProgress(
       targetNetAssetsJpy: target,
       monthsRemaining,
       annualContributionJpy: annualContribution,
+      now,
     }),
   ];
 
