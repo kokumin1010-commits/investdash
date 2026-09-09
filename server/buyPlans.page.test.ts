@@ -147,6 +147,11 @@ const overviewData = {
       ...commonRow,
       symbol: "NVDA",
       name: "NVIDIA",
+      held: false,
+      holdingValueJpy: null,
+      weightPct: null,
+      avgCost: null,
+      pnlPct: null,
       action: "VERIFY",
       actionLabel: "下落要因を確認",
       outsideDirection: null,
@@ -164,6 +169,11 @@ const overviewData = {
       ...commonRow,
       symbol: "MSFT",
       name: "Microsoft",
+      held: false,
+      holdingValueJpy: null,
+      weightPct: null,
+      avgCost: null,
+      pnlPct: null,
       action: "HOLD",
       actionLabel: "様子見",
       outsideDirection: null,
@@ -178,6 +188,11 @@ const overviewData = {
       ...commonRow,
       symbol: "9984.T",
       name: "ソフトバンクグループ",
+      held: false,
+      holdingValueJpy: null,
+      weightPct: null,
+      avgCost: null,
+      pnlPct: null,
       action: null,
       outsideDirection: "ABOVE",
       ranking: {
@@ -204,7 +219,16 @@ const overviewData = {
     snapshotRecomputed: false,
     eligibleCount: 12,
     priorityCandidateCount: 5,
-    unheldOpportunityVersion: "unheld-quality-price-v1",
+    unheldOpportunityVersion: "unheld-purchase-decision-v2",
+    unheldCandidates: [] as Array<
+      (typeof overviewData.rows)[number] & {
+        purchaseDecision: {
+          decision: "BUY_NOW" | "PRICE_WAIT" | "DATA_WAIT" | "SKIP";
+          label: string;
+          reasons: string[];
+        };
+      }
+    >,
     unheldOpportunities: [] as Array<(typeof overviewData.rows)[number]>,
     frozenAt: new Date("2026-08-01T00:00:00Z"),
     monthlyCandidates: [] as Array<(typeof overviewData.rows)[number]>,
@@ -214,9 +238,42 @@ const overviewData = {
 overviewData.ranking.monthlyCandidates = overviewData.rows
   .filter(row => row.ranking.eligible && row.ranking.rank !== null)
   .sort((a, b) => (a.ranking.rank ?? 999) - (b.ranking.rank ?? 999));
-overviewData.ranking.unheldOpportunities = [
-  overviewData.rows.find(row => row.symbol === "GOOGL")!,
+const unheldBySymbol = (symbol: string) => overviewData.rows.find(row => row.symbol === symbol)!;
+overviewData.ranking.unheldCandidates = [
+  {
+    ...unheldBySymbol("GOOGL"),
+    purchaseDecision: {
+      decision: "BUY_NOW",
+      label: "今すぐ購入を検討",
+      reasons: ["全口座合算で保有0株です", "資料と価格条件を通過しています"],
+    },
+  },
+  {
+    ...unheldBySymbol("MSFT"),
+    purchaseDecision: {
+      decision: "PRICE_WAIT",
+      label: "価格待ち",
+      reasons: ["現在は初回購入の価格帯に入っていません"],
+    },
+  },
+  {
+    ...unheldBySymbol("NVDA"),
+    purchaseDecision: {
+      decision: "DATA_WAIT",
+      label: "資料確認待ち",
+      reasons: ["未照合の確認項目が 3 件あります"],
+    },
+  },
+  {
+    ...unheldBySymbol("9984.T"),
+    purchaseDecision: {
+      decision: "SKIP",
+      label: "今回は見送る",
+      reasons: ["現在の購入条件を満たしていません"],
+    },
+  },
 ];
+overviewData.ranking.unheldOpportunities = [overviewData.ranking.unheldCandidates[0]];
 
 const proposal = {
   id: 1,
@@ -274,15 +331,35 @@ describe("BuyPlans page interactions", () => {
     }
   );
 
-  it("未保有で品質資料と価格条件を通過した候補を独立表示する", () => {
+  it.each([390, 1280])(
+    "%dpxで真实未持有候补を四类判断に分け、全账户0股と初回购买目安を表示する",
+    async width => {
+    Object.defineProperty(window, "innerWidth", {
+      value: width,
+      configurable: true,
+    });
+    const user = userEvent.setup();
     render(React.createElement(BuyPlans));
-    expect(screen.getByText("未保有・品質資料と価格条件を通過")).toBeTruthy();
-    expect(screen.getByText("初回建て候補")).toBeTruthy();
+    expect(screen.getByText("未保有・購入判断")).toBeTruthy();
+    expect(screen.getByText(/未保有 4 銘柄・今すぐ検討 1 銘柄/)).toBeTruthy();
+    expect(screen.getAllByText("未保有・0株")).toHaveLength(4);
+    expect(screen.getAllByText("全口座合算の実保有を確認済み")).toHaveLength(4);
+    expect(screen.getByText("今すぐ購入を検討", { selector: "span" })).toBeTruthy();
+    expect(screen.getByText("価格待ち", { selector: "span" })).toBeTruthy();
+    expect(screen.getByText("資料確認待ち", { selector: "span" })).toBeTruthy();
+    expect(screen.getByText("今回は見送る", { selector: "span" })).toBeTruthy();
     expect(screen.getAllByText("Alphabet").length).toBeGreaterThanOrEqual(2);
     expect(screen.getAllByText("25 株").length).toBeGreaterThanOrEqual(2);
     expect(screen.getAllByText("77 万円").length).toBeGreaterThanOrEqual(2);
-    expect(screen.getAllByText("0円（未保有）").length).toBeGreaterThanOrEqual(2);
-  });
+    const priceWaitButton = screen
+      .getAllByRole("button")
+      .find(button => button.textContent?.includes("価格待ち"));
+    expect(priceWaitButton).toBeTruthy();
+    await user.click(priceWaitButton!);
+    expect(screen.getByTestId("unheld-candidate-MSFT")).toBeTruthy();
+    expect(screen.queryByTestId("unheld-candidate-GOOGL")).toBeNull();
+    }
+  );
 
   it("shows real plan coverage and every pending holding without fake price bands", () => {
     render(React.createElement(BuyPlans));
@@ -320,21 +397,27 @@ describe("BuyPlans page interactions", () => {
     await user.click(screen.getByRole("button", { name: /価格帯の外/ }));
     expect(screen.getByText("ソフトバンクグループ", { selector: "span" })).toBeTruthy();
 
-    await user.click(screen.getByRole("button", { name: /すべて/ }));
+    const allPlansButton = screen
+      .getAllByRole("button", { name: /すべて/ })
+      .find(button => button.textContent?.includes("15"));
+    expect(allPlansButton).toBeTruthy();
+    await user.click(allPlansButton!);
     expect(screen.getByText("トヨタ自動車", { selector: "span" })).toBeTruthy();
     expect(screen.getByText("NVIDIA", { selector: "span" })).toBeTruthy();
     expect(screen.getByText("Microsoft", { selector: "span" })).toBeTruthy();
     expect(screen.getByText("ソフトバンクグループ", { selector: "span" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: /すべて/ }).getAttribute("aria-pressed")).toBe(
-      "true"
-    );
+    expect(allPlansButton!.getAttribute("aria-pressed")).toBe("true");
   });
 
   it("shows an empty search and restores the list through the clear button", async () => {
     const user = userEvent.setup();
     render(React.createElement(BuyPlans));
     await user.click(screen.getByRole("button", { name: "全 15 銘柄を表示" }));
-    await user.click(screen.getByRole("button", { name: /すべて/ }));
+    const allPlansButton = screen
+      .getAllByRole("button", { name: /すべて/ })
+      .find(button => button.textContent?.includes("15"));
+    expect(allPlansButton).toBeTruthy();
+    await user.click(allPlansButton!);
 
     const search = screen.getByPlaceholderText("銘柄名・ティッカー");
     await user.type(search, "NO-SUCH-SYMBOL");

@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   overview: vi.fn(),
+  priceBandOverview: vi.fn(),
   assetTrend: vi.fn(),
   settings: vi.fn(),
   updateSettings: vi.fn(),
@@ -23,6 +24,7 @@ vi.mock("@/lib/trpc", () => ({
     }),
     portfolio: {
       overview: { useQuery: mocks.overview },
+      priceBandOverview: { useQuery: mocks.priceBandOverview },
       assetTrend: { useQuery: mocks.assetTrend },
       settings: { useQuery: mocks.settings },
       updateSettings: {
@@ -254,6 +256,20 @@ beforeEach(() => {
     isLoading: false,
     error: null,
   });
+  mocks.priceBandOverview.mockReturnValue({
+    data: {
+      ranking: {
+        unheldCandidates: [
+          { symbol: "GOOGL", purchaseDecision: { decision: "BUY_NOW" } },
+          { symbol: "MSFT", purchaseDecision: { decision: "PRICE_WAIT" } },
+          { symbol: "NVDA", purchaseDecision: { decision: "DATA_WAIT" } },
+          { symbol: "SNOW", purchaseDecision: { decision: "SKIP" } },
+        ],
+      },
+    },
+    isLoading: false,
+    error: null,
+  });
   mocks.settings.mockReturnValue({
     data: {
       longTermTargetNetAssetsJpy: "100000000000.00",
@@ -384,6 +400,12 @@ describe("Dashboard actual page", () => {
     expect(screen.getByText("あと7日で確認")).toBeTruthy();
     expect(screen.getByText("AI目安")).toBeTruthy();
     expect(screen.getByText("次回決算を確認")).toBeTruthy();
+    expect(screen.getByText("未保有・購入判断")).toBeTruthy();
+    expect(screen.getByText("今すぐ購入を検討")).toBeTruthy();
+    expect(screen.getByText("価格待ち")).toBeTruthy();
+    expect(screen.getByText("資料確認待ち")).toBeTruthy();
+    expect(screen.getByText("今回は見送る")).toBeTruthy();
+    expect(screen.queryByText("未保有と仮定した新規判断")).toBeNull();
     const signalCard = screen
       .getByText("AI シグナル内訳")
       .closest("[data-slot='card']");

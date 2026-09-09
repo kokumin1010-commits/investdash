@@ -36,7 +36,11 @@ import {
   formatNextBandHint,
   type BuyPlanListFilter,
 } from "@shared/buyPlanUi";
-import { groupRankedCandidates } from "@shared/buyPlanOpportunity";
+import {
+  groupRankedCandidates,
+  UNHELD_PURCHASE_DECISION_LABELS,
+  type UnheldPurchaseDecision,
+} from "@shared/buyPlanOpportunity";
 
 /**
  * 買い増しプランの一覧。
@@ -60,6 +64,9 @@ export default function BuyPlans() {
   const [filter, setFilter] = useState<Filter>("BUY");
   const [keyword, setKeyword] = useState("");
   const [showFullList, setShowFullList] = useState(false);
+  const [unheldDecisionFilter, setUnheldDecisionFilter] = useState<
+    "ALL" | UnheldPurchaseDecision
+  >("ALL");
 
   const { data, isLoading, error } = trpc.portfolio.priceBandOverview.useQuery();
   const utils = trpc.useUtils();
@@ -89,11 +96,32 @@ export default function BuyPlans() {
   const coverage = data?.coverage;
   const ranking = data?.ranking;
   const monthlyCandidates = ranking?.monthlyCandidates ?? [];
+  const unheldCandidates = ranking?.unheldCandidates ?? [];
   const unheldOpportunities = ranking?.unheldOpportunities ?? [];
   const priorityCandidateCount = ranking?.priorityCandidateCount ?? Math.min(5, monthlyCandidates.length);
   const rankedCandidateGroups = useMemo(
     () => groupRankedCandidates(monthlyCandidates),
     [monthlyCandidates]
+  );
+  const unheldDecisionCounts = useMemo(() => {
+    const counts: Record<"ALL" | UnheldPurchaseDecision, number> = {
+      ALL: unheldCandidates.length,
+      BUY_NOW: 0,
+      PRICE_WAIT: 0,
+      DATA_WAIT: 0,
+      SKIP: 0,
+    };
+    for (const row of unheldCandidates) counts[row.purchaseDecision.decision] += 1;
+    return counts;
+  }, [unheldCandidates]);
+  const visibleUnheldCandidates = useMemo(
+    () =>
+      unheldDecisionFilter === "ALL"
+        ? unheldCandidates
+        : unheldCandidates.filter(
+            row => row.purchaseDecision.decision === unheldDecisionFilter
+          ),
+    [unheldCandidates, unheldDecisionFilter]
   );
 
   const pendingRows = useMemo(() => {
@@ -294,36 +322,62 @@ export default function BuyPlans() {
               <p className="text-xs font-semibold tracking-[0.14em] text-sky-700 dark:text-sky-300">
                 FIRST POSITION OPPORTUNITIES
               </p>
-              <h2 className="mt-1 text-xl font-semibold">未保有・品質資料と価格条件を通過</h2>
+              <h2 className="mt-1 text-xl font-semibold">未保有・購入判断</h2>
               <p className="mt-1 text-sm text-muted-foreground">
-                現在の保有が0で、投資カード、資料品質、買付価格帯、未照合なし、実行可能な初回サイズをすべて確認できた候補です。
+                全口座を合算して保有0株の銘柄だけを、今すぐ購入・価格待ち・資料確認待ち・今回は見送りに分けます。「仮に未保有」の保有銘柄は含みません。
               </p>
             </div>
             <div className="text-xs text-muted-foreground sm:text-right">
               <p>{ranking.unheldOpportunityVersion}</p>
-              <p>現在 {unheldOpportunities.length} 銘柄</p>
+              <p>未保有 {unheldCandidates.length} 銘柄・今すぐ検討 {unheldOpportunities.length} 銘柄</p>
             </div>
           </div>
 
-          {unheldOpportunities.length > 0 ? (
-            <div className="grid gap-3 lg:grid-cols-2">
-              {unheldOpportunities.map(row => (
-                <MonthlyCandidateCard
-                  key={`unheld-${row.symbol}`}
-                  row={row}
-                  priority
-                  unheldOpportunity
-                />
-              ))}
-            </div>
+          {unheldCandidates.length > 0 ? (
+            <>
+              <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap">
+                {([
+                  ["ALL", "すべて"],
+                  ["BUY_NOW", UNHELD_PURCHASE_DECISION_LABELS.BUY_NOW],
+                  ["PRICE_WAIT", UNHELD_PURCHASE_DECISION_LABELS.PRICE_WAIT],
+                  ["DATA_WAIT", UNHELD_PURCHASE_DECISION_LABELS.DATA_WAIT],
+                  ["SKIP", UNHELD_PURCHASE_DECISION_LABELS.SKIP],
+                ] as const).map(([key, label]) => (
+                  <Button
+                    key={key}
+                    size="sm"
+                    variant={unheldDecisionFilter === key ? "default" : "outline"}
+                    className={unheldDecisionFilter === key ? "" : "bg-background"}
+                    onClick={() => setUnheldDecisionFilter(key)}
+                    aria-pressed={unheldDecisionFilter === key}
+                  >
+                    {label}
+                    <span className="ml-1.5 opacity-70">{unheldDecisionCounts[key]}</span>
+                  </Button>
+                ))}
+              </div>
+              {visibleUnheldCandidates.length > 0 ? (
+                <div className="grid gap-3 lg:grid-cols-2" data-testid="all-unheld-candidates">
+                  {visibleUnheldCandidates.map(row => (
+                    <UnheldCandidateCard key={`unheld-${row.symbol}`} row={row} />
+                  ))}
+                </div>
+              ) : (
+                <Card className="border-dashed">
+                  <CardContent className="py-8 text-center text-sm text-muted-foreground">
+                    この判断に該当する未保有候補はありません
+                  </CardContent>
+                </Card>
+              )}
+            </>
           ) : (
             <Card className="border-dashed border-sky-200 bg-sky-50/40 dark:border-sky-900 dark:bg-sky-950/20">
               <CardContent className="flex min-h-32 items-center gap-3 p-5">
                 <ShieldCheck className="size-7 shrink-0 text-sky-600" />
                 <div>
-                  <p className="font-semibold">現在、条件をすべて満たす未保有候補はありません</p>
+                  <p className="font-semibold">現在、判定できる未保有候補はありません</p>
                   <p className="mt-1 text-sm leading-6 text-muted-foreground">
-                    価格だけで候補を作らず、品質資料・確認項目・初回購入サイズが揃うまで待ちます。候補が出ればこの最上段に表示します。
+                    ウォッチリストまたは候補庫にあり、全口座合算で保有0株の銘柄だけをここに表示します。保有銘柄の仮定判断では補いません。
                   </p>
                 </div>
               </CardContent>
@@ -562,6 +616,14 @@ type Stats = {
   topAvgWeightPct: number | null;
 };
 
+type UnheldRow = Row & {
+  purchaseDecision: {
+    decision: UnheldPurchaseDecision;
+    label: string;
+    reasons: string[];
+  };
+};
+
 /** 万円単位で丸める。8.58 億円規模なので円単位まで出すと桁が読めない */
 function manYen(jpy: number): string {
   const man = jpy / 10000;
@@ -586,6 +648,85 @@ function priceBandText(row: Row): string {
     return `${format(row.currentBandLowerPrice)} ${row.currency} 以上`;
   }
   return "価格条件未取得";
+}
+
+function UnheldCandidateCard({ row }: { row: UnheldRow }) {
+  const style =
+    row.purchaseDecision.decision === "BUY_NOW"
+      ? "border-emerald-300 bg-emerald-50/50 dark:border-emerald-800 dark:bg-emerald-950/20"
+      : row.purchaseDecision.decision === "PRICE_WAIT"
+        ? "border-sky-200 bg-sky-50/40 dark:border-sky-900 dark:bg-sky-950/20"
+        : row.purchaseDecision.decision === "DATA_WAIT"
+          ? "border-amber-200 bg-amber-50/40 dark:border-amber-900 dark:bg-amber-950/20"
+          : "border-slate-200 bg-slate-50/50 dark:border-slate-800 dark:bg-slate-950/20";
+  const executable = row.sizing.shares > 0 && row.sizing.amountBase > 0;
+
+  return (
+    <Card className={`overflow-hidden ${style}`} data-testid={`unheld-candidate-${row.symbol}`}>
+      <CardHeader className="pb-3">
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-2">
+              <Badge variant="outline">未保有・0株</Badge>
+              <CardTitle className="text-base break-words">{row.name}</CardTitle>
+              <span className="text-xs text-muted-foreground">{row.symbol}</span>
+            </div>
+            <CardDescription className="mt-1">全口座合算の実保有を確認済み</CardDescription>
+          </div>
+          <Badge className="shrink-0">{row.purchaseDecision.label}</Badge>
+        </div>
+      </CardHeader>
+      <CardContent className="space-y-3 p-4">
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+          <div className="rounded-lg bg-background/70 p-2.5">
+            <p className="text-[11px] text-muted-foreground">現在値</p>
+            <p className="mt-1 font-mono text-sm font-semibold">
+              {row.currentPrice === null
+                ? "未取得"
+                : `${row.currentPrice.toLocaleString("ja-JP", { maximumFractionDigits: 2 })} ${row.currency}`}
+            </p>
+          </div>
+          <div className="rounded-lg bg-background/70 p-2.5">
+            <p className="text-[11px] text-muted-foreground">価格条件</p>
+            <p className="mt-1 text-xs font-semibold leading-5">{priceBandText(row)}</p>
+          </div>
+          <div className="rounded-lg bg-background/70 p-2.5">
+            <p className="text-[11px] text-muted-foreground">初回購入目安</p>
+            <p className="mt-1 font-mono text-sm font-semibold">
+              {executable
+                ? `${row.sizing.shares.toLocaleString("ja-JP", { maximumFractionDigits: 4 })} 株`
+                : "条件未達"}
+            </p>
+            <p className="text-[11px] text-muted-foreground">
+              {executable ? manYen(row.sizing.amountBase) : "金額は提案しません"}
+            </p>
+          </div>
+          <div className="rounded-lg bg-background/70 p-2.5">
+            <p className="text-[11px] text-muted-foreground">購入後構成比</p>
+            <p className="mt-1 font-mono text-sm font-semibold">
+              {executable ? `${row.sizing.afterWeightPct.toFixed(2)}%` : "—"}
+            </p>
+          </div>
+        </div>
+        <div className="rounded-xl border bg-background/70 px-3 py-2.5">
+          <p className="text-xs font-semibold">この判断の理由</p>
+          <ul className="mt-1.5 space-y-1 text-xs leading-5 text-muted-foreground">
+            {row.purchaseDecision.reasons.map((reason, index) => (
+              <li key={`${row.symbol}-reason-${index}`}>・{reason}</li>
+            ))}
+          </ul>
+        </div>
+        <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
+          <span>
+            資料 {row.signalDataQuality ?? "未取得"}・カード確信度 {row.cardConviction ?? "未設定"}/5・IBKR {row.sizing.ibkrRiskLevel ?? "未取得"}
+          </span>
+          <Link href="/watchlist" className="font-medium text-primary hover:underline">
+            ウォッチリストで詳細を見る
+          </Link>
+        </div>
+      </CardContent>
+    </Card>
+  );
 }
 
 function MonthlyCandidateCard({

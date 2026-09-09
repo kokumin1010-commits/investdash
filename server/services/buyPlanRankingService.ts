@@ -13,6 +13,7 @@ import { computePortfolioPositionSizing } from "../../shared/portfolioPositionSi
 import {
   BUY_PLAN_OPPORTUNITY_VERSION,
   selectAllRankedCandidates,
+  selectUnheldPurchaseCandidates,
   selectUnheldQualityPriceOpportunities,
 } from "../../shared/buyPlanOpportunity";
 import { getDb } from "../db";
@@ -211,6 +212,7 @@ export async function buildRankedPlanOverview(
     };
   });
   const monthlyCandidates = selectAllRankedCandidates(enrichedRows);
+  const unheldCandidates = selectUnheldPurchaseCandidates(enrichedRows);
   const unheldOpportunities = selectUnheldQualityPriceOpportunities(enrichedRows);
 
   return {
@@ -224,6 +226,7 @@ export async function buildRankedPlanOverview(
       monthlyCandidates,
       priorityCandidateCount: Math.min(5, monthlyCandidates.length),
       unheldOpportunityVersion: BUY_PLAN_OPPORTUNITY_VERSION,
+      unheldCandidates,
       unheldOpportunities,
       frozenAt:
         activeSnapshots.length > 0

@@ -7,7 +7,6 @@ import {
   SignalPlaceholder,
 } from "@/components/investing/SignalBadge";
 import { elapsedLabel } from "@/components/investing/SignalBody";
-import { BuffettLensBlock } from "@/components/investing/WouldBuyNowBadge";
 import { PriceBandPlanCard } from "@/components/investing/PriceBandPlanCard";
 import {
   HoldingDurationSummary,
@@ -554,20 +553,6 @@ export default function HoldingDetail({ params }: { params: { id: string } }) {
             </div>
 
             <SignalDecisionMeta signal={view.signal} />
-
-            <details className="rounded-lg border border-dashed bg-muted/20 px-3 py-2.5">
-              <summary className="cursor-pointer text-xs font-medium text-muted-foreground">
-                参考視点（未保有なら買うか・株価と中身）
-              </summary>
-              <div className="mt-2">
-                <BuffettLensBlock
-                  wouldBuyNow={view.signal.wouldBuyNow}
-                  wouldBuyNowReason={view.signal.wouldBuyNowReason}
-                  priceVsValue={view.signal.priceVsValue}
-                  priceVsValueReason={view.signal.priceVsValueReason}
-                />
-              </div>
-            </details>
 
             {signalHistory[0]?.factors ? (
               <>

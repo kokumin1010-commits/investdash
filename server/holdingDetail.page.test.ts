@@ -249,7 +249,7 @@ describe("HoldingDetail actual page", () => {
     ).toBeTruthy();
   });
 
-  it("renders real dividend metrics and an actual-holding action before the reference lens", () => {
+  it("renders real dividend metrics and only the actual-holding action", () => {
     render(React.createElement(HoldingDetail, { params: { id: "1" } }));
     expect(screen.getByText("予想配当利回り")).toBeTruthy();
     expect(screen.getByText("2.88%")).toBeTruthy();
@@ -257,8 +257,8 @@ describe("HoldingDetail actual page", () => {
     expect(screen.getByText(/729,000/)).toBeTruthy();
     expect(screen.getByText("8,100株を継続保有")).toBeTruthy();
     expect(screen.getByText("売買なし")).toBeTruthy();
-    const reference = screen.getByText(/参考視点/).closest("details");
-    expect(reference?.open).toBe(false);
+    expect(screen.queryByText(/参考視点/)).toBeNull();
+    expect(screen.queryByText(/仮に未保有/)).toBeNull();
   });
 
   it("shows a compact JPY execution amount for REDUCE without truncating the decision", () => {

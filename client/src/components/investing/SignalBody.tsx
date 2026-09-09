@@ -18,7 +18,6 @@
  */
 import { Brain, ChevronDown, ChevronUp } from "lucide-react";
 import { useState } from "react";
-import { BuffettLensBlock } from "@/components/investing/WouldBuyNowBadge";
 
 /** 折りたたみボタンを出す文字数の下限（おおよそ 2 行分） */
 const COLLAPSE_MIN_LENGTH = 80;
@@ -88,15 +87,7 @@ export function SignalBody({
       >
         {signal.rationale}
       </p>
-      {open ? (
-        <BuffettLensBlock
-          wouldBuyNow={signal.wouldBuyNow}
-          wouldBuyNowReason={signal.wouldBuyNowReason}
-          priceVsValue={signal.priceVsValue}
-          priceVsValueReason={signal.priceVsValueReason}
-        />
-      ) : null}
-      {collapsible || signal.wouldBuyNowReason || signal.priceVsValueReason ? (
+      {collapsible ? (
         <button
           type="button"
           onClick={() => setOpen(v => !v)}

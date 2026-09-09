@@ -38,7 +38,11 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { trpc } from "@/lib/trpc";
 import { parseBrokerFilter } from "@shared/brokerFilter";
 import {
@@ -79,7 +83,7 @@ import {
   Sparkles,
   Trash2,
 } from "lucide-react";
-import { Fragment, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { Link, useLocation, useSearch } from "wouter";
 
@@ -91,8 +95,14 @@ function holdingDurationText(days: number): string {
   return `${days}日`;
 }
 
-function holdingDurationBasis(confidence: "EXACT" | "AT_LEAST" | "TRACKED_SINCE"): string {
-  return confidence === "EXACT" ? "正確" : confidence === "AT_LEAST" ? "少なくとも" : "記録開始から";
+function holdingDurationBasis(
+  confidence: "EXACT" | "AT_LEAST" | "TRACKED_SINCE"
+): string {
+  return confidence === "EXACT"
+    ? "正確"
+    : confidence === "AT_LEAST"
+      ? "少なくとも"
+      : "記録開始から";
 }
 
 function holdingDurationSource(source: string): string {
@@ -106,7 +116,13 @@ function holdingDurationSource(source: string): string {
  * 並び替えの軸。長期保有が前提のため「前日比順」は置かない
  * （日々の変動は判断材料にならず、長期の損益や配当のほうが役に立つ）。
  */
-type SortKey = "value" | "pnlPct" | "weight" | "name" | "dividend" | "dividendYield";
+type SortKey =
+  | "value"
+  | "pnlPct"
+  | "weight"
+  | "name"
+  | "dividend"
+  | "dividendYield";
 
 export default function Holdings() {
   const utils = trpc.useUtils();
@@ -119,7 +135,9 @@ export default function Holdings() {
   const consultStats = trpc.consult.symbolStats.useQuery();
   const [query, setQuery] = useState("");
   const [sortKey, setSortKey] = useState<SortKey>("value");
-  const [signalFilter, setSignalFilter] = useState<"ALL" | SignalAction | "NONE">("ALL");
+  const [signalFilter, setSignalFilter] = useState<
+    "ALL" | SignalAction | "NONE"
+  >("ALL");
   /**
    * 口座フィルタは URL クエリ（?broker=moomoo_jp）でも指定できる。
    * ダッシュボードの「証券口座別の資産」カードから遷移してくるため。
@@ -133,7 +151,8 @@ export default function Holdings() {
    */
   const lensFromUrl = useMemo(() => parseBuffettFilter(search), [search]);
   const [lensFilterState, setLensFilter] = useState<BuffettFilter>("ALL");
-  const lensFilter: BuffettFilter = lensFromUrl ?? lensFilterState;
+  const lensFilter: BuffettFilter =
+    lensFromUrl === "BUY_NOW" ? "ALL" : (lensFromUrl ?? lensFilterState);
   const brokerFromUrl = useMemo(() => parseBrokerFilter(search), [search]);
   const [brokerFilterState, setBrokerFilter] = useState<"ALL" | Broker>("ALL");
   // URL 指定があればそれを優先する（リンクで直接開いた場合に効かせるため）
@@ -143,7 +162,9 @@ export default function Holdings() {
    * 両方を同時に指定できる（例: 楽天の米国株だけを見る）。
    */
   const marketFromUrl = useMemo(() => {
-    const params = new URLSearchParams(search.startsWith("?") ? search.slice(1) : search);
+    const params = new URLSearchParams(
+      search.startsWith("?") ? search.slice(1) : search
+    );
     return parseMarketFilter(params.get("market"));
   }, [search]);
   const [marketFilterState, setMarketFilter] = useState<"ALL" | Market>("ALL");
@@ -154,14 +175,25 @@ export default function Holdings() {
    * ID を持っていない。検索語として渡して絞り込む。
    */
   const symbolFromUrl = useMemo(() => {
-    const params = new URLSearchParams(search.startsWith("?") ? search.slice(1) : search);
+    const params = new URLSearchParams(
+      search.startsWith("?") ? search.slice(1) : search
+    );
     return params.get("symbol")?.trim() ?? null;
   }, [search]);
   const effectiveQuery = symbolFromUrl ?? query;
   const [addOpen, setAddOpen] = useState(false);
   const [editTarget, setEditTarget] = useState<number | null>(null);
-  const [deleteTarget, setDeleteTarget] = useState<{ id: number; name: string } | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<{
+    id: number;
+    name: string;
+  } | null>(null);
   const [signalBusyId, setSignalBusyId] = useState<number | null>(null);
+
+  useEffect(() => {
+    if (lensFromUrl === "BUY_NOW") {
+      navigate("/buy-plans?view=unheld", { replace: true });
+    }
+  }, [lensFromUrl, navigate]);
 
   const syncPrices = trpc.portfolio.syncPrices.useMutation({
     onSuccess: async res => {
@@ -183,16 +215,15 @@ export default function Holdings() {
         toast.info("下書きが必要な銘柄はありません");
       } else {
         toast.success(`${res.created} 銘柄の投資カードを下書きしました`, {
-          description:
-            res.quotaExhausted
-              ? `AI 利用枠に達したため中断しました。残り ${res.remaining} 銘柄は自動で続行します`
-              : res.remaining > 0
+          description: res.quotaExhausted
+            ? `AI 利用枠に達したため中断しました。残り ${res.remaining} 銘柄は自動で続行します`
+            : res.remaining > 0
               ? `残り ${res.remaining} 銘柄。もう一度押すと続けて下書きします`
               : res.deferred.length > 0
                 ? `${res.deferred.length} 銘柄は直近失敗のため一時保留です`
-              : res.failed.length > 0
-                ? `失敗: ${res.failed.join(", ")}`
-                : "すべての銘柄に下書きが入りました",
+                : res.failed.length > 0
+                  ? `失敗: ${res.failed.join(", ")}`
+                  : "すべての銘柄に下書きが入りました",
         });
       }
     },
@@ -208,7 +239,10 @@ export default function Holdings() {
       });
     },
     onError: e =>
-      toast.error("AI分析を実行できませんでした", { description: e.message, duration: 8000 }),
+      toast.error("AI分析を実行できませんでした", {
+        description: e.message,
+        duration: 8000,
+      }),
     onSettled: () => setSignalBusyId(null),
   });
 
@@ -289,15 +323,29 @@ export default function Holdings() {
          * 現地通貨のままだと SGD 5,586 と JPY 1,425,000 を正しく比較できない）。
          */
         case "dividend":
-          return (b.dividend?.annualIncomeBase ?? 0) - (a.dividend?.annualIncomeBase ?? 0);
+          return (
+            (b.dividend?.annualIncomeBase ?? 0) -
+            (a.dividend?.annualIncomeBase ?? 0)
+          );
         case "dividendYield":
-          return (b.dividend?.yieldPct ?? -Infinity) - (a.dividend?.yieldPct ?? -Infinity);
+          return (
+            (b.dividend?.yieldPct ?? -Infinity) -
+            (a.dividend?.yieldPct ?? -Infinity)
+          );
         default:
           return (b.marketValueBase ?? 0) - (a.marketValueBase ?? 0);
       }
     });
     return sorted;
-  }, [groups, effectiveQuery, signalFilter, brokerFilter, marketFilter, lensFilter, sortKey]);
+  }, [
+    groups,
+    effectiveQuery,
+    signalFilter,
+    brokerFilter,
+    marketFilter,
+    lensFilter,
+    sortKey,
+  ]);
 
   /** 実際に保有がある口座だけを絞り込みの選択肢にする */
   const usedBrokers = useMemo(() => {
@@ -322,10 +370,17 @@ export default function Holdings() {
    * 混乱するため、該当レコードだけを足し合わせる。
    */
   const filterSummary = useMemo(() => {
-    if (brokerFilter === "ALL" && marketFilter === "ALL" && lensFilter === "ALL") return null;
+    if (
+      brokerFilter === "ALL" &&
+      marketFilter === "ALL" &&
+      lensFilter === "ALL"
+    )
+      return null;
     let mine = positions;
-    if (brokerFilter !== "ALL") mine = mine.filter(p => p.broker === brokerFilter);
-    if (marketFilter !== "ALL") mine = mine.filter(p => p.market === marketFilter);
+    if (brokerFilter !== "ALL")
+      mine = mine.filter(p => p.broker === brokerFilter);
+    if (marketFilter !== "ALL")
+      mine = mine.filter(p => p.market === marketFilter);
     /*
      * 判定での絞り込みは銘柄単位で入っているため、
      * 残った銘柄に属するレコードだけを残す。
@@ -377,7 +432,9 @@ export default function Holdings() {
               <>
                 {groups.length} 銘柄
                 {/* 同一銘柄を複数口座で持つ場合、行数と銘柄数がずれるので明示する */}
-                {positions.length !== groups.length ? `（${positions.length} 口座分）` : ""}
+                {positions.length !== groups.length
+                  ? `（${positions.length} 口座分）`
+                  : ""}
               </>
             ) : (
               `${rows.length} 銘柄を表示中（全 ${groups.length} 銘柄）`
@@ -407,7 +464,11 @@ export default function Holdings() {
           <Button
             variant="outline"
             size="sm"
-            disabled={draftCards.isPending || positions.length === 0 || cardReadyCount === groups.length}
+            disabled={
+              draftCards.isPending ||
+              positions.length === 0 ||
+              cardReadyCount === groups.length
+            }
             onClick={() => draftCards.mutate({ batchSize: 4 })}
           >
             {draftCards.isPending ? (
@@ -432,7 +493,9 @@ export default function Holdings() {
         <Card>
           <CardContent className="flex flex-wrap items-center justify-between gap-3 py-3">
             <div className="flex items-center gap-2.5">
-              {brokerFilter !== "ALL" ? <BrokerBadge broker={brokerFilter} /> : null}
+              {brokerFilter !== "ALL" ? (
+                <BrokerBadge broker={brokerFilter} />
+              ) : null}
               {marketFilter !== "ALL" ? (
                 <span
                   className="rounded-md border px-2 py-0.5 text-xs font-medium"
@@ -460,7 +523,9 @@ export default function Holdings() {
             </div>
             <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1">
               <span className="flex items-baseline gap-1.5">
-                <span className="text-[11px] text-muted-foreground">評価額</span>
+                <span className="text-[11px] text-muted-foreground">
+                  評価額
+                </span>
                 <MoneyText
                   value={filterSummary.value}
                   currency={summary?.baseCurrency}
@@ -468,7 +533,9 @@ export default function Holdings() {
                 />
               </span>
               <span className="flex items-baseline gap-1.5">
-                <span className="text-[11px] text-muted-foreground">評価損益</span>
+                <span className="text-[11px] text-muted-foreground">
+                  評価損益
+                </span>
                 <PnlText
                   value={filterSummary.pnl}
                   currency={summary?.baseCurrency}
@@ -489,7 +556,8 @@ export default function Holdings() {
                   setBrokerFilter("ALL");
                   setMarketFilter("ALL");
                   setLensFilter("ALL");
-                  if (brokerFromUrl || marketFromUrl || lensFromUrl) navigate("/holdings");
+                  if (brokerFromUrl || marketFromUrl || lensFromUrl)
+                    navigate("/holdings");
                 }}
               >
                 絞り込みを解除
@@ -510,7 +578,10 @@ export default function Holdings() {
             className="h-9 pl-8"
           />
         </div>
-        <Select value={signalFilter} onValueChange={v => setSignalFilter(v as typeof signalFilter)}>
+        <Select
+          value={signalFilter}
+          onValueChange={v => setSignalFilter(v as typeof signalFilter)}
+        >
           <SelectTrigger className="h-9 w-[150px]">
             <SelectValue />
           </SelectTrigger>
@@ -524,24 +595,22 @@ export default function Holdings() {
             <SelectItem value="NONE">未生成</SelectItem>
           </SelectContent>
         </Select>
-        {/*
-          判定での絞り込み。シグナル（ADD/HOLD）とは別の軸なので独立させる。
-          ADD は「今の保有をどうするか」、判定は「今から買うか」を見ている。
-        */}
+        {/* 保有銘柄では、現在の保有に対する注意判断だけを絞り込む。 */}
         <Select
           value={lensFilter}
           onValueChange={v => {
             const next = v as BuffettFilter;
             setLensFilter(next);
             // URL クエリで来ている場合は URL 側も合わせて書き換える
-            if (lensFromUrl) navigate(next === "ALL" ? "/holdings" : `/holdings?lens=${next}`);
+            if (lensFromUrl)
+              navigate(next === "ALL" ? "/holdings" : `/holdings?lens=${next}`);
           }}
         >
           <SelectTrigger className="h-9 w-[180px]">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            {BUFFETT_FILTERS.map(f => (
+            {BUFFETT_FILTERS.filter(f => f !== "BUY_NOW").map(f => (
               <SelectItem key={f} value={f}>
                 {BUFFETT_FILTER_LABELS[f]}
               </SelectItem>
@@ -558,7 +627,10 @@ export default function Holdings() {
                * URL クエリで来ている場合、state だけ変えても URL 優先のままになるので
                * URL 側も合わせて書き換える。
                */
-              if (brokerFromUrl) navigate(next === "ALL" ? "/holdings" : `/holdings?broker=${next}`);
+              if (brokerFromUrl)
+                navigate(
+                  next === "ALL" ? "/holdings" : `/holdings?broker=${next}`
+                );
             }}
           >
             <SelectTrigger className="h-9 w-[170px]">
@@ -581,7 +653,10 @@ export default function Holdings() {
               const next = v as "ALL" | Market;
               setMarketFilter(next);
               // URL クエリで来ている場合は URL 側も合わせて書き換える
-              if (marketFromUrl) navigate(next === "ALL" ? "/holdings" : `/holdings?market=${next}`);
+              if (marketFromUrl)
+                navigate(
+                  next === "ALL" ? "/holdings" : `/holdings?market=${next}`
+                );
             }}
           >
             <SelectTrigger className="h-9 w-[140px]">
@@ -651,7 +726,9 @@ export default function Holdings() {
                     >
                       <div className="flex items-center gap-1.5">
                         <span className="truncate font-medium">{p.name}</span>
-                        {p.hasCard ? <FileText className="h-3.5 w-3.5 shrink-0 text-primary" /> : null}
+                        {p.hasCard ? (
+                          <FileText className="h-3.5 w-3.5 shrink-0 text-primary" />
+                        ) : null}
                         {consultBySymbol.get(p.symbol) ? (
                           <span className="flex shrink-0 items-center gap-0.5 text-primary">
                             <MessageSquare className="h-3.5 w-3.5" />
@@ -676,18 +753,27 @@ export default function Holdings() {
                         {p.sector ? (
                           <>
                             <span>·</span>
-                            <span className="truncate">{sectorJa(p.sector)}</span>
+                            <span className="truncate">
+                              {sectorJa(p.sector)}
+                            </span>
                           </>
                         ) : null}
                       </div>
                       <p className="text-[10px] text-muted-foreground">
-                        保有 {holdingDurationBasis(p.holdingDuration.confidence)} {holdingDurationText(p.holdingDuration.days)}
+                        保有{" "}
+                        {holdingDurationBasis(p.holdingDuration.confidence)}{" "}
+                        {holdingDurationText(p.holdingDuration.days)}
                         {` ・ ${new Date(p.holdingDuration.startDate).toLocaleDateString("ja-JP")}（${holdingDurationSource(p.holdingDuration.source)}）`}
                       </p>
                     </Link>
                     <div className="flex shrink-0 flex-col items-end gap-1">
-                      <HoldingSignalStatus action={p.signal?.action} surface="mobile" />
-                      {p.signal ? <SignalReviewPlanBadge plan={p.signal.reviewPlan} /> : null}
+                      <HoldingSignalStatus
+                        action={p.signal?.action}
+                        surface="mobile"
+                      />
+                      {p.signal ? (
+                        <SignalReviewPlanBadge plan={p.signal.reviewPlan} />
+                      ) : null}
                       {/* 複数口座にまたがる場合はすべてのバッジを並べる */}
                       <div className="flex flex-wrap justify-end gap-1">
                         {p.brokers.map(b => (
@@ -700,7 +786,9 @@ export default function Holdings() {
                   {/* 中段: 評価額と損益を大きく */}
                   <div className="mt-3 flex items-end justify-between gap-3 border-t pt-2.5">
                     <div className="space-y-0.5">
-                      <p className="text-[11px] text-muted-foreground">評価額</p>
+                      <p className="text-[11px] text-muted-foreground">
+                        評価額
+                      </p>
                       <MoneyText
                         value={p.marketValue}
                         currency={p.currency}
@@ -709,7 +797,9 @@ export default function Holdings() {
                       />
                     </div>
                     <div className="space-y-0.5 text-right">
-                      <p className="text-[11px] text-muted-foreground">評価損益</p>
+                      <p className="text-[11px] text-muted-foreground">
+                        評価損益
+                      </p>
                       <PnlText
                         value={p.pnl}
                         currency={p.currency}
@@ -731,7 +821,9 @@ export default function Holdings() {
                   <div className="mt-2.5 grid grid-cols-4 gap-2 border-t pt-2.5 text-center">
                     <div>
                       <p className="text-[10px] text-muted-foreground">株数</p>
-                      <p className="tabular text-xs font-medium">{formatNumber(p.quantity, 0)}</p>
+                      <p className="tabular text-xs font-medium">
+                        {formatNumber(p.quantity, 0)}
+                      </p>
                     </div>
                     <div>
                       <p className="text-[10px] text-muted-foreground">
@@ -744,7 +836,9 @@ export default function Holdings() {
                       />
                     </div>
                     <div>
-                      <p className="text-[10px] text-muted-foreground">現在値</p>
+                      <p className="text-[10px] text-muted-foreground">
+                        現在値
+                      </p>
                       <MoneyText
                         value={p.currentPrice}
                         currency={p.currency}
@@ -752,9 +846,13 @@ export default function Holdings() {
                       />
                     </div>
                     <div>
-                      <p className="text-[10px] text-muted-foreground">構成比</p>
+                      <p className="text-[10px] text-muted-foreground">
+                        構成比
+                      </p>
                       <p className="tabular text-xs font-medium">
-                        {p.weightPct !== null ? `${p.weightPct.toFixed(1)}%` : "—"}
+                        {p.weightPct !== null
+                          ? `${p.weightPct.toFixed(1)}%`
+                          : "—"}
                       </p>
                     </div>
                   </div>
@@ -787,7 +885,9 @@ export default function Holdings() {
                         </span>
                       </div>
                       <div className="mt-1 flex items-baseline justify-between gap-2 text-[11px]">
-                        <span className="text-muted-foreground">買った値段に対する利回り</span>
+                        <span className="text-muted-foreground">
+                          買った値段に対する利回り
+                        </span>
                         <span className="tabular font-medium text-gain">
                           {p.dividend.yieldOnCostPct !== null
                             ? `${p.dividend.yieldOnCostPct.toFixed(2)}%`
@@ -851,7 +951,9 @@ export default function Holdings() {
                     entries={p.entries.map(e => ({
                       ...e,
                       pnlBase:
-                        e.marketValueBase === null ? null : e.marketValueBase - e.costValueBase,
+                        e.marketValueBase === null
+                          ? null
+                          : e.marketValueBase - e.costValueBase,
                     }))}
                     onEdit={id => setEditTarget(id)}
                     onDelete={id => {
@@ -896,7 +998,12 @@ export default function Holdings() {
                           variant="ghost"
                           size="icon"
                           className="h-8 w-8 text-muted-foreground hover:text-destructive"
-                          onClick={() => setDeleteTarget({ id: p.entries[0].id, name: p.name })}
+                          onClick={() =>
+                            setDeleteTarget({
+                              id: p.entries[0].id,
+                              name: p.name,
+                            })
+                          }
                         >
                           <Trash2 className="h-3.5 w-3.5" />
                         </Button>
@@ -918,427 +1025,513 @@ export default function Holdings() {
           {/* デスクトップ: 一覧性の高い表 */}
           <Card className="hidden overflow-hidden lg:block">
             <div className="overflow-x-auto">
-            <Table>
-              <TableHeader>
+              <Table>
+                <TableHeader>
                   <TableRow className="hover:bg-transparent">
                     <TableHead className="min-w-[220px]">銘柄</TableHead>
                     <TableHead className="min-w-[110px]">口座</TableHead>
                     <TableHead className="text-right">株数</TableHead>
-                  <TableHead className="text-right">取得単価</TableHead>
+                    <TableHead className="text-right">取得単価</TableHead>
                     <TableHead className="text-right">現在値</TableHead>
-                  <TableHead className="text-right">評価額</TableHead>
-                  <TableHead className="min-w-[130px] text-right">評価損益</TableHead>
-                  <TableHead className="min-w-[120px] text-right">年間配当</TableHead>
-                  <TableHead className="text-right">構成比</TableHead>
-                  <TableHead className="min-w-[150px]">AIシグナル</TableHead>
-                  <TableHead className="w-[120px] text-right">操作</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {rows.map(p => (
-                  <Fragment key={p.symbol}>
-                  {/*
+                    <TableHead className="text-right">評価額</TableHead>
+                    <TableHead className="min-w-[130px] text-right">
+                      評価損益
+                    </TableHead>
+                    <TableHead className="min-w-[120px] text-right">
+                      年間配当
+                    </TableHead>
+                    <TableHead className="text-right">構成比</TableHead>
+                    <TableHead className="min-w-[150px]">AIシグナル</TableHead>
+                    <TableHead className="w-[120px] text-right">操作</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {rows.map(p => (
+                    <Fragment key={p.symbol}>
+                      {/*
                     複数口座の銘柄は「合計行 + 内訳行」のまとまりになる。
                     まとまりの境目が分かるよう、合計行の上に太めの区切り線を置き、
                     合計行自体は白背景のまま（内訳だけ色を敷く）にして主従を示す。
                   */}
-                  <TableRow
-                    className={`group ${
-                      p.isSplit ? "border-b-0 border-t-2 border-t-border/70" : ""
-                    }`}
-                  >
-                    <TableCell className={p.isSplit ? "font-medium" : undefined}>
-                      <Link href={`/holdings/${p.entries[0].id}`} className="block space-y-0.5">
-                        <div className="flex items-center gap-1.5">
-                          <span className="font-medium hover:underline">{p.name}</span>
-                          {p.hasCard ? (
-                            <Tooltip>
-                              <TooltipTrigger asChild>
-                                <FileText className="h-3.5 w-3.5 text-primary" />
-                              </TooltipTrigger>
-                              <TooltipContent>投資カード記入済み</TooltipContent>
-                            </Tooltip>
-                          ) : null}
-                          {/*
+                      <TableRow
+                        className={`group ${
+                          p.isSplit
+                            ? "border-b-0 border-t-2 border-t-border/70"
+                            : ""
+                        }`}
+                      >
+                        <TableCell
+                          className={p.isSplit ? "font-medium" : undefined}
+                        >
+                          <Link
+                            href={`/holdings/${p.entries[0].id}`}
+                            className="block space-y-0.5"
+                          >
+                            <div className="flex items-center gap-1.5">
+                              <span className="font-medium hover:underline">
+                                {p.name}
+                              </span>
+                              {p.hasCard ? (
+                                <Tooltip>
+                                  <TooltipTrigger asChild>
+                                    <FileText className="h-3.5 w-3.5 text-primary" />
+                                  </TooltipTrigger>
+                                  <TooltipContent>
+                                    投資カード記入済み
+                                  </TooltipContent>
+                                </Tooltip>
+                              ) : null}
+                              {/*
                             過去に相談した銘柄が分かるようにする。相談画面を開かないと
                             分からない状態だと「前に検討した」ことに気付けない。
                           */}
-                          {consultBySymbol.get(p.symbol) ? (
-                            <Tooltip>
-                              <TooltipTrigger asChild>
-                                <span className="flex items-center gap-0.5 text-primary">
-                                  <MessageSquare className="h-3.5 w-3.5" />
-                                  <span className="tabular text-[10px] font-semibold">
-                                    {consultBySymbol.get(p.symbol)!.consultCount}
-                                  </span>
-                                </span>
-                              </TooltipTrigger>
-                              <TooltipContent>
-                                AI に相談済み {consultBySymbol.get(p.symbol)!.consultCount} 件（最終{" "}
-                                {new Date(
-                                  consultBySymbol.get(p.symbol)!.lastConsultedAt
-                                ).toLocaleDateString()}
-                                ）
-                              </TooltipContent>
-                            </Tooltip>
-                          ) : null}
-                          {p.negativeNewsCount > 0 ? (
-                            <Tooltip>
-                              <TooltipTrigger asChild>
-                                <span className="flex items-center gap-0.5 text-loss">
-                                  <Newspaper className="h-3.5 w-3.5" />
-                                  <span className="tabular text-[10px] font-semibold">
-                                    {p.negativeNewsCount}
-                                  </span>
-                                </span>
-                              </TooltipTrigger>
-                              <TooltipContent>
-                                影響度の高いネガティブニュース {p.negativeNewsCount} 件
-                              </TooltipContent>
-                            </Tooltip>
-                          ) : null}
-                        </div>
-                        <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                          <span className="tabular">{p.tickerCode}</span>
-                          <span>·</span>
-                          <span>{marketLabel(p.market)}</span>
-                          {p.sector ? (
-                            <>
+                              {consultBySymbol.get(p.symbol) ? (
+                                <Tooltip>
+                                  <TooltipTrigger asChild>
+                                    <span className="flex items-center gap-0.5 text-primary">
+                                      <MessageSquare className="h-3.5 w-3.5" />
+                                      <span className="tabular text-[10px] font-semibold">
+                                        {
+                                          consultBySymbol.get(p.symbol)!
+                                            .consultCount
+                                        }
+                                      </span>
+                                    </span>
+                                  </TooltipTrigger>
+                                  <TooltipContent>
+                                    AI に相談済み{" "}
+                                    {
+                                      consultBySymbol.get(p.symbol)!
+                                        .consultCount
+                                    }{" "}
+                                    件（最終{" "}
+                                    {new Date(
+                                      consultBySymbol.get(
+                                        p.symbol
+                                      )!.lastConsultedAt
+                                    ).toLocaleDateString()}
+                                    ）
+                                  </TooltipContent>
+                                </Tooltip>
+                              ) : null}
+                              {p.negativeNewsCount > 0 ? (
+                                <Tooltip>
+                                  <TooltipTrigger asChild>
+                                    <span className="flex items-center gap-0.5 text-loss">
+                                      <Newspaper className="h-3.5 w-3.5" />
+                                      <span className="tabular text-[10px] font-semibold">
+                                        {p.negativeNewsCount}
+                                      </span>
+                                    </span>
+                                  </TooltipTrigger>
+                                  <TooltipContent>
+                                    影響度の高いネガティブニュース{" "}
+                                    {p.negativeNewsCount} 件
+                                  </TooltipContent>
+                                </Tooltip>
+                              ) : null}
+                            </div>
+                            <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                              <span className="tabular">{p.tickerCode}</span>
                               <span>·</span>
-                              <span className="truncate">{sectorJa(p.sector)}</span>
-                            </>
-                          ) : null}
-                        </div>
-                        <p className="text-[10px] text-muted-foreground">
-                          保有 {holdingDurationBasis(p.holdingDuration.confidence)} {holdingDurationText(p.holdingDuration.days)}
-                          {` ・ ${new Date(p.holdingDuration.startDate).toLocaleDateString("ja-JP")}（${holdingDurationSource(p.holdingDuration.source)}）`}
-                        </p>
-                      </Link>
-                    </TableCell>
-                    <TableCell>
-                      {/* 複数口座にまたがる場合はすべての口座を表示し、株数の内訳も添える */}
-                      <div className="space-y-1">
-                        <div className="flex flex-wrap gap-1">
-                          {p.brokers.map(b => (
-                            <BrokerBadge key={b} broker={b} />
-                          ))}
-                        </div>
-                        {p.isSplit ? (
-                          <p className="text-[10px] text-muted-foreground">
-                            {p.entries.length} 口座の合計
-                          </p>
-                        ) : null}
-                      </div>
-                    </TableCell>
-                    <TableCell className="tabular text-right">
-                      {formatNumber(p.quantity, 0)}
-                    </TableCell>
-                    <TableCell className="text-right">
-                      <div className="space-y-0.5">
-                        <MoneyText value={p.avgCost} currency={p.currency} />
-                        {p.isSplit ? (
-                          <p className="text-[10px] text-muted-foreground">加重平均</p>
-                        ) : null}
-                      </div>
-                    </TableCell>
-                    <TableCell className="text-right">
-                      <MoneyText value={p.currentPrice} currency={p.currency} />
-                    </TableCell>
-                    <TableCell className="text-right">
-                      {/* 評価額は表示通貨に合わせる。並び順の基準（円換算）と表示を一致させるため */}
-                      <MoneyText
-                        value={p.marketValue}
-                        currency={p.currency}
-                        baseValue={p.marketValueBase}
-                        compact
-                      />
-                    </TableCell>
-                    <TableCell className="text-right">
-                      <div className="space-y-0.5">
-                        <PnlText
-                          value={p.pnl}
-                          currency={p.currency}
-                          baseValue={p.pnlBase}
-                          compact
-                          /*
+                              <span>{marketLabel(p.market)}</span>
+                              {p.sector ? (
+                                <>
+                                  <span>·</span>
+                                  <span className="truncate">
+                                    {sectorJa(p.sector)}
+                                  </span>
+                                </>
+                              ) : null}
+                            </div>
+                            <p className="text-[10px] text-muted-foreground">
+                              保有{" "}
+                              {holdingDurationBasis(
+                                p.holdingDuration.confidence
+                              )}{" "}
+                              {holdingDurationText(p.holdingDuration.days)}
+                              {` ・ ${new Date(p.holdingDuration.startDate).toLocaleDateString("ja-JP")}（${holdingDurationSource(p.holdingDuration.source)}）`}
+                            </p>
+                          </Link>
+                        </TableCell>
+                        <TableCell>
+                          {/* 複数口座にまたがる場合はすべての口座を表示し、株数の内訳も添える */}
+                          <div className="space-y-1">
+                            <div className="flex flex-wrap gap-1">
+                              {p.brokers.map(b => (
+                                <BrokerBadge key={b} broker={b} />
+                              ))}
+                            </div>
+                            {p.isSplit ? (
+                              <p className="text-[10px] text-muted-foreground">
+                                {p.entries.length} 口座の合計
+                              </p>
+                            ) : null}
+                          </div>
+                        </TableCell>
+                        <TableCell className="tabular text-right">
+                          {formatNumber(p.quantity, 0)}
+                        </TableCell>
+                        <TableCell className="text-right">
+                          <div className="space-y-0.5">
+                            <MoneyText
+                              value={p.avgCost}
+                              currency={p.currency}
+                            />
+                            {p.isSplit ? (
+                              <p className="text-[10px] text-muted-foreground">
+                                加重平均
+                              </p>
+                            ) : null}
+                          </div>
+                        </TableCell>
+                        <TableCell className="text-right">
+                          <MoneyText
+                            value={p.currentPrice}
+                            currency={p.currency}
+                          />
+                        </TableCell>
+                        <TableCell className="text-right">
+                          {/* 評価額は表示通貨に合わせる。並び順の基準（円換算）と表示を一致させるため */}
+                          <MoneyText
+                            value={p.marketValue}
+                            currency={p.currency}
+                            baseValue={p.marketValueBase}
+                            compact
+                          />
+                        </TableCell>
+                        <TableCell className="text-right">
+                          <div className="space-y-0.5">
+                            <PnlText
+                              value={p.pnl}
+                              currency={p.currency}
+                              baseValue={p.pnlBase}
+                              compact
+                              /*
                             損益は「金額 + 率」で既に 2 段になっている。
                             ここに現地通貨を併記すると 3 つの数字が並んで読みにくいため省く。
                             現地通貨は隣の評価額列に出ているので情報は失われない。
                           */
-                          hideLocalHint
-                          className="text-sm"
-                        />
-                        <div className="text-xs">
-                          <PctText value={p.pnlPct} costValue={p.costValue} />
-                        </div>
-                      </div>
-                    </TableCell>
-                    {/*
+                              hideLocalHint
+                              className="text-sm"
+                            />
+                            <div className="text-xs">
+                              <PctText
+                                value={p.pnlPct}
+                                costValue={p.costValue}
+                              />
+                            </div>
+                          </div>
+                        </TableCell>
+                        {/*
                       配当。年間受取額と現在値ベースの利回りを並べる。
                       無配や未取得は「—」で区別せず空欄にせず、意味が伝わる表記にする。
                     */}
-                    <TableCell className="text-right">
-                      {p.dividend && p.dividend.annualIncome > 0 ? (
-                        <div className="space-y-0.5">
-                          <MoneyText
-                            value={p.dividend.annualIncome}
-                            currency={p.currency}
-                            baseValue={p.dividend.annualIncomeBase}
-                            compact
-                            className="text-sm font-medium text-gain"
-                            hideLocalHint
-                          />
-                          <div className="flex items-center justify-end gap-1">
-                            <span className="tabular text-xs text-muted-foreground">
-                              {p.dividend.yieldPct !== null
-                                ? `${p.dividend.yieldPct.toFixed(2)}%`
-                                : "—"}
-                            </span>
-                            {p.dividend.yieldNeedsCheck || p.dividend.hasSpecial ? (
-                              <Tooltip>
-                                <TooltipTrigger asChild>
-                                  <AlertTriangle className="h-3 w-3 cursor-help text-amber-500" />
-                                </TooltipTrigger>
-                                <TooltipContent className="max-w-xs">
-                                  <p className="text-xs leading-relaxed">
-                                    {p.dividend.yieldNeedsCheck
-                                      ? "利回りが高すぎます。特別配当（記念配当）が含まれている可能性があり、来期も同額とは限りません。"
-                                      : `一時的な配当を含みます。それを除くと利回り ${
-                                          p.dividend.recurringYieldPct !== null
-                                            ? `${p.dividend.recurringYieldPct.toFixed(2)}%`
-                                            : "—"
-                                        } です。`}
-                                  </p>
-                                </TooltipContent>
-                              </Tooltip>
-                            ) : null}
-                          </div>
-                        </div>
-                      ) : (
-                        <span className="text-xs text-muted-foreground">
-                          {p.dividend ? "無配" : "未取得"}
-                        </span>
-                      )}
-                    </TableCell>
-                    <TableCell className="tabular text-right text-sm text-muted-foreground">
-                      {p.weightPct !== null ? `${p.weightPct.toFixed(1)}%` : "—"}
-                    </TableCell>
-                    <TableCell>
-                      {p.signal ? (
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <div className="cursor-help space-y-1.5">
-                              <HoldingSignalStatus action={p.signal.action} surface="desktop" />
-                              <SignalReviewPlanBadge plan={p.signal.reviewPlan} />
+                        <TableCell className="text-right">
+                          {p.dividend && p.dividend.annualIncome > 0 ? (
+                            <div className="space-y-0.5">
+                              <MoneyText
+                                value={p.dividend.annualIncome}
+                                currency={p.currency}
+                                baseValue={p.dividend.annualIncomeBase}
+                                compact
+                                className="text-sm font-medium text-gain"
+                                hideLocalHint
+                              />
+                              <div className="flex items-center justify-end gap-1">
+                                <span className="tabular text-xs text-muted-foreground">
+                                  {p.dividend.yieldPct !== null
+                                    ? `${p.dividend.yieldPct.toFixed(2)}%`
+                                    : "—"}
+                                </span>
+                                {p.dividend.yieldNeedsCheck ||
+                                p.dividend.hasSpecial ? (
+                                  <Tooltip>
+                                    <TooltipTrigger asChild>
+                                      <AlertTriangle className="h-3 w-3 cursor-help text-amber-500" />
+                                    </TooltipTrigger>
+                                    <TooltipContent className="max-w-xs">
+                                      <p className="text-xs leading-relaxed">
+                                        {p.dividend.yieldNeedsCheck
+                                          ? "利回りが高すぎます。特別配当（記念配当）が含まれている可能性があり、来期も同額とは限りません。"
+                                          : `一時的な配当を含みます。それを除くと利回り ${
+                                              p.dividend.recurringYieldPct !==
+                                              null
+                                                ? `${p.dividend.recurringYieldPct.toFixed(2)}%`
+                                                : "—"
+                                            } です。`}
+                                      </p>
+                                    </TooltipContent>
+                                  </Tooltip>
+                                ) : null}
+                              </div>
                             </div>
-                          </TooltipTrigger>
-                          <TooltipContent className="max-w-sm">
-                            <p className="text-xs leading-relaxed">{p.signal.rationale}</p>
-                            <p className="mt-1.5 text-[10px] text-muted-foreground">
-                              確信度 {p.signal.confidence ?? "—"} ・{" "}
-                              {new Date(p.signal.createdAt).toLocaleString("ja-JP")}
-                            </p>
-                          </TooltipContent>
-                        </Tooltip>
-                      ) : (
-                        <HoldingSignalStatus action={null} surface="desktop" />
-                      )}
-                      {/*
+                          ) : (
+                            <span className="text-xs text-muted-foreground">
+                              {p.dividend ? "無配" : "未取得"}
+                            </span>
+                          )}
+                        </TableCell>
+                        <TableCell className="tabular text-right text-sm text-muted-foreground">
+                          {p.weightPct !== null
+                            ? `${p.weightPct.toFixed(1)}%`
+                            : "—"}
+                        </TableCell>
+                        <TableCell>
+                          {p.signal ? (
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <div className="cursor-help space-y-1.5">
+                                  <HoldingSignalStatus
+                                    action={p.signal.action}
+                                    surface="desktop"
+                                  />
+                                  <SignalReviewPlanBadge
+                                    plan={p.signal.reviewPlan}
+                                  />
+                                </div>
+                              </TooltipTrigger>
+                              <TooltipContent className="max-w-sm">
+                                <p className="text-xs leading-relaxed">
+                                  {p.signal.rationale}
+                                </p>
+                                <p className="mt-1.5 text-[10px] text-muted-foreground">
+                                  確信度 {p.signal.confidence ?? "—"} ・{" "}
+                                  {new Date(p.signal.createdAt).toLocaleString(
+                                    "ja-JP"
+                                  )}
+                                </p>
+                              </TooltipContent>
+                            </Tooltip>
+                          ) : (
+                            <HoldingSignalStatus
+                              action={null}
+                              surface="desktop"
+                            />
+                          )}
+                          {/*
                         表では縦幅を増やせないので金額と株数だけを 1 行で添える。
                         構成比の変化はカード表示側で出す。
                       */}
-                      {p.addPlan && !p.addPlan.atCap && p.addPlan.shares ? (
-                        <p className="tabular mt-0.5 text-[10px] leading-tight text-emerald-700 dark:text-emerald-400">
-                          {p.addPlan.shares.toLocaleString("ja-JP")} 株
-                        </p>
-                      ) : null}
-                    </TableCell>
-                    <TableCell>
-                      <div className="flex items-center justify-end gap-0.5">
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              className="h-8 w-8"
-                              disabled={signalBusyId !== null}
-                              onClick={() => {
-                                // シグナルは銘柄単位なので先頭の口座の ID で呼ぶ
-                                setSignalBusyId(p.entries[0].id);
-                                regenSignal.mutate({ id: p.entries[0].id });
-                              }}
+                          {p.addPlan && !p.addPlan.atCap && p.addPlan.shares ? (
+                            <p className="tabular mt-0.5 text-[10px] leading-tight text-emerald-700 dark:text-emerald-400">
+                              {p.addPlan.shares.toLocaleString("ja-JP")} 株
+                            </p>
+                          ) : null}
+                        </TableCell>
+                        <TableCell>
+                          <div className="flex items-center justify-end gap-0.5">
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  className="h-8 w-8"
+                                  disabled={signalBusyId !== null}
+                                  onClick={() => {
+                                    // シグナルは銘柄単位なので先頭の口座の ID で呼ぶ
+                                    setSignalBusyId(p.entries[0].id);
+                                    regenSignal.mutate({ id: p.entries[0].id });
+                                  }}
+                                >
+                                  <Brain
+                                    className={`h-3.5 w-3.5 ${
+                                      signalBusyId === p.entries[0].id
+                                        ? "animate-spin"
+                                        : ""
+                                    }`}
+                                  />
+                                </Button>
+                              </TooltipTrigger>
+                              <TooltipContent>
+                                {signalBusyId === p.entries[0].id
+                                  ? "分析中…"
+                                  : "AI分析でシグナルを生成"}
+                              </TooltipContent>
+                            </Tooltip>
+                            {/* 複数口座の銘柄はどの口座を編集するか選ぶ必要があるため個別に並べる */}
+                            {/* 複数口座の場合は内訳行に編集・削除を出すので、ここでは 1 口座のときだけ */}
+                            {(p.isSplit ? [] : p.entries).map(e => (
+                              <Tooltip key={`edit-${e.id}`}>
+                                <TooltipTrigger asChild>
+                                  <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    className="h-8 w-8"
+                                    onClick={() => setEditTarget(e.id)}
+                                  >
+                                    <FileText className="h-3.5 w-3.5" />
+                                  </Button>
+                                </TooltipTrigger>
+                                <TooltipContent>
+                                  {p.isSplit
+                                    ? `${BROKER_LABELS[e.broker]}の株数・取得単価を編集`
+                                    : "株数・取得単価を編集"}
+                                </TooltipContent>
+                              </Tooltip>
+                            ))}
+                            {(p.isSplit ? [] : p.entries).map(e => (
+                              <Tooltip key={`del-${e.id}`}>
+                                <TooltipTrigger asChild>
+                                  <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    className="h-8 w-8 text-muted-foreground hover:text-destructive"
+                                    onClick={() =>
+                                      setDeleteTarget({
+                                        id: e.id,
+                                        name: p.name,
+                                      })
+                                    }
+                                  >
+                                    <Trash2 className="h-3.5 w-3.5" />
+                                  </Button>
+                                </TooltipTrigger>
+                                <TooltipContent>
+                                  {p.isSplit
+                                    ? `${BROKER_LABELS[e.broker]}の保有を削除`
+                                    : "削除"}
+                                </TooltipContent>
+                              </Tooltip>
+                            ))}
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                      {/**
+                       * 複数口座で保有している銘柄は、口座ごとの明細を合計行の直下に
+                       * そのまま並べる。以前はツールチップだったが、マウスを乗せないと
+                       * 見えずスマホでは開けないため常時表示にした。
+                       */}
+                      {p.isSplit
+                        ? p.entries.map((e, i) => (
+                            <TableRow
+                              key={`sub-${e.id}`}
+                              className={`bg-muted/40 hover:bg-muted/60 ${
+                                i === p.entries.length - 1 ? "" : "border-b-0"
+                              }`}
+                              data-testid="desktop-breakdown-row"
                             >
-                              <Brain
-                                className={`h-3.5 w-3.5 ${
-                                  signalBusyId === p.entries[0].id ? "animate-spin" : ""
-                                }`}
-                              />
-                            </Button>
-                          </TooltipTrigger>
-                          <TooltipContent>
-                            {signalBusyId === p.entries[0].id ? "分析中…" : "AI分析でシグナルを生成"}
-                          </TooltipContent>
-                        </Tooltip>
-                        {/* 複数口座の銘柄はどの口座を編集するか選ぶ必要があるため個別に並べる */}
-                        {/* 複数口座の場合は内訳行に編集・削除を出すので、ここでは 1 口座のときだけ */}
-                        {(p.isSplit ? [] : p.entries).map(e => (
-                          <Tooltip key={`edit-${e.id}`}>
-                            <TooltipTrigger asChild>
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                className="h-8 w-8"
-                                onClick={() => setEditTarget(e.id)}
-                              >
-                                <FileText className="h-3.5 w-3.5" />
-                              </Button>
-                            </TooltipTrigger>
-                            <TooltipContent>
-                              {p.isSplit
-                                ? `${BROKER_LABELS[e.broker]}の株数・取得単価を編集`
-                                : "株数・取得単価を編集"}
-                            </TooltipContent>
-                          </Tooltip>
-                        ))}
-                        {(p.isSplit ? [] : p.entries).map(e => (
-                          <Tooltip key={`del-${e.id}`}>
-                            <TooltipTrigger asChild>
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                className="h-8 w-8 text-muted-foreground hover:text-destructive"
-                                onClick={() => setDeleteTarget({ id: e.id, name: p.name })}
-                              >
-                                <Trash2 className="h-3.5 w-3.5" />
-                              </Button>
-                            </TooltipTrigger>
-                            <TooltipContent>
-                              {p.isSplit ? `${BROKER_LABELS[e.broker]}の保有を削除` : "削除"}
-                            </TooltipContent>
-                          </Tooltip>
-                        ))}
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                  {/**
-                   * 複数口座で保有している銘柄は、口座ごとの明細を合計行の直下に
-                   * そのまま並べる。以前はツールチップだったが、マウスを乗せないと
-                   * 見えずスマホでは開けないため常時表示にした。
-                   */}
-                  {p.isSplit
-                    ? p.entries.map((e, i) => (
-                        <TableRow
-                          key={`sub-${e.id}`}
-                          className={`bg-muted/40 hover:bg-muted/60 ${
-                            i === p.entries.length - 1 ? "" : "border-b-0"
-                          }`}
-                          data-testid="desktop-breakdown-row"
-                        >
-                          {/*
+                              {/*
                             内訳行の左端に口座の色を縦線で出す。バッジだけだと
                             行が続いたときに「どの口座の行か」を追いにくいため、
                             行そのものに色の帯を持たせて視線で追えるようにする。
                           */}
-                          <TableCell className="relative py-1.5">
-                            <span
-                              aria-hidden
-                              className="absolute inset-y-0 left-0 w-1"
-                              style={{ backgroundColor: brokerHex(e.broker) }}
-                            />
-                            <span className="pl-5 text-xs text-muted-foreground">
-                              {i === p.entries.length - 1 ? "└" : "├"} 内訳
-                            </span>
-                          </TableCell>
-                          <TableCell className="py-1.5">
-                            <BrokerBadge broker={e.broker} />
-                          </TableCell>
-                          <TableCell className="tabular py-1.5 text-right text-xs">
-                            {formatNumber(e.quantity, 0)}
-                          </TableCell>
-                          <TableCell className="py-1.5 text-right text-xs">
-                            <MoneyText value={e.avgCost} currency={e.currency} />
-                          </TableCell>
-                          {/* 現在値は口座によらず同じなので繰り返さない */}
-                          <TableCell className="py-1.5" />
-                          <TableCell className="py-1.5 text-right text-xs">
-                            <MoneyText
-                              value={e.marketValue}
-                              currency={e.currency}
-                              baseValue={e.marketValueBase}
-                              compact
-                              hideLocalHint
-                            />
-                          </TableCell>
-                          <TableCell className="py-1.5 text-right">
-                            <div className="space-y-0.5">
-                              <PnlText
-                                value={e.pnl}
-                                currency={e.currency}
-                                baseValue={
-                                  e.marketValueBase === null
-                                    ? null
-                                    : e.marketValueBase - e.costValueBase
-                                }
-                                compact
-                                hideLocalHint
-                                className="text-xs"
-                              />
-                              <div className="text-[10px]">
-                                <PctText value={e.pnlPct} costValue={e.costValue} />
-                              </div>
-                            </div>
-                          </TableCell>
-                          {/* 口座ごとの年間配当。株数が違えば受取額も変わる */}
-                          <TableCell className="py-1.5 text-right">
-                            {e.dividend && e.dividend.annualIncome > 0 ? (
-                              <MoneyText
-                                value={e.dividend.annualIncome}
-                                currency={e.currency}
-                                baseValue={e.dividend.annualIncomeBase}
-                                compact
-                                className="text-xs text-gain"
-                                hideLocalHint
-                              />
-                            ) : null}
-                          </TableCell>
-                          <TableCell className="py-1.5" />
-                          <TableCell className="py-1.5" />
-                          <TableCell className="py-1.5">
-                            <div className="flex items-center justify-end gap-0.5">
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                className="h-7 px-2 text-xs"
-                                onClick={() => setEditTarget(e.id)}
-                              >
-                                編集
-                              </Button>
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                className="h-7 px-2 text-xs text-muted-foreground hover:text-destructive"
-                                onClick={() => setDeleteTarget({ id: e.id, name: p.name })}
-                              >
-                                削除
-                              </Button>
-                            </div>
-                          </TableCell>
-                        </TableRow>
-                      ))
-                    : null}
-                  </Fragment>
-                ))}
-                {rows.length === 0 ? (
-                  <TableRow>
-                    <TableCell colSpan={11} className="py-10 text-center text-sm text-muted-foreground">
-                      条件に一致する銘柄がありません
-                    </TableCell>
-                  </TableRow>
-                ) : null}
-              </TableBody>
-            </Table>
-          </div>
-        </Card>
+                              <TableCell className="relative py-1.5">
+                                <span
+                                  aria-hidden
+                                  className="absolute inset-y-0 left-0 w-1"
+                                  style={{
+                                    backgroundColor: brokerHex(e.broker),
+                                  }}
+                                />
+                                <span className="pl-5 text-xs text-muted-foreground">
+                                  {i === p.entries.length - 1 ? "└" : "├"} 内訳
+                                </span>
+                              </TableCell>
+                              <TableCell className="py-1.5">
+                                <BrokerBadge broker={e.broker} />
+                              </TableCell>
+                              <TableCell className="tabular py-1.5 text-right text-xs">
+                                {formatNumber(e.quantity, 0)}
+                              </TableCell>
+                              <TableCell className="py-1.5 text-right text-xs">
+                                <MoneyText
+                                  value={e.avgCost}
+                                  currency={e.currency}
+                                />
+                              </TableCell>
+                              {/* 現在値は口座によらず同じなので繰り返さない */}
+                              <TableCell className="py-1.5" />
+                              <TableCell className="py-1.5 text-right text-xs">
+                                <MoneyText
+                                  value={e.marketValue}
+                                  currency={e.currency}
+                                  baseValue={e.marketValueBase}
+                                  compact
+                                  hideLocalHint
+                                />
+                              </TableCell>
+                              <TableCell className="py-1.5 text-right">
+                                <div className="space-y-0.5">
+                                  <PnlText
+                                    value={e.pnl}
+                                    currency={e.currency}
+                                    baseValue={
+                                      e.marketValueBase === null
+                                        ? null
+                                        : e.marketValueBase - e.costValueBase
+                                    }
+                                    compact
+                                    hideLocalHint
+                                    className="text-xs"
+                                  />
+                                  <div className="text-[10px]">
+                                    <PctText
+                                      value={e.pnlPct}
+                                      costValue={e.costValue}
+                                    />
+                                  </div>
+                                </div>
+                              </TableCell>
+                              {/* 口座ごとの年間配当。株数が違えば受取額も変わる */}
+                              <TableCell className="py-1.5 text-right">
+                                {e.dividend && e.dividend.annualIncome > 0 ? (
+                                  <MoneyText
+                                    value={e.dividend.annualIncome}
+                                    currency={e.currency}
+                                    baseValue={e.dividend.annualIncomeBase}
+                                    compact
+                                    className="text-xs text-gain"
+                                    hideLocalHint
+                                  />
+                                ) : null}
+                              </TableCell>
+                              <TableCell className="py-1.5" />
+                              <TableCell className="py-1.5" />
+                              <TableCell className="py-1.5">
+                                <div className="flex items-center justify-end gap-0.5">
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    className="h-7 px-2 text-xs"
+                                    onClick={() => setEditTarget(e.id)}
+                                  >
+                                    編集
+                                  </Button>
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    className="h-7 px-2 text-xs text-muted-foreground hover:text-destructive"
+                                    onClick={() =>
+                                      setDeleteTarget({
+                                        id: e.id,
+                                        name: p.name,
+                                      })
+                                    }
+                                  >
+                                    削除
+                                  </Button>
+                                </div>
+                              </TableCell>
+                            </TableRow>
+                          ))
+                        : null}
+                    </Fragment>
+                  ))}
+                  {rows.length === 0 ? (
+                    <TableRow>
+                      <TableCell
+                        colSpan={11}
+                        className="py-10 text-center text-sm text-muted-foreground"
+                      >
+                        条件に一致する銘柄がありません
+                      </TableCell>
+                    </TableRow>
+                  ) : null}
+                </TableBody>
+              </Table>
+            </div>
+          </Card>
         </>
       )}
 
@@ -1347,7 +1540,10 @@ export default function Holdings() {
       <AddHoldingDialog open={addOpen} onOpenChange={setAddOpen} />
 
       {/* 編集ダイアログ */}
-      <Dialog open={editTarget !== null} onOpenChange={o => !o && setEditTarget(null)}>
+      <Dialog
+        open={editTarget !== null}
+        onOpenChange={o => !o && setEditTarget(null)}
+      >
         <DialogContent className="sm:max-w-md">
           {editing ? (
             <EditHoldingForm
@@ -1361,12 +1557,16 @@ export default function Holdings() {
       </Dialog>
 
       {/* 削除確認 */}
-      <Dialog open={deleteTarget !== null} onOpenChange={o => !o && setDeleteTarget(null)}>
+      <Dialog
+        open={deleteTarget !== null}
+        onOpenChange={o => !o && setDeleteTarget(null)}
+      >
         <DialogContent className="sm:max-w-sm">
           <DialogHeader>
             <DialogTitle>この銘柄を削除しますか</DialogTitle>
             <DialogDescription>
-              {deleteTarget?.name} を保有一覧から削除します。この操作は取り消せません。投資カードとニュース履歴は残ります。
+              {deleteTarget?.name}{" "}
+              を保有一覧から削除します。この操作は取り消せません。投資カードとニュース履歴は残ります。
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
@@ -1376,7 +1576,9 @@ export default function Holdings() {
             <Button
               variant="destructive"
               disabled={removeHolding.isPending}
-              onClick={() => deleteTarget && removeHolding.mutate({ id: deleteTarget.id })}
+              onClick={() =>
+                deleteTarget && removeHolding.mutate({ id: deleteTarget.id })
+              }
             >
               削除する
             </Button>
@@ -1439,7 +1641,8 @@ function AddHoldingDialog({
         <DialogHeader>
           <DialogTitle>銘柄を追加</DialogTitle>
           <DialogDescription>
-            日本株は 4 桁の証券コード（例: 7270）、米国株はティッカー（例: AAPL）を入力してください。
+            日本株は 4 桁の証券コード（例: 7270）、米国株はティッカー（例:
+            AAPL）を入力してください。
           </DialogDescription>
         </DialogHeader>
 
@@ -1484,10 +1687,18 @@ function AddHoldingDialog({
               <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
                 <span>
                   現在値{" "}
-                  <MoneyText value={preview.price} currency={preview.currency} className="text-foreground" />
+                  <MoneyText
+                    value={preview.price}
+                    currency={preview.currency}
+                    className="text-foreground"
+                  />
                 </span>
-                {preview.sector ? <span>{sectorJa(preview.sector)}</span> : null}
-                {preview.exchangeName ? <span>{preview.exchangeName}</span> : null}
+                {preview.sector ? (
+                  <span>{sectorJa(preview.sector)}</span>
+                ) : null}
+                {preview.exchangeName ? (
+                  <span>{preview.exchangeName}</span>
+                ) : null}
               </div>
             </div>
           ) : null}
@@ -1623,12 +1834,18 @@ function EditHoldingForm({
     <>
       <DialogHeader>
         <DialogTitle>保有情報の編集</DialogTitle>
-        <DialogDescription className="tabular">{holding.symbol}</DialogDescription>
+        <DialogDescription className="tabular">
+          {holding.symbol}
+        </DialogDescription>
       </DialogHeader>
       <div className="space-y-4">
         <div className="space-y-2">
           <Label htmlFor="edit-name">表示名</Label>
-          <Input id="edit-name" value={name} onChange={e => setName(e.target.value)} />
+          <Input
+            id="edit-name"
+            value={name}
+            onChange={e => setName(e.target.value)}
+          />
         </div>
         <div className="grid grid-cols-2 gap-3">
           <div className="space-y-2">
@@ -1677,7 +1894,9 @@ function EditHoldingForm({
             onChange={e => setAcquiredAt(e.target.value)}
           />
           <p className="text-xs text-muted-foreground">
-            未入力では「{holdingDurationBasis(holding.holdingDuration.confidence)}」の記録日を表示します。推定日を正確な買入日として保存しません。
+            未入力では「
+            {holdingDurationBasis(holding.holdingDuration.confidence)}
+            」の記録日を表示します。推定日を正確な買入日として保存しません。
           </p>
         </div>
       </div>
