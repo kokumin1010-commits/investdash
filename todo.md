@@ -336,5 +336,7 @@
 - [x] 从 Holdings 移除「仮に未保有なら買う」筛选和详情参考；已持有标的只显示实际 ADD/HOLD/WATCH/REDUCE/EXIT
 - [x] 在独立未持有候选区块显示当前价、价格条件、首次建仓股数/金额、买后仓位、理由与风险
 - [x] 为多账户已持有排除、真实0股纳入、四类判断门槛、空状态及390px/1280px补充测试
-- [x] 运行 rebuilt 完整 Vitest（140文件/1141项）、TypeScript 与 production build；Railway部署待同步
-- [ ] 更新验证文档、同步 GitHub 并保存最终 checkpoint
+- [x] 运行 rebuilt 与 Railway 工作树完整 Vitest（140文件/1141项）、TypeScript 与 production build，并部署6d9e8ec
+- [x] 正式验证QCOM/ASML/285A.T共3个真实0股候选均为资料确认待，已持有候选为0，立即买入为0
+- [x] 正式验证Holdings无假设性筛选、旧BUY_NOW链接重定向及390px/1280px无溢出
+- [x] 更新验证文档、同步 GitHub 并保存最终 checkpoint

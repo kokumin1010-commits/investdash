@@ -104,7 +104,7 @@ async function verify(scenario) {
     await send("Page.navigate", { url: `${baseUrl}${path}` });
     await waitUntil(
       "real unheld candidates",
-      "document.body?.innerText.includes('未保有・購入判断') && document.body?.innerText.includes('未保有 3 銘柄・今すぐ検討 0 銘柄')"
+      "document.body?.innerText.includes('未保有・購入判断') && document.body?.innerText.includes('未保有 3 銘柄・今すぐ検討 0 銘柄') && document.body?.innerText.includes('現在、今すぐ購入を検討できる未保有候補はありません')"
     );
     const state = await evaluate(`(() => {
       const body = document.body.innerText;
@@ -184,5 +184,5 @@ async function verify(scenario) {
 
 const results = [];
 for (const scenario of scenarios) results.push(await verify(scenario));
-console.log(JSON.stringify({ version: "71491e0", results }, null, 2));
+console.log(JSON.stringify({ version: "6d9e8ec", results }, null, 2));
 if (results.some(result => !result.passed)) process.exitCode = 1;
