@@ -356,6 +356,11 @@ export default function BuyPlans() {
                   </Button>
                 ))}
               </div>
+              {unheldDecisionCounts.BUY_NOW === 0 ? (
+                <p className="rounded-lg border border-sky-200 bg-sky-50/60 px-3 py-2 text-sm leading-6 text-sky-900 dark:border-sky-900 dark:bg-sky-950/30 dark:text-sky-100">
+                  現在、今すぐ購入を検討できる未保有候補はありません。価格または確認資料が揃うまでは待ちます。
+                </p>
+              ) : null}
               {visibleUnheldCandidates.length > 0 ? (
                 <div className="grid gap-3 lg:grid-cols-2" data-testid="all-unheld-candidates">
                   {visibleUnheldCandidates.map(row => (

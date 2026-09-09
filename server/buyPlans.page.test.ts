@@ -361,6 +361,29 @@ describe("BuyPlans page interactions", () => {
     }
   );
 
+  it("未持有候補はあるが今すぐ購入0件なら、待つことを明示する", () => {
+    mocks.useOverview.mockReturnValue({
+      data: {
+        ...overviewData,
+        ranking: {
+          ...overviewData.ranking,
+          unheldCandidates: overviewData.ranking.unheldCandidates.filter(
+            row => row.purchaseDecision.decision !== "BUY_NOW"
+          ),
+          unheldOpportunities: [],
+        },
+      },
+      isLoading: false,
+      error: null,
+    });
+    render(React.createElement(BuyPlans));
+    expect(
+      screen.getByText(
+        "現在、今すぐ購入を検討できる未保有候補はありません。価格または確認資料が揃うまでは待ちます。"
+      )
+    ).toBeTruthy();
+  });
+
   it("shows real plan coverage and every pending holding without fake price bands", () => {
     render(React.createElement(BuyPlans));
 
