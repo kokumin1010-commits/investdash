@@ -324,7 +324,7 @@ export default function BuyPlans() {
               </p>
               <h2 className="mt-1 text-xl font-semibold">未保有・購入判断</h2>
               <p className="mt-1 text-sm text-muted-foreground">
-                全口座を合算して保有0株の銘柄だけを、今すぐ購入・価格待ち・資料確認待ち・今回は見送りに分けます。「仮に未保有」の保有銘柄は含みません。
+                全口座を合算して保有0株の銘柄だけを、今すぐ購入・価格待ち・資料確認待ち・今回は見送りに分けます。保有銘柄は含みません。
               </p>
             </div>
             <div className="text-xs text-muted-foreground sm:text-right">

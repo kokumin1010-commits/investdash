@@ -1273,7 +1273,7 @@ export default function Dashboard() {
                   未保有・購入判断
                 </CardTitle>
                 <CardDescription className="text-xs">
-                  全口座を合算して保有0株の候補だけを表示します。保有銘柄の「仮に未保有」判定は含みません
+                  全口座を合算して保有0株の候補だけを表示します。保有銘柄の仮定判定は含みません
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-2">
