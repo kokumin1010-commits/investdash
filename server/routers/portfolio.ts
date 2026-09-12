@@ -725,7 +725,7 @@ export const portfolioRouter = router({
     .input(
       z.object({
         symbol: z.string().min(1).max(24),
-        span: z.enum(["10Y", "20Y", "MAX"]).default("10Y"),
+        span: z.enum(["10Y", "20Y", "MAX"]).default("MAX"),
       })
     )
     .query(async ({ input }) =>

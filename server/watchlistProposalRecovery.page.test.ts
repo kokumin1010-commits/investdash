@@ -222,6 +222,10 @@ vi.mock("@/components/investing/WatchProposalReviewDialog", () => ({
   WatchProposalReviewDialog: () => null,
 }));
 
+vi.mock("@/components/investing/LongTermAnnualChart", () => ({
+  LongTermAnnualChart: () => null,
+}));
+
 import Watchlist from "../client/src/pages/Watchlist";
 
 beforeEach(() => {

@@ -371,7 +371,7 @@ const longTermChartData = {
   symbol: "LRCX",
   currency: "USD",
   currentPrice: 298.22,
-  span: "10Y" as const,
+  span: "MAX" as const,
   adjustmentBasis: "Yahoo Finance の株式分割調整済み月次終値を年次集約（配当再投資を含まない）",
   bars: [
     { year: 2024, t: Date.UTC(2024, 11, 1), close: 180, yearHigh: 200, yearLow: 120, returnPct: null },
@@ -499,8 +499,12 @@ describe("BuyPlans page interactions", () => {
       expect(screen.getByTestId("research-idea-LRCX")).toBeTruthy();
       expect(screen.queryByTestId("research-idea-IDEA2")).toBeNull();
 
-      await user.click(screen.getByRole("button", { name: "長期年足を見る" }));
       expect(screen.getByTestId("long-term-chart-LRCX")).toBeTruthy();
+      expect(screen.getByRole("button", { name: "長期年足を見る" }).getAttribute("aria-expanded")).toBe("true");
+      expect(screen.getByRole("button", { name: "上場来" }).getAttribute("aria-pressed")).toBe("true");
+      const title = screen.getByText("Lam Research");
+      const chartShell = screen.getByTestId("long-term-chart-shell-LRCX");
+      expect(title.compareDocumentPosition(chartShell) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
       expect(screen.getByText("2024〜2026")).toBeTruthy();
       expect(screen.getAllByText("298.22 USD").length).toBeGreaterThanOrEqual(1);
     }

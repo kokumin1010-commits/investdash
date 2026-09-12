@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import * as React from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -124,6 +124,19 @@ vi.mock("@/components/investing/WatchProposalReviewDialog", () => ({
   WatchProposalReviewDialog: () => null,
 }));
 
+vi.mock("@/components/investing/LongTermAnnualChart", () => ({
+  LongTermAnnualChart: ({ symbol, targetPrice }: { symbol: string; targetPrice: number | null }) =>
+    React.createElement(
+      "section",
+      {
+        "data-testid": `watchlist-long-term-chart-${symbol}`,
+        "data-target-price": targetPrice,
+        "data-default-span": "MAX",
+      },
+      "長期年足・上場来"
+    ),
+}));
+
 import Watchlist from "../client/src/pages/Watchlist";
 
 function cardOrder(): number[] {
@@ -140,6 +153,22 @@ beforeEach(() => {
 afterEach(() => cleanup());
 
 describe.each([390, 1280])("Watchlist sort at %ipx", width => {
+  it("shows a listing-to-date annual chart directly below each company name", () => {
+    Object.defineProperty(window, "innerWidth", {
+      configurable: true,
+      value: width,
+    });
+    render(React.createElement(Watchlist));
+
+    const card = document.querySelector('[data-watch-id="3"]');
+    expect(card).toBeTruthy();
+    const title = within(card as HTMLElement).getByText("Charlie Corp");
+    const chart = within(card as HTMLElement).getByTestId("watchlist-long-term-chart-CHARLIE");
+    expect(chart.getAttribute("data-default-span")).toBe("MAX");
+    expect(chart.getAttribute("data-target-price")).toBe("90");
+    expect(title.compareDocumentPosition(chart) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
   it("switches added date, priority and target-distance order", () => {
     Object.defineProperty(window, "innerWidth", {
       configurable: true,

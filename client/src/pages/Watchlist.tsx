@@ -1,6 +1,7 @@
 import { DisclaimerNote } from "@/components/investing/DisclaimerNote";
 import { ExpandableText } from "@/components/investing/ExpandableText";
 import { MoneyText, PctText } from "@/components/investing/Figures";
+import { LongTermAnnualChart } from "@/components/investing/LongTermAnnualChart";
 import { SignalBadge, SignalPlaceholder } from "@/components/investing/SignalBadge";
 import {
   WatchProposalReviewDialog,
@@ -1017,6 +1018,13 @@ export default function Watchlist() {
                   </div>
                 </div>
               </CardHeader>
+              <div className="px-4 pb-1">
+                <LongTermAnnualChart
+                  symbol={r.symbol}
+                  targetPrice={r.targetNum}
+                  targetLabel="目標価格"
+                />
+              </div>
               <CardContent className="space-y-3">
                 {/*
                   保有済みの場合は取得単価と損益を出す。買い増しの判断では
