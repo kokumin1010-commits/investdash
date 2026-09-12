@@ -1223,6 +1223,7 @@ function LongTermAnnualChart({
                   dataKey="close"
                   stroke="#6d28d9"
                   strokeWidth={2}
+                  isAnimationActive={false}
                   fill={`url(#annual-gradient-${symbol.replace(/[^a-zA-Z0-9]/g, "")})`}
                   dot={{ r: 2, fill: "#6d28d9" }}
                   activeDot={{ r: 4 }}
