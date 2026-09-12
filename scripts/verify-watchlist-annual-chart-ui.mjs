@@ -98,8 +98,9 @@ async function openBrowser(width, height, port) {
     deviceScaleFactor: 1,
     mobile: width < 768,
   });
-  await navigate("/watchlist");
-  await evalValue(`localStorage.setItem('investdesk-passcode-token', ${JSON.stringify(token)})`);
+  await send("Page.addScriptToEvaluateOnNewDocument", {
+    source: `try { localStorage.setItem('investdesk-passcode-token', ${JSON.stringify(token)}); } catch {}`,
+  });
   await navigate("/watchlist");
   return { chrome, socket, userDataDir, evalValue, waitUntil, navigate, screenshot };
 }
@@ -114,10 +115,34 @@ async function setNativeInput(browser, selector, value) {
   })()`);
 }
 
-async function verify(width, height, port, watchSymbol) {
+async function verify(width, height, port, watchSymbol, savedCandidate) {
   const browser = await openBrowser(width, height, port);
   try {
     await browser.waitUntil("watchlist", "Boolean(document.querySelector('#watchlist-search'))");
+    await browser.evalValue(
+      `document.querySelector('[data-testid="long-term-chart-shell-${savedCandidate.symbol}"]')?.scrollIntoView({ block: 'start' })`
+    );
+    await browser.waitUntil(
+      "saved AI candidate listing-to-date chart",
+      `(() => { const shell = document.querySelector('[data-testid="long-term-chart-shell-${savedCandidate.symbol}"]'); return Boolean(document.querySelector('[data-testid="long-term-chart-${savedCandidate.symbol}"]')) && shell?.querySelector('button[aria-expanded="true"]') && shell?.querySelector('button[aria-pressed="true"]')?.textContent?.trim() === '上場来' && shell?.textContent?.includes('表示期間') && shell?.querySelectorAll('svg path').length > 0; })()`
+    );
+    const savedAiCandidate = await browser.evalValue(`(() => {
+      const shell = document.querySelector('[data-testid="long-term-chart-shell-${savedCandidate.symbol}"]');
+      const card = shell?.closest('.rounded-lg.border');
+      const title = card ? [...card.querySelectorAll('*')].find(node => node.textContent?.trim() === ${JSON.stringify(savedCandidate.name)}) : null;
+      return {
+        chartLoaded: Boolean(document.querySelector('[data-testid="long-term-chart-${savedCandidate.symbol}"]')),
+        expanded: [...(shell?.querySelectorAll('button') ?? [])].some(node => node.textContent?.includes('長期年足を見る') && node.getAttribute('aria-expanded') === 'true'),
+        maxSelected: [...(shell?.querySelectorAll('button') ?? [])].some(node => node.textContent?.trim() === '上場来' && node.getAttribute('aria-pressed') === 'true'),
+        belowTitle: Boolean(title && (title.compareDocumentPosition(shell) & Node.DOCUMENT_POSITION_FOLLOWING)),
+        targetLabel: shell?.textContent?.includes('買いたい値段') ?? false,
+        dismissActionPresent: Boolean(card && [...card.querySelectorAll('button')].some(node => node.textContent?.trim() === '今後出さない')),
+        scrollWidth: document.documentElement.scrollWidth,
+        clientWidth: document.documentElement.clientWidth,
+      };
+    })()`);
+    const savedCandidateScreenshot = await browser.screenshot("watchlist-saved-ai-candidate-annual-chart");
+
     await setNativeInput(browser, "#watchlist-search", watchSymbol);
     await browser.waitUntil(
       "single watch card",
@@ -170,11 +195,20 @@ async function verify(width, height, port, watchSymbol) {
 
     return {
       width,
+      savedAiCandidate,
       watch,
       buyPlans,
+      savedCandidateScreenshot,
       watchScreenshot,
       buyPlansScreenshot,
       passed:
+        savedAiCandidate.chartLoaded &&
+        savedAiCandidate.expanded &&
+        savedAiCandidate.maxSelected &&
+        savedAiCandidate.belowTitle &&
+        savedAiCandidate.targetLabel &&
+        savedAiCandidate.dismissActionPresent &&
+        savedAiCandidate.scrollWidth <= savedAiCandidate.clientWidth &&
         watch.chartLoaded &&
         watch.expanded &&
         watch.maxSelected &&
@@ -195,11 +229,14 @@ async function verify(width, height, port, watchSymbol) {
 }
 
 const rows = await trpcGet("watchlist.list");
+const savedCandidates = await trpcGet("portfolio.savedCandidates");
+const savedCandidate = savedCandidates.find(row => !row.dismissed && !row.addedToWatchlist);
 const watchSymbol = rows.find(row => row.symbol === "ITW" && row.targetNum != null)?.symbol
   ?? rows.find(row => row.targetNum != null && row.symbol.length >= 3)?.symbol
   ?? rows[0]?.symbol;
 if (!watchSymbol) throw new Error("production watchlist is empty");
-const mobile = await verify(390, 844, 9490, watchSymbol);
-const desktop = await verify(1280, 900, 9491, watchSymbol);
-console.log(JSON.stringify({ version: "4dcc955", rowCount: rows.length, watchSymbol, mobile, desktop }, null, 2));
+if (!savedCandidate) throw new Error("production saved AI candidate list is empty");
+const mobile = await verify(390, 844, 9490, watchSymbol, savedCandidate);
+const desktop = await verify(1280, 900, 9491, watchSymbol, savedCandidate);
+console.log(JSON.stringify({ version: "0c5a250", rowCount: rows.length, savedCandidate: { symbol: savedCandidate.symbol, name: savedCandidate.name }, watchSymbol, mobile, desktop }, null, 2));
 if (!mobile.passed || !desktop.passed) process.exitCode = 1;

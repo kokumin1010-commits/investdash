@@ -363,3 +363,11 @@
 - [x] 运行完整 Vitest、TypeScript 与 production build；143个测试文件、1153项通过；Railway正式版本4dcc955已上线
 - [x] 在 SalesDash 正式 Watchlist/Buy Plans 验证名称下方、默认展开上場来、ITW/TXN完整年线、目标线及390px/1280px无溢出
 - [x] 更新验证文档、同步 GitHub 并保存最终 checkpoint
+- [x] 审计 Watchlist「前回AIが挙げた候補」及新生成AI候选卡的 symbol、名称、目标价字段与共用年线插入点
+- [x] 在前回与新生成AI候选卡的公司名称／代码下方接入 LongTermAnnualChart，默认展开并选择「上場来」
+- [x] 保留10年／20年切换、当前价、高点回撤与候选买入目标线，并仅在进入视口时加载
+- [x] 不影响「ウォッチリストへ追加／今後出さない」现有操作、优先度与候选说明
+- [x] 为AI候选年线位置、默认上場来、懒加载、操作兼容及390px/1280px补充页面测试
+- [x] 运行完整 Vitest、TypeScript 与 production build；143个测试文件、1153项通过；Railway正式版本0c5a250已上线
+- [x] 在 SalesDash 正式前回AI候选 Dominion Energy 验证名称下方、默认展开上場来、买入目标线及390px/1280px无溢出
+- [x] 更新验证文档、同步 GitHub 并保存最终 checkpoint
