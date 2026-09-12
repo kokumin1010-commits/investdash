@@ -7,12 +7,20 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   useOverview: vi.fn(),
+  useResearchIdeas: vi.fn(),
+  useLongTermChart: vi.fn(),
   useAddProposals: vi.fn(),
   mutateProposal: vi.fn(),
   mutateChecks: vi.fn(),
+  mutateGenerateResearch: vi.fn(),
+  mutateAddResearch: vi.fn(),
+  mutateDismissResearch: vi.fn(),
   invalidateProposals: vi.fn(),
   invalidateOverview: vi.fn(),
   invalidateScheduler: vi.fn(),
+  invalidateResearch: vi.fn(),
+  invalidateSavedCandidates: vi.fn(),
+  invalidateWatchlist: vi.fn(),
 }));
 
 vi.mock("@/lib/trpc", () => ({
@@ -22,10 +30,24 @@ vi.mock("@/lib/trpc", () => ({
         addProposals: { invalidate: mocks.invalidateProposals },
         priceBandOverview: { invalidate: mocks.invalidateOverview },
         schedulerRuns: { invalidate: mocks.invalidateScheduler },
+        unheldResearchIdeas: { invalidate: mocks.invalidateResearch },
+        savedCandidates: { invalidate: mocks.invalidateSavedCandidates },
       },
+      watchlist: { invalidate: mocks.invalidateWatchlist },
     }),
     portfolio: {
       priceBandOverview: { useQuery: mocks.useOverview },
+      unheldResearchIdeas: { useQuery: mocks.useResearchIdeas },
+      longTermChart: { useQuery: mocks.useLongTermChart },
+      suggestCandidates: {
+        useMutation: () => ({ mutate: mocks.mutateGenerateResearch, isPending: false }),
+      },
+      addSuggestedToWatchlist: {
+        useMutation: () => ({ mutate: mocks.mutateAddResearch, isPending: false }),
+      },
+      dismissCandidate: {
+        useMutation: () => ({ mutate: mocks.mutateDismissResearch, isPending: false }),
+      },
       addProposals: { useQuery: mocks.useAddProposals },
       generateAddProposalBatch: {
         useMutation: () => ({ mutate: mocks.mutateProposal }),
@@ -40,6 +62,21 @@ vi.mock("@/lib/trpc", () => ({
 vi.mock("@/components/investing/TransitionHistoryCard", () => ({
   TransitionHistoryCard: () => null,
 }));
+
+vi.mock("recharts", () => {
+  const box = ({ children }: { children?: React.ReactNode }) =>
+    React.createElement("div", null, children);
+  return {
+    Area: box,
+    AreaChart: box,
+    CartesianGrid: box,
+    ReferenceLine: box,
+    ResponsiveContainer: box,
+    Tooltip: box,
+    XAxis: box,
+    YAxis: box,
+  };
+});
 
 import BuyPlans from "../client/src/pages/BuyPlans";
 
@@ -296,9 +333,65 @@ const proposal = {
   priceChangePct: null,
 };
 
+const researchIdea = (index: number) => ({
+  symbol: index === 0 ? "LRCX" : `IDEA${index + 1}`,
+  name: index === 0 ? "Lam Research" : `研究候補 ${index + 1}`,
+  market: "US",
+  track: index % 2 === 0 ? ("EXPAND" as const) : ("FILL" as const),
+  basedOn: index % 2 === 0 ? "Semiconductors" : null,
+  gapKind: index % 2 === 0 ? "SECTOR" : "REGION",
+  reason: "保有中の半導体関連とは異なる収益源を研究する価値がある",
+  concern: "設備投資循環と顧客集中を確認する必要がある",
+  priority: index < 3 ? ("HIGH" as const) : ("MEDIUM" as const),
+  priceAtSuggestion: 298.22,
+  targetPrice: 260,
+  targetBasis: "過去の調整局面と利益成長のバランス",
+  currency: "USD",
+  sector: "Technology",
+  industry: index % 2 === 0 ? "Semiconductors" : "Industrials",
+  addedToWatchlist: false,
+  dismissed: false,
+  createdAt: new Date(`2026-09-${String(index + 1).padStart(2, "0")}T00:00:00Z`),
+  sourceLabel: index % 2 === 0 ? "関心を広げる・Semiconductors" : "地域分散を補う",
+  missingChecks: ["企業資料の再確認", "投資カード作成", "価格帯と初回購入量の決定"],
+  nextAction: "ウォッチリストへ追加し、企業資料・価格帯・初回購入量を確認する",
+});
+
+const researchIdeasData = {
+  version: "unheld-research-v1",
+  targetCount: 24,
+  maxCount: 30,
+  count: 13,
+  remainingToTarget: 11,
+  canGenerateMore: true,
+  ideas: Array.from({ length: 13 }, (_, index) => researchIdea(index)),
+};
+
+const longTermChartData = {
+  symbol: "LRCX",
+  currency: "USD",
+  currentPrice: 298.22,
+  span: "10Y" as const,
+  adjustmentBasis: "Yahoo Finance の株式分割調整済み月次終値を年次集約（配当再投資を含まない）",
+  bars: [
+    { year: 2024, t: Date.UTC(2024, 11, 1), close: 180, yearHigh: 200, yearLow: 120, returnPct: null },
+    { year: 2025, t: Date.UTC(2025, 11, 1), close: 240, yearHigh: 260, yearLow: 170, returnPct: 33.33 },
+    { year: 2026, t: Date.UTC(2026, 8, 1), close: 298.22, yearHigh: 320, yearLow: 220, returnPct: 24.26 },
+  ],
+  summary: {
+    latestClose: 298.22,
+    peakClose: 298.22,
+    drawdownFromPeakPct: 0,
+    startYear: 2024,
+    endYear: 2026,
+  },
+};
+
 beforeEach(() => {
   vi.stubGlobal("React", React);
   mocks.useOverview.mockReturnValue({ data: overviewData, isLoading: false, error: null });
+  mocks.useResearchIdeas.mockReturnValue({ data: researchIdeasData, isLoading: false, error: null });
+  mocks.useLongTermChart.mockReturnValue({ data: longTermChartData, isLoading: false, error: null });
   mocks.useAddProposals.mockReturnValue({ data: [proposal], isLoading: false });
 });
 
@@ -383,6 +476,35 @@ describe("BuyPlans page interactions", () => {
       )
     ).toBeTruthy();
   });
+
+  it.each([390, 1280])(
+    "%dpxで研究候補を購入判断と分離し、検索・追加表示・年足を操作できる",
+    async width => {
+      Object.defineProperty(window, "innerWidth", { value: width, configurable: true });
+      const user = userEvent.setup();
+      render(React.createElement(BuyPlans));
+
+      expect(screen.getByText("未保有・研究候補")).toBeTruthy();
+      expect(screen.getByText("13 / 目安 24 銘柄")).toBeTruthy();
+      expect(screen.getAllByText("購入判断前")).toHaveLength(12);
+      expect(screen.getByTestId("research-idea-LRCX")).toBeTruthy();
+      expect(screen.queryByTestId("research-idea-IDEA13")).toBeNull();
+
+      await user.click(screen.getByRole("button", { name: "残り 1 件も表示" }));
+      expect(screen.getByTestId("research-idea-IDEA13")).toBeTruthy();
+
+      const search = screen.getByPlaceholderText("研究候補を銘柄名・コード・業種で検索");
+      await user.clear(search);
+      await user.type(search, "LRCX");
+      expect(screen.getByTestId("research-idea-LRCX")).toBeTruthy();
+      expect(screen.queryByTestId("research-idea-IDEA2")).toBeNull();
+
+      await user.click(screen.getByRole("button", { name: "長期年足を見る" }));
+      expect(screen.getByTestId("long-term-chart-LRCX")).toBeTruthy();
+      expect(screen.getByText("2024〜2026")).toBeTruthy();
+      expect(screen.getAllByText("298.22 USD").length).toBeGreaterThanOrEqual(1);
+    }
+  );
 
   it("shows real plan coverage and every pending holding without fake price bands", () => {
     render(React.createElement(BuyPlans));

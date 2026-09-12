@@ -18,9 +18,12 @@ import {
 import {
   AlertTriangle,
   ArrowDown,
+  BarChart3,
   ChevronDown,
   ChevronUp,
+  Lightbulb,
   Loader2,
+  Plus,
   Search,
   ShieldCheck,
   TrendingUp,
@@ -29,6 +32,16 @@ import {
 import { useMemo, useState } from "react";
 import { Link } from "wouter";
 import { toast } from "sonner";
+import {
+  Area,
+  AreaChart,
+  CartesianGrid,
+  ReferenceLine,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from "recharts";
 import { TransitionHistoryCard } from "@/components/investing/TransitionHistoryCard";
 import { AddProposalCard } from "@/components/investing/AddProposalCard";
 import {
@@ -67,9 +80,41 @@ export default function BuyPlans() {
   const [unheldDecisionFilter, setUnheldDecisionFilter] = useState<
     "ALL" | UnheldPurchaseDecision
   >("ALL");
+  const [researchTrack, setResearchTrack] = useState<"ALL" | "EXPAND" | "FILL">("ALL");
+  const [researchKeyword, setResearchKeyword] = useState("");
+  const [showAllResearch, setShowAllResearch] = useState(false);
 
   const { data, isLoading, error } = trpc.portfolio.priceBandOverview.useQuery();
+  const researchIdeas = trpc.portfolio.unheldResearchIdeas.useQuery();
   const utils = trpc.useUtils();
+  const generateResearchIdeas = trpc.portfolio.suggestCandidates.useMutation({
+    onSuccess: async result => {
+      await Promise.all([
+        utils.portfolio.unheldResearchIdeas.invalidate(),
+        utils.portfolio.savedCandidates.invalidate(),
+      ]);
+      toast.success(`研究候補を ${result.candidates.length} 銘柄追加しました`);
+    },
+    onError: mutationError => toast.error(mutationError.message),
+  });
+  const addResearchIdea = trpc.portfolio.addSuggestedToWatchlist.useMutation({
+    onSuccess: async result => {
+      await Promise.all([
+        utils.portfolio.unheldResearchIdeas.invalidate(),
+        utils.portfolio.priceBandOverview.invalidate(),
+        utils.watchlist.invalidate(),
+      ]);
+      toast.success(`${result.added} 銘柄をウォッチリストに追加しました`);
+    },
+    onError: mutationError => toast.error(mutationError.message),
+  });
+  const dismissResearchIdea = trpc.portfolio.dismissCandidate.useMutation({
+    onSuccess: async () => {
+      await utils.portfolio.unheldResearchIdeas.invalidate();
+      toast.success("この研究候補は今後の表示から外しました");
+    },
+    onError: mutationError => toast.error(mutationError.message),
+  });
   const runMissingChecks = trpc.portfolio.runMissingBandChecks.useMutation({
     onSuccess: async result => {
       await Promise.all([
@@ -123,6 +168,20 @@ export default function BuyPlans() {
           ),
     [unheldCandidates, unheldDecisionFilter]
   );
+  const visibleResearchIdeas = useMemo(() => {
+    const normalized = researchKeyword.trim().toLowerCase();
+    const filtered = (researchIdeas.data?.ideas ?? []).filter(idea => {
+      if (researchTrack !== "ALL" && idea.track !== researchTrack) return false;
+      if (!normalized) return true;
+      return (
+        idea.symbol.toLowerCase().includes(normalized) ||
+        idea.name.toLowerCase().includes(normalized) ||
+        (idea.sector ?? "").toLowerCase().includes(normalized) ||
+        (idea.industry ?? "").toLowerCase().includes(normalized)
+      );
+    });
+    return showAllResearch ? filtered : filtered.slice(0, 12);
+  }, [researchIdeas.data?.ideas, researchKeyword, researchTrack, showAllResearch]);
 
   const pendingRows = useMemo(() => {
     const normalized = keyword.trim().toLowerCase();
@@ -391,6 +450,152 @@ export default function BuyPlans() {
         </section>
       )}
 
+      <section className="space-y-3" data-testid="unheld-research-pool">
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+          <div>
+            <p className="text-xs font-semibold tracking-[0.14em] text-violet-700 dark:text-violet-300">
+              RESEARCH IDEA POOL
+            </p>
+            <h2 className="mt-1 text-xl font-semibold">未保有・研究候補</h2>
+            <p className="mt-1 max-w-3xl text-sm leading-6 text-muted-foreground">
+              全口座0株の銘柄を広く研究するための候補プールです。ここへの掲載は購入推奨ではなく、上の厳格な購入判断へ進める前の調査候補です。
+            </p>
+          </div>
+          <div className="flex flex-col items-start gap-2 sm:items-end">
+            <p className="text-xs text-muted-foreground">
+              {researchIdeas.data
+                ? `${researchIdeas.data.count} / 目安 ${researchIdeas.data.targetCount} 銘柄`
+                : "候補数を確認中"}
+            </p>
+            <Button
+              size="sm"
+              variant="outline"
+              className="bg-background"
+              disabled={generateResearchIdeas.isPending || researchIdeas.isLoading}
+              onClick={() => generateResearchIdeas.mutate()}
+            >
+              {generateResearchIdeas.isPending ? (
+                <Loader2 className="size-4 animate-spin" />
+              ) : (
+                <Lightbulb className="size-4" />
+              )}
+              {generateResearchIdeas.isPending
+                ? "新しい候補を調査中…"
+                : researchIdeas.data?.canGenerateMore
+                  ? "研究候補を5〜8件追加"
+                  : "別の研究候補を追加"}
+            </Button>
+          </div>
+        </div>
+
+        <Card className="border-violet-200 bg-violet-50/30 dark:border-violet-900 dark:bg-violet-950/20">
+          <CardContent className="space-y-3 p-4">
+            <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto]">
+              <div className="relative">
+                <Search className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
+                <Input
+                  value={researchKeyword}
+                  onChange={event => setResearchKeyword(event.target.value)}
+                  placeholder="研究候補を銘柄名・コード・業種で検索"
+                  className="bg-background pl-9"
+                />
+              </div>
+              <div className="grid grid-cols-3 gap-2">
+                {([
+                  ["ALL", "すべて"],
+                  ["EXPAND", "関心を広げる"],
+                  ["FILL", "不足を補う"],
+                ] as const).map(([key, label]) => (
+                  <Button
+                    key={key}
+                    size="sm"
+                    variant={researchTrack === key ? "default" : "outline"}
+                    className={researchTrack === key ? "" : "bg-background"}
+                    onClick={() => setResearchTrack(key)}
+                    aria-pressed={researchTrack === key}
+                  >
+                    {label}
+                  </Button>
+                ))}
+              </div>
+            </div>
+            <p className="text-xs leading-5 text-muted-foreground">
+              AI提案は実在する上場コードと取得可能な株価を確認済みです。ただし企業資料・価格帯・初回購入量の確認前なので、購入判断には使いません。
+            </p>
+          </CardContent>
+        </Card>
+
+        {researchIdeas.isLoading ? (
+          <div className="grid gap-3 lg:grid-cols-2">
+            {Array.from({ length: 4 }).map((_, index) => (
+              <Skeleton key={`research-skeleton-${index}`} className="h-64 w-full" />
+            ))}
+          </div>
+        ) : researchIdeas.error ? (
+          <Card className="border-rose-200">
+            <CardContent className="py-6 text-sm text-rose-700">
+              研究候補を読み込めませんでした: {researchIdeas.error.message}
+            </CardContent>
+          </Card>
+        ) : visibleResearchIdeas.length > 0 ? (
+          <>
+            <div className="grid gap-3 lg:grid-cols-2" data-testid="unheld-research-ideas">
+              {visibleResearchIdeas.map(idea => (
+                <ResearchIdeaCard
+                  key={`research-${idea.symbol}`}
+                  idea={idea}
+                  adding={addResearchIdea.isPending}
+                  dismissing={dismissResearchIdea.isPending}
+                  onAdd={() =>
+                    addResearchIdea.mutate({
+                      candidates: [
+                        {
+                          symbol: idea.symbol,
+                          name: idea.name,
+                          market: idea.market as "JP" | "US" | "SG" | "HK" | "OTHER",
+                          priority: idea.priority,
+                          targetPrice: idea.targetPrice,
+                          reason: idea.reason,
+                          concern: idea.concern,
+                        },
+                      ],
+                    })
+                  }
+                  onDismiss={() => dismissResearchIdea.mutate({ symbol: idea.symbol })}
+                />
+              ))}
+            </div>
+            {(researchIdeas.data?.ideas.length ?? 0) > 12 && !researchKeyword.trim() ? (
+              <div className="flex justify-center">
+                <Button
+                  variant="outline"
+                  className="bg-background"
+                  onClick={() => setShowAllResearch(value => !value)}
+                  aria-expanded={showAllResearch}
+                >
+                  {showAllResearch ? <ChevronUp className="size-4" /> : <ChevronDown className="size-4" />}
+                  {showAllResearch
+                    ? "研究候補を12件に戻す"
+                    : `残り ${(researchIdeas.data?.ideas.length ?? 0) - 12} 件も表示`}
+                </Button>
+              </div>
+            ) : null}
+          </>
+        ) : (
+          <Card className="border-dashed">
+            <CardContent className="flex min-h-32 items-center gap-3 p-5">
+              <Lightbulb className="size-7 shrink-0 text-violet-600" />
+              <div>
+                <p className="font-semibold">条件に合う研究候補はまだありません</p>
+                <p className="mt-1 text-sm leading-6 text-muted-foreground">
+                  「研究候補を5〜8件追加」で、保有構成と関心分野から実在確認済みの未保有銘柄を追加します。
+                </p>
+              </div>
+            </CardContent>
+          </Card>
+        )}
+      </section>
+
       {!isLoading && !error && ranking && (
         <section className="space-y-3" data-testid="monthly-priority-candidates">
           <div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
@@ -629,6 +834,51 @@ type UnheldRow = Row & {
   };
 };
 
+type ResearchIdea = {
+  symbol: string;
+  name: string;
+  market: string;
+  track: "EXPAND" | "FILL";
+  basedOn: string | null;
+  gapKind: string;
+  reason: string;
+  concern: string;
+  priority: "HIGH" | "MEDIUM" | "LOW";
+  priceAtSuggestion: number | null;
+  targetPrice: number | null;
+  targetBasis: string | null;
+  currency: string | null;
+  sector: string | null;
+  industry: string | null;
+  sourceLabel: string;
+  missingChecks: string[];
+  nextAction: string;
+  createdAt: Date;
+};
+
+type LongTermChartResult = {
+  symbol: string;
+  currency: string | null;
+  currentPrice: number | null;
+  span: "10Y" | "20Y" | "MAX";
+  adjustmentBasis: string;
+  bars: Array<{
+    year: number;
+    t: number;
+    close: number;
+    yearHigh: number;
+    yearLow: number;
+    returnPct: number | null;
+  }>;
+  summary: {
+    latestClose: number | null;
+    peakClose: number | null;
+    drawdownFromPeakPct: number | null;
+    startYear: number | null;
+    endYear: number | null;
+  };
+};
+
 /** 万円単位で丸める。8.58 億円規模なので円単位まで出すと桁が読めない */
 function manYen(jpy: number): string {
   const man = jpy / 10000;
@@ -732,6 +982,279 @@ function UnheldCandidateCard({ row }: { row: UnheldRow }) {
       </CardContent>
     </Card>
   );
+}
+
+function ResearchIdeaCard({
+  idea,
+  adding,
+  dismissing,
+  onAdd,
+  onDismiss,
+}: {
+  idea: ResearchIdea;
+  adding: boolean;
+  dismissing: boolean;
+  onAdd: () => void;
+  onDismiss: () => void;
+}) {
+  const [chartOpen, setChartOpen] = useState(false);
+  const [chartSpan, setChartSpan] = useState<"10Y" | "20Y" | "MAX">("10Y");
+  const chart = trpc.portfolio.longTermChart.useQuery(
+    { symbol: idea.symbol, span: chartSpan },
+    { enabled: chartOpen, staleTime: 30 * 60 * 1000 }
+  );
+  const priorityLabel =
+    idea.priority === "HIGH" ? "優先調査" : idea.priority === "MEDIUM" ? "標準調査" : "余裕時に調査";
+
+  return (
+    <Card className="overflow-hidden border-violet-200 dark:border-violet-900" data-testid={`research-idea-${idea.symbol}`}>
+      <CardHeader className="border-b bg-gradient-to-br from-violet-50/80 to-white pb-3 dark:from-violet-950/30 dark:to-background">
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-2">
+              <Badge variant="outline" className="border-violet-300 bg-white text-violet-800 dark:bg-background dark:text-violet-200">
+                研究候補・未保有
+              </Badge>
+              <CardTitle className="break-words text-base">{idea.name}</CardTitle>
+              <span className="text-xs text-muted-foreground">{idea.symbol}</span>
+            </div>
+            <CardDescription className="mt-1">
+              {idea.sourceLabel} · {priorityLabel}
+            </CardDescription>
+          </div>
+          <Badge className="shrink-0 bg-violet-700 text-white hover:bg-violet-700">
+            購入判断前
+          </Badge>
+        </div>
+      </CardHeader>
+      <CardContent className="space-y-3 p-4">
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+          <div className="rounded-lg bg-muted/45 p-2.5">
+            <p className="text-[11px] text-muted-foreground">提案時株価</p>
+            <p className="mt-1 font-mono text-sm font-semibold">
+              {idea.priceAtSuggestion === null
+                ? "未取得"
+                : `${idea.priceAtSuggestion.toLocaleString("ja-JP", { maximumFractionDigits: 2 })} ${idea.currency ?? ""}`}
+            </p>
+          </div>
+          <div className="rounded-lg bg-muted/45 p-2.5">
+            <p className="text-[11px] text-muted-foreground">調査目標価格</p>
+            <p className="mt-1 font-mono text-sm font-semibold">
+              {idea.targetPrice === null
+                ? "未設定"
+                : `${idea.targetPrice.toLocaleString("ja-JP", { maximumFractionDigits: 2 })} ${idea.currency ?? ""}`}
+            </p>
+          </div>
+          <div className="rounded-lg bg-muted/45 p-2.5">
+            <p className="text-[11px] text-muted-foreground">業種</p>
+            <p className="mt-1 text-xs font-semibold leading-5">
+              {idea.industry ?? idea.sector ?? "未取得"}
+            </p>
+          </div>
+          <div className="rounded-lg bg-muted/45 p-2.5">
+            <p className="text-[11px] text-muted-foreground">提案日</p>
+            <p className="mt-1 font-mono text-sm font-semibold">
+              {new Date(idea.createdAt).toLocaleDateString("ja-JP")}
+            </p>
+          </div>
+        </div>
+
+        <div className="grid gap-2 sm:grid-cols-2">
+          <div className="rounded-xl border bg-background/70 px-3 py-2.5">
+            <p className="text-xs font-semibold">なぜ研究するか</p>
+            <p className="mt-1.5 text-xs leading-5 text-muted-foreground">{idea.reason}</p>
+          </div>
+          <div className="rounded-xl border border-amber-200 bg-amber-50/40 px-3 py-2.5 dark:border-amber-900 dark:bg-amber-950/20">
+            <p className="text-xs font-semibold">主な疑点</p>
+            <p className="mt-1.5 text-xs leading-5 text-muted-foreground">{idea.concern}</p>
+          </div>
+        </div>
+        {idea.targetBasis ? (
+          <p className="text-xs leading-5 text-muted-foreground">
+            <span className="font-medium text-foreground">目標価格の仮説:</span> {idea.targetBasis}
+          </p>
+        ) : null}
+        <div className="rounded-xl border border-dashed px-3 py-2.5 text-xs leading-5">
+          <p className="font-semibold">次にすること</p>
+          <p className="mt-1 text-muted-foreground">{idea.nextAction}</p>
+          <p className="mt-1 text-muted-foreground">未確認: {idea.missingChecks.join("・")}</p>
+        </div>
+
+        <Button
+          type="button"
+          variant="outline"
+          className="w-full justify-between bg-background"
+          onClick={() => setChartOpen(value => !value)}
+          aria-expanded={chartOpen}
+        >
+          <span className="flex items-center gap-2">
+            <BarChart3 className="size-4" /> 長期年足を見る
+          </span>
+          {chartOpen ? <ChevronUp className="size-4" /> : <ChevronDown className="size-4" />}
+        </Button>
+        {chartOpen ? (
+          <LongTermAnnualChart
+            symbol={idea.symbol}
+            targetPrice={idea.targetPrice}
+            span={chartSpan}
+            onSpanChange={setChartSpan}
+            query={chart}
+          />
+        ) : null}
+
+        <div className="flex flex-col gap-2 sm:flex-row sm:justify-end">
+          <Button
+            variant="ghost"
+            size="sm"
+            disabled={dismissing || adding}
+            onClick={onDismiss}
+          >
+            今後表示しない
+          </Button>
+          <Button size="sm" disabled={adding || dismissing} onClick={onAdd}>
+            {adding ? <Loader2 className="size-4 animate-spin" /> : <Plus className="size-4" />}
+            ウォッチリストへ追加
+          </Button>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+function LongTermAnnualChart({
+  symbol,
+  targetPrice,
+  span,
+  onSpanChange,
+  query,
+}: {
+  symbol: string;
+  targetPrice: number | null;
+  span: "10Y" | "20Y" | "MAX";
+  onSpanChange: (span: "10Y" | "20Y" | "MAX") => void;
+  query: {
+    data: LongTermChartResult | undefined;
+    isLoading: boolean;
+    error: { message: string } | null;
+  };
+}) {
+  return (
+    <div className="space-y-3 rounded-xl border bg-background p-3" data-testid={`long-term-chart-${symbol}`}>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <p className="text-sm font-semibold">長期年足</p>
+          <p className="text-[11px] leading-5 text-muted-foreground">
+            株式分割調整済み価格。配当再投資を含まず、短期指標は購入判断に使いません。
+          </p>
+        </div>
+        <div className="grid grid-cols-3 gap-1">
+          {([
+            ["10Y", "10年"],
+            ["20Y", "20年"],
+            ["MAX", "上場来"],
+          ] as const).map(([key, label]) => (
+            <Button
+              key={key}
+              size="sm"
+              variant={span === key ? "default" : "outline"}
+              className={span === key ? "h-8" : "h-8 bg-background"}
+              onClick={() => onSpanChange(key)}
+            >
+              {label}
+            </Button>
+          ))}
+        </div>
+      </div>
+      {query.isLoading ? (
+        <Skeleton className="h-64 w-full" />
+      ) : query.error ? (
+        <p className="py-8 text-center text-sm text-rose-700">年足を取得できませんでした</p>
+      ) : (query.data?.bars.length ?? 0) < 2 ? (
+        <p className="py-8 text-center text-sm text-muted-foreground">
+          この期間の年足データは不足しています
+        </p>
+      ) : (
+        <>
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+            <ChartMetric label="現在値" value={formatChartPrice(query.data?.currentPrice, query.data?.currency)} />
+            <ChartMetric label="年足最新" value={formatChartPrice(query.data?.summary.latestClose, query.data?.currency)} />
+            <ChartMetric
+              label="高値から"
+              value={
+                query.data?.summary.drawdownFromPeakPct == null
+                  ? "—"
+                  : `${query.data.summary.drawdownFromPeakPct.toFixed(1)}%`
+              }
+            />
+            <ChartMetric
+              label="表示期間"
+              value={`${query.data?.summary.startYear ?? "—"}〜${query.data?.summary.endYear ?? "—"}`}
+            />
+          </div>
+          <div className="h-64 w-full min-w-0">
+            <ResponsiveContainer width="100%" height="100%">
+              <AreaChart data={query.data?.bars ?? []} margin={{ top: 12, right: 8, left: -16, bottom: 0 }}>
+                <defs>
+                  <linearGradient id={`annual-gradient-${symbol.replace(/[^a-zA-Z0-9]/g, "")}`} x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="#7c3aed" stopOpacity={0.28} />
+                    <stop offset="95%" stopColor="#7c3aed" stopOpacity={0.02} />
+                  </linearGradient>
+                </defs>
+                <CartesianGrid strokeDasharray="3 3" vertical={false} opacity={0.35} />
+                <XAxis dataKey="year" tick={{ fontSize: 11 }} minTickGap={22} />
+                <YAxis tick={{ fontSize: 10 }} tickFormatter={value => compactNumber(Number(value))} width={56} />
+                <Tooltip
+                  formatter={value => [
+                    formatChartPrice(Number(value), query.data?.currency),
+                    "年末調整済み価格",
+                  ]}
+                  labelFormatter={label => `${label}年`}
+                />
+                {targetPrice !== null ? (
+                  <ReferenceLine
+                    y={targetPrice}
+                    stroke="#d97706"
+                    strokeDasharray="5 4"
+                    label={{ value: "調査目標", position: "insideTopRight", fontSize: 10 }}
+                  />
+                ) : null}
+                <Area
+                  type="monotone"
+                  dataKey="close"
+                  stroke="#6d28d9"
+                  strokeWidth={2}
+                  fill={`url(#annual-gradient-${symbol.replace(/[^a-zA-Z0-9]/g, "")})`}
+                  dot={{ r: 2, fill: "#6d28d9" }}
+                  activeDot={{ r: 4 }}
+                />
+              </AreaChart>
+            </ResponsiveContainer>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+function ChartMetric({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-lg bg-muted/45 px-2.5 py-2">
+      <p className="text-[10px] text-muted-foreground">{label}</p>
+      <p className="mt-1 break-words font-mono text-xs font-semibold">{value}</p>
+    </div>
+  );
+}
+
+function formatChartPrice(value: number | null | undefined, currency: string | null | undefined): string {
+  if (value == null || !Number.isFinite(value)) return "—";
+  return `${value.toLocaleString("ja-JP", { maximumFractionDigits: 2 })} ${currency ?? ""}`.trim();
+}
+
+function compactNumber(value: number): string {
+  if (!Number.isFinite(value)) return "";
+  if (Math.abs(value) >= 1_000_000) return `${(value / 1_000_000).toFixed(1)}M`;
+  if (Math.abs(value) >= 1_000) return `${(value / 1_000).toFixed(1)}K`;
+  return value.toLocaleString("ja-JP", { maximumFractionDigits: 1 });
 }
 
 function MonthlyCandidateCard({

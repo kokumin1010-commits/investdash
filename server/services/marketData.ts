@@ -5,6 +5,11 @@ import { callDataApi } from "../_core/dataApi";
  * レスポンス構造は実測に基づく（docs/research-notes.md 参照）。
  */
 import type { DividendEvent, SplitEvent } from "./dividend";
+import {
+  aggregateAnnualPrices,
+  summarizeAnnualPrices,
+  type LongTermChartSpan,
+} from "../../shared/annualPriceHistory";
 
 export type Quote = {
   symbol: string;
@@ -29,7 +34,10 @@ type ChartResponse = {
     result?: Array<{
       meta?: Record<string, unknown>;
       timestamp?: number[];
-      indicators?: { quote?: Array<{ close?: (number | null)[] }> };
+      indicators?: {
+        quote?: Array<{ close?: (number | null)[] }>;
+        adjclose?: Array<{ adjclose?: (number | null)[] }>;
+      };
       events?: {
         dividends?: Record<string, { amount?: unknown; date?: unknown }>;
         splits?: Record<
@@ -261,6 +269,57 @@ export async function fetchPriceHistory(
   } catch (error) {
     console.warn(`[marketData] fetchPriceHistory failed for ${symbol}:`, error);
     return [];
+  }
+}
+
+/**
+ * 長期判断用の年足。Yahoo の株式分割調整済み月次終値を年ごとに集約する。
+ * 短期指標は返さず、長期の価格経路と高値からの下落だけを確認する。
+ */
+export async function fetchLongTermAnnualHistory(
+  symbol: string,
+  span: LongTermChartSpan = "10Y"
+) {
+  const adjustmentBasis =
+    "Yahoo Finance の株式分割調整済み月次終値を年次集約（配当再投資を含まない）";
+  try {
+    const res = await fetchChart(symbol, {
+      interval: "1mo",
+      range: "max",
+      events: "div,splits",
+      includeAdjustedClose: "true",
+    });
+    const result = res?.chart?.result?.[0];
+    const timestamps = result?.timestamp ?? [];
+    const closes = result?.indicators?.quote?.[0]?.close ?? [];
+    const points = timestamps.flatMap((timestamp, index) => {
+      const close = closes[index];
+      if (typeof close !== "number" || !Number.isFinite(close)) {
+        return [];
+      }
+      return [{ t: timestamp * 1000, price: close }];
+    });
+    const bars = aggregateAnnualPrices(points, span);
+    return {
+      symbol: str(result?.meta?.symbol) ?? symbol,
+      currency: str(result?.meta?.currency),
+      currentPrice: num(result?.meta?.regularMarketPrice),
+      span,
+      adjustmentBasis,
+      bars,
+      summary: summarizeAnnualPrices(bars),
+    };
+  } catch (error) {
+    console.warn(`[marketData] fetchLongTermAnnualHistory failed for ${symbol}:`, error);
+    return {
+      symbol,
+      currency: null,
+      currentPrice: null,
+      span,
+      adjustmentBasis,
+      bars: [],
+      summary: summarizeAnnualPrices([]),
+    };
   }
 }
 

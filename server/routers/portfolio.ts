@@ -4,10 +4,12 @@ import * as db from "../db";
 import { protectedProcedure, router } from "../_core/trpc";
 import {
   fetchCompanyProfile,
+  fetchLongTermAnnualHistory,
   fetchPriceHistory,
   fetchQuote,
 } from "../services/marketData";
 import { isQuotaError, toFriendlyAiError } from "../services/aiErrors";
+import { listUnheldResearchIdeas } from "../services/unheldResearchIdeaService";
 import {
   buildAssetTrend,
   resolveScale,
@@ -717,6 +719,17 @@ export const portfolioRouter = router({
     )
     .query(async ({ input }) =>
       fetchPriceHistory(input.symbol, input.range, "1d")
+    ),
+
+  longTermChart: protectedProcedure
+    .input(
+      z.object({
+        symbol: z.string().min(1).max(24),
+        span: z.enum(["10Y", "20Y", "MAX"]).default("10Y"),
+      })
+    )
+    .query(async ({ input }) =>
+      fetchLongTermAnnualHistory(input.symbol.trim().toUpperCase(), input.span)
     ),
 
   saveCard: protectedProcedure
@@ -1644,6 +1657,10 @@ export const portfolioRouter = router({
       createdAt: r.createdAt,
     }));
   }),
+
+  unheldResearchIdeas: protectedProcedure.query(({ ctx }) =>
+    listUnheldResearchIdeas(ctx.user.id)
+  ),
 
   /**
    * 提案を見送る。
