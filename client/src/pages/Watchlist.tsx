@@ -491,6 +491,12 @@ export default function Watchlist() {
                       優先度 {PRIORITY_LABELS[s.priority]}
                     </Badge>
                   </div>
+                  <LongTermAnnualChart
+                    symbol={s.symbol}
+                    targetPrice={s.targetPrice == null ? null : Number(s.targetPrice)}
+                    targetLabel="買いたい値段"
+                    className="mt-3"
+                  />
                   <div className="mt-1 flex flex-wrap items-baseline gap-x-4 gap-y-1 text-xs">
                     <span className="tabular">
                       提案時 {formatMoney(s.priceAtSuggestion, s.currency ?? "USD")}
@@ -649,6 +655,12 @@ export default function Watchlist() {
                                   </Badge>
                                 ) : null}
                               </div>
+
+                              <LongTermAnnualChart
+                                symbol={c.symbol}
+                                targetPrice={c.targetPrice}
+                                targetLabel="買いたい値段"
+                              />
 
                               {/*
                                * EXPAND はどの関心から来たかを出す。これがないと

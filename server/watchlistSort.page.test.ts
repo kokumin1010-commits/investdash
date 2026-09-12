@@ -31,6 +31,22 @@ const mocks = vi.hoisted(() => {
     latestProposal: null,
   };
   return {
+    dismissCandidate: vi.fn(),
+    savedCandidates: [
+      {
+        symbol: "TXN",
+        name: "Texas Instruments Incorporated",
+        track: "EXPAND",
+        priority: "HIGH",
+        priceAtSuggestion: 268.7,
+        targetPrice: 201.52,
+        currency: "USD",
+        reason: "長期で調査する価値がある。",
+        createdAt: "2026-09-12T00:00:00Z",
+        dismissed: false,
+        addedToWatchlist: false,
+      },
+    ],
     watchRows: [
       {
         ...baseRow,
@@ -94,8 +110,12 @@ vi.mock("@/lib/trpc", () => ({
     portfolio: {
       syncPrices: { useMutation: idleMutation },
       suggestCandidates: { useMutation: idleMutation },
-      savedCandidates: { useQuery: () => ({ data: [], isLoading: false }) },
-      dismissCandidate: { useMutation: idleMutation },
+      savedCandidates: {
+        useQuery: () => ({ data: mocks.savedCandidates, isLoading: false }),
+      },
+      dismissCandidate: {
+        useMutation: () => ({ mutate: mocks.dismissCandidate, isPending: false }),
+      },
       addSuggestedToWatchlist: { useMutation: idleMutation },
       lookup: {
         useMutation: () => ({
@@ -167,6 +187,22 @@ describe.each([390, 1280])("Watchlist sort at %ipx", width => {
     expect(chart.getAttribute("data-default-span")).toBe("MAX");
     expect(chart.getAttribute("data-target-price")).toBe("90");
     expect(title.compareDocumentPosition(chart) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+
+    const candidateTitle = screen.getByText("Texas Instruments Incorporated");
+    const candidateCard = candidateTitle.closest(".rounded-lg.border");
+    expect(candidateCard).toBeTruthy();
+    const candidateChart = within(candidateCard as HTMLElement).getByTestId(
+      "watchlist-long-term-chart-TXN"
+    );
+    expect(candidateChart.getAttribute("data-default-span")).toBe("MAX");
+    expect(candidateChart.getAttribute("data-target-price")).toBe("201.52");
+    expect(
+      candidateTitle.compareDocumentPosition(candidateChart) &
+        Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy();
+
+    fireEvent.click(within(candidateCard as HTMLElement).getByRole("button", { name: "今後出さない" }));
+    expect(mocks.dismissCandidate).toHaveBeenCalledWith({ symbol: "TXN" });
   });
 
   it("switches added date, priority and target-distance order", () => {
