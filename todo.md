@@ -379,6 +379,6 @@
 - [x] 资料、价格、FX、交易单位或风险输入不足时停止sizing并显示暂不计算，不硬凑买入数量
 - [x] 在前回AI候选、新生成候选、Buy Plans研究候选与正式观察卡复用统一指标／sizing组件
 - [x] 为指标口径、缺失状态、行业差异、多币种、交易单位、组合上限及390px/1280px补充测试；146个测试文件、1168项通过
-- [ ] 运行完整Vitest、TypeScript与production build，并同步Railway
-- [ ] 在SalesDash正式页面只读验证真实候选指标、买入数量、缺失状态及双视口无溢出
-- [ ] 更新验证文档、同步GitHub并保存最终checkpoint
+- [x] 运行完整Vitest、TypeScript与production build；146个测试文件、1168项通过；Railway正式版本21d051c已上线
+- [x] 在SalesDash正式页面只读验证真实候选指标、买入数量、缺失状态及390px/1280px无溢出
+- [x] 更新验证文档与正式验收脚本并同步GitHub；最终checkpoint待本次交付保存
