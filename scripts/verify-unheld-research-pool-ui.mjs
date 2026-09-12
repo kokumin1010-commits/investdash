@@ -187,5 +187,5 @@ async function verify(scenario) {
 
 const results = [];
 for (const scenario of scenarios) results.push(await verify(scenario));
-console.log(JSON.stringify({ version: "9c37bc6", results }, null, 2));
+console.log(JSON.stringify({ version: "26e3a40", results }, null, 2));
 if (results.some(result => !result.passed)) process.exitCode = 1;
