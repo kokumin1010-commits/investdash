@@ -20,3 +20,17 @@
 - `/tmp/investdash-screenshot-cash-income-review-390.png`
 - `/tmp/investdash-screenshot-cash-income-review-1280.png`
 
+## SalesDash正式验收
+
+Railway正式版本`5b380d9`于2026-09-13上线，`/healthz`返回`ok=true`和完整提交SHA。SalesDash正式Dashboard在390px与1280px均显示“スクショから自動計算”主入口；“手入力”只作为截图无法识别时的异常兜底，实际／预测分层、日期与防重复说明继续保持。
+
+正式`/import`入口完成390×844和1280×900只读检查。页面明确说明每月截图会读取保有銘柄、现金宝实际利息和入金済み股息；提示现金宝以同商品前回截图累计值计算差额，配当只接受“入金済み／受渡済み”实际金额，并明确排除预测配当。两个视口均满足`scrollWidth <= clientWidth`，无横向溢出。
+
+正式验收没有上传任何图片、没有创建导入任务，也没有点击保存；报告为`uploaded=false`、`applied=false`。正式入口截图证据：
+
+- `/tmp/investdash-screenshot-cash-income-entry-390.png`
+- `/tmp/investdash-screenshot-cash-income-entry-1280.png`
+- `/tmp/investdash-cash-income-card-390.png`
+- `/tmp/investdash-cash-income-card-1280.png`
+
+验收后再次只读查询正式API，`import.history`仍为0件；本年记录分收入仍为¥8,222.708131、入金済み股息状态仍为`UNAVAILABLE`、最新日次利息仍为¥8,222.708131。由此确认本次正式检查没有新增导入任务或改写实际收入。

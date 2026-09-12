@@ -397,5 +397,5 @@
 - [x] 实现截图上传后自动生成现金收入草稿，仅在用户确认后写入实际收入流水与日次／月次快照
 - [x] 将“配当入金を記録”升级为“截图自动计算＋确认”，保留手工修正作为异常兜底
 - [x] 为多券商、多币种、截图缺失、跨月、累计值回退、重复截图、低置信度及390px／1280px补充测试；152个测试文件、1195项通过
-- [ ] 运行完整Vitest、TypeScript与production build，同步Railway并完成SalesDash正式只读验收
-- [ ] 更新验证文档、GitHub与最终checkpoint
+- [x] 运行完整Vitest、TypeScript与production build，同步Railway并完成SalesDash正式只读验收；正式功能提交5b380d9，152个测试文件／1195项通过
+- [x] 更新验证文档与GitHub，最终checkpoint在本次交付保存；正式版本5b380d9双视口只读验收通过
