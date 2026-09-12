@@ -215,7 +215,7 @@ export function buildCashIncomeOverview(input: {
     row => row.occurredOn,
     row => row.netAmount,
     row => row.fxRateJpy,
-    "券商の実際入金記録",
+    "証券口座の実際入金記録",
     true
   );
   const dividendYtd = sumConverted(
@@ -223,7 +223,7 @@ export function buildCashIncomeOverview(input: {
     row => row.occurredOn,
     row => row.netAmount,
     row => row.fxRateJpy,
-    "券商の実際入金記録",
+    "証券口座の実際入金記録",
     true
   );
   const borrowingRecordIsCurrentMonth =
