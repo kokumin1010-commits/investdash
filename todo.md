@@ -390,4 +390,4 @@
 - [x] 在Dashboard与长期目标中显示实际累计、未来预计及股息／利息明细，不将预测数计入当前净资产增量
 - [x] 为日次计提、到账、预测、币种／FX、缺失、跨月／跨年、防重复计算及390px／1280px补充测试；148个测试文件、1177项通过
 - [x] 运行完整Vitest、TypeScript与production build，同步Railway并完成SalesDash正式只读验收；正式功能提交cdb1229，148个测试文件／1177项通过
-- [ ] 更新验证文档、GitHub与最终checkpoint
+- [x] 更新验证文档与GitHub，最终checkpoint在本次交付保存；正式最终版本f2d38cf双视口复验通过
