@@ -358,7 +358,8 @@
 - [x] 抽取 Buy Plans/Watchlist 共用的长期年线组件，保持当前价、高点回撤、调研/目标价和10年/20年/上場来
 - [x] 将年线直接置于公司名称／代码下方，默认展开并默认选择「上場来」
 - [x] 在 Watchlist 每张观察卡接入同一长期年线，不改变现有 AI 判断、目标价或排序
-- [x] 使用视口内按需加载避免25个研究候选和16张观察卡同时请求长期行情
+- [x] 使用视口内按需加载避免25个研究候选和17张观察卡同时请求长期行情
 - [x] 为组件位置、默认上場来、展开/折叠、懒加载及390px/1280px补充页面测试
-- [x] 运行完整 Vitest、TypeScript 与 production build；143个测试文件、1153项通过，Railway同步与正式验收待完成
-- [ ] 更新验证文档、同步 GitHub 并保存最终 checkpoint
+- [x] 运行完整 Vitest、TypeScript 与 production build；143个测试文件、1153项通过；Railway正式版本4dcc955已上线
+- [x] 在 SalesDash 正式 Watchlist/Buy Plans 验证名称下方、默认展开上場来、ITW/TXN完整年线、目标线及390px/1280px无溢出
+- [x] 更新验证文档、同步 GitHub 并保存最终 checkpoint
