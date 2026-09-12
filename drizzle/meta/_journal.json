@@ -267,6 +267,13 @@
       "when": 1789239268157,
       "tag": "0037_clever_bullseye",
       "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "5",
+      "when": 1789243212299,
+      "tag": "0038_lethal_havok",
+      "breakpoints": true
     }
   ]
 }

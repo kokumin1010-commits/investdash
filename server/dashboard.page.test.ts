@@ -448,7 +448,12 @@ describe("Dashboard actual page", () => {
   it("records only an actual settled dividend through the protected income form", () => {
     render(React.createElement(Dashboard));
 
-    fireEvent.click(screen.getByRole("button", { name: "配当入金を記録" }));
+    expect(
+      screen
+        .getByRole("link", { name: "スクショから自動計算" })
+        .getAttribute("href")
+    ).toBe("/import");
+    fireEvent.click(screen.getByRole("button", { name: "手入力" }));
     fireEvent.change(screen.getByLabelText("入金日"), {
       target: { value: "2026-09-10" },
     });

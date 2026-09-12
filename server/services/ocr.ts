@@ -3,79 +3,125 @@ import { parseLlmJson } from "./jsonExtract";
 import { getBrokerFormat, type BrokerFormatId } from "./brokerFormats";
 
 /**
- * 証券会社アプリのスクリーンショットから保有ポジションを抽出する。
- * マルチモーダル対応モデルに JSON Schema 構造化出力を要求する。
+ * 証券会社アプリのスクリーンショットから、保有ポジションと実際の
+ * キャッシュ収入根拠を同時に抽出する。
+ *
+ * AI の出力は必ず確認前の草稿として扱い、ここでは DB に書き込まない。
  */
 
 export type ParsedPosition = {
-  /** 画面に表示されていた銘柄名（日本語可） */
   name: string;
-  /** 証券コード or ティッカー */
   tickerCode: string;
-  /** 保有株数 */
   quantity: number | null;
-  /** 取得単価 */
   avgCost: number | null;
-  /** 現在値（画面表示値。後で API 値で上書きされる） */
   currentPrice: number | null;
-  /** 評価額 */
   marketValue: number | null;
-  /** 評価損益 */
   pnl: number | null;
-  /** 抽出の確信度 0-100 */
   confidence: number;
 };
 
-export type ParsedAccount = {
-  /** 純資産 */
-  netAssets: number | null;
-  /** 預り金・現金 */
-  cash: number | null;
-  /** 通貨 */
+export type ParsedInterestAsset = {
+  /** 画面から読めた証券会社名。判定不能なら null */
+  broker: string | null;
+  name: string;
   currency: string | null;
-  /** 証券会社名の推定 */
+  /** 現在残高／評価額（原通貨） */
+  amount: number | null;
+  /** 画面表示の年率（%） */
+  annualRatePct: number | null;
+  /** 画面表示の最新1日分利息（原通貨） */
+  dailyIncome: number | null;
+  /** 購入開始からの累計収益（原通貨） */
+  cumulativeIncome: number | null;
+  /** 画面に明記された基準日。YYYY-MM-DD。読めなければ null */
+  asOfDate: string | null;
+  confidence: number;
+  /** どの表示ラベルを根拠にしたか。短い説明のみ */
+  evidence: string | null;
+};
+
+export type ParsedDividendIncome = {
+  broker: string | null;
+  symbol: string | null;
+  name: string;
+  currency: string | null;
+  /** 税前額。画面に表示がなければ null */
+  grossAmount: number | null;
+  /** 源泉税。画面に表示がなければ null */
+  taxAmount: number | null;
+  /** 手数料。画面に表示がなければ null */
+  feeAmount: number | null;
+  /** 実際の入金額。画面に表示がなければ null */
+  netAmount: number | null;
+  /** 実際の入金日／受渡日。YYYY-MM-DD。読めなければ null */
+  occurredOn: string | null;
+  confidence: number;
+  evidence: string | null;
+};
+
+export type ParsedAccount = {
+  netAssets: number | null;
+  cash: number | null;
+  currency: string | null;
   broker: string | null;
 };
 
 export type OcrResult = {
   positions: ParsedPosition[];
+  interestAssets: ParsedInterestAsset[];
+  dividendIncomes: ParsedDividendIncome[];
   account: ParsedAccount;
-  /** 読み取りに関する注意点 */
   warnings: string[];
-  /** 実際に適用したフォーマット */
   formatId: BrokerFormatId;
+  model: string;
 };
+
+export const SCREENSHOT_EXTRACTION_MODEL = "gemini-3.1-pro-preview";
 
 const SYSTEM_PROMPT = `あなたは証券口座のスクリーンショットを読み取る専門のデータ抽出エンジンです。
 
-読み取りルール:
-1. 画面に実際に表示されている数値のみを抽出する。推測や補完は絶対に行わない。
-2. 数値が途切れている・見切れている場合は null にし、warnings に理由を記載する。
-3. 桁区切りのカンマは除去して数値化する（例: "4,859,250.00" → 4859250）。
-4. 各行は上下 2 段の組み合わせで表示される。列見出しの「A/B」という表記は
-   「上段が A、下段が B」を意味する。見出しを必ず確認してから列を対応づける。
-5. 取得単価が右端で見切れている場合（例: "3,390.0(" のように末尾が欠けている）、
-   評価額・数量・評価損益から逆算できる場合のみ算出し、warnings に「取得単価を逆算」と記載する。
-   逆算式: 取得単価 =（評価額 − 評価損益）÷ 数量
-6. マイナスの損益は必ず負の数として表現する。
-7. 証券コードは日本株なら 4 桁の数字（末尾が英字の場合もある）、米国株ならアルファベットの
-   ティッカー、香港株なら 5 桁以内の数字、台湾株なら 4 桁の数字。
-8. 画面上部の「純資産」「預り金」も抽出する。
-9. 行が画面下端で途切れて数値が読めない場合はその行を含めず、warnings に記載する。
-10. 銘柄名が「オリエンタル…」のように省略記号で切れている場合は、表示されている文字を
-    そのまま name に入れる。勝手に補完してはならない。証券コードから正式名称を特定するのは
-    後段の処理が行う。
-11. 「一般」「NISA」「特定」などの口座区分タグは銘柄名やコードに含めない。
+絶対ルール:
+1. 画面に実際に表示されている文字と数値だけを抽出する。推測、補完、将来予想は行わない。
+2. 数値や日付が途切れている、隠れている、ラベルとの対応が不明な場合は null にし、warnings に理由を書く。
+3. 桁区切りのカンマは除去して数値化する。マイナス記号を落とさない。
+4. 日付は画面に明記された場合だけ YYYY-MM-DD に正規化する。年が表示されていない日付は null にする。
+5. 通貨は画面に明記された ISO コード（JPY/USD/SGD/HKD 等）を使う。判別できなければ null にする。
+6. confidence は各行の全必須項目の読み取り確度を 0-100 で表す。95以上は文字・数値・ラベルが明瞭、60-94は一部注意、59以下は要確認。
+7. evidence には「累計収益」「配当金入金」のように、実際に見えたラベルと行を短く記録する。画像にない説明を作らない。
 
-confidence は各行の読み取り確度を 0-100 で自己評価する。全ての数値が明瞭なら 95 以上、
-一部を逆算・推定した場合は 60-80、不明瞭な箇所が多い場合は 50 未満とする。
+保有ポジション positions:
+- 銘柄名、コード、数量、取得単価、現在値、評価額、評価損益を読み取る。
+- 取得単価が右端で見切れている場合、評価額・数量・評価損益がすべて明瞭なときだけ
+  取得単価 =（評価額 − 評価損益）÷ 数量 で逆算し、warnings に記録する。
+- 行が画面下端で途切れている場合は含めない。
+- 「一般」「NISA」「特定」などの口座タグを名称やコードに含めない。
 
-broker には画面から判断できるアプリ名を入れる。判断できない場合は null にする。`;
+利息資産 interestAssets:
+- 「現金宝」「貨幣基金」「貨幣市場基金」など、日次で利息が付く現金性商品の画面だけを対象にする。
+- amount は現在残高／評価額、annualRatePct は表示年率、dailyIncome は「前日収益／昨日収益／日次利息」、
+  cumulativeIncome は「累計収益／持有收益」の明示値を対応させる。
+- 株式、ETF、債券、株式型投資信託を現金性資産として扱わない。
+- 年率から日次利息や累計収益を逆算しない。日次利息から累計収益も逆算しない。
+
+実際の配当入金 dividendIncomes:
+- 「配当金」「分配金」「Dividend」が実際に入金／受渡／決済済みになった明細だけを対象にする。
+- 予想配当、配当利回り、権利予定、未決済、入金予定は絶対に含めない。
+- occurredOn は画面の入金日／受渡日、netAmount は実際の入金額。
+- 税引前額、源泉税、手数料がそれぞれ表示されている場合だけ対応欄へ入れる。
+- 画面に netAmount だけがある場合、grossAmount/taxAmount/feeAmount は null のままにする。
+- 税前額から税や手数料を推測せず、税率を仮定しない。
+
+account:
+- 画面上部の純資産、預り金／現金、通貨、証券会社名を読み取る。
+- 買付力や最大購買力を現金や資産として扱わない。`;
+
+const nullableNumber = { type: ["number", "null"] } as const;
+const nullableString = { type: ["string", "null"] } as const;
 
 const OUTPUT_SCHEMA = {
   type: "json_schema" as const,
   json_schema: {
-    name: "portfolio_extraction",
+    name: "portfolio_and_cash_income_extraction",
     strict: true,
     schema: {
       type: "object",
@@ -85,13 +131,13 @@ const OUTPUT_SCHEMA = {
           items: {
             type: "object",
             properties: {
-              name: { type: "string", description: "画面表示の銘柄名" },
-              tickerCode: { type: "string", description: "証券コードまたはティッカー" },
-              quantity: { type: ["number", "null"] },
-              avgCost: { type: ["number", "null"] },
-              currentPrice: { type: ["number", "null"] },
-              marketValue: { type: ["number", "null"] },
-              pnl: { type: ["number", "null"] },
+              name: { type: "string" },
+              tickerCode: { type: "string" },
+              quantity: nullableNumber,
+              avgCost: nullableNumber,
+              currentPrice: nullableNumber,
+              marketValue: nullableNumber,
+              pnl: nullableNumber,
               confidence: { type: "number" },
             },
             required: [
@@ -107,31 +153,95 @@ const OUTPUT_SCHEMA = {
             additionalProperties: false,
           },
         },
+        interestAssets: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              broker: nullableString,
+              name: { type: "string" },
+              currency: nullableString,
+              amount: nullableNumber,
+              annualRatePct: nullableNumber,
+              dailyIncome: nullableNumber,
+              cumulativeIncome: nullableNumber,
+              asOfDate: nullableString,
+              confidence: { type: "number" },
+              evidence: nullableString,
+            },
+            required: [
+              "broker",
+              "name",
+              "currency",
+              "amount",
+              "annualRatePct",
+              "dailyIncome",
+              "cumulativeIncome",
+              "asOfDate",
+              "confidence",
+              "evidence",
+            ],
+            additionalProperties: false,
+          },
+        },
+        dividendIncomes: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              broker: nullableString,
+              symbol: nullableString,
+              name: { type: "string" },
+              currency: nullableString,
+              grossAmount: nullableNumber,
+              taxAmount: nullableNumber,
+              feeAmount: nullableNumber,
+              netAmount: nullableNumber,
+              occurredOn: nullableString,
+              confidence: { type: "number" },
+              evidence: nullableString,
+            },
+            required: [
+              "broker",
+              "symbol",
+              "name",
+              "currency",
+              "grossAmount",
+              "taxAmount",
+              "feeAmount",
+              "netAmount",
+              "occurredOn",
+              "confidence",
+              "evidence",
+            ],
+            additionalProperties: false,
+          },
+        },
         account: {
           type: "object",
           properties: {
-            netAssets: { type: ["number", "null"] },
-            cash: { type: ["number", "null"] },
-            currency: { type: ["string", "null"] },
-            broker: { type: ["string", "null"] },
+            netAssets: nullableNumber,
+            cash: nullableNumber,
+            currency: nullableString,
+            broker: nullableString,
           },
           required: ["netAssets", "cash", "currency", "broker"],
           additionalProperties: false,
         },
         warnings: { type: "array", items: { type: "string" } },
       },
-      required: ["positions", "account", "warnings"],
+      required: [
+        "positions",
+        "interestAssets",
+        "dividendIncomes",
+        "account",
+        "warnings",
+      ],
       additionalProperties: false,
     },
   },
 };
 
-/**
- * base64 データ URL（複数枚可）を渡してポジションを抽出する。
- *
- * `formatId` を指定すると、そのアプリのレイアウト定義をプロンプトに含めるため
- * 列の対応を誤りにくくなる。省略時は汎用ルールで読み取る。
- */
 export async function extractPositions(
   imageDataUrls: string[],
   formatId?: BrokerFormatId
@@ -139,9 +249,12 @@ export async function extractPositions(
   if (imageDataUrls.length === 0) {
     return {
       positions: [],
+      interestAssets: [],
+      dividendIncomes: [],
       account: emptyAccount(),
       warnings: ["画像が指定されていません"],
       formatId: formatId ?? "generic",
+      model: SCREENSHOT_EXTRACTION_MODEL,
     };
   }
 
@@ -149,14 +262,13 @@ export async function extractPositions(
   const systemPrompt = format.layoutPrompt
     ? `${SYSTEM_PROMPT}\n\n---\n\n${format.layoutPrompt}`
     : SYSTEM_PROMPT;
-
   const content = [
     {
       type: "text" as const,
       text:
         imageDataUrls.length > 1
-          ? `${imageDataUrls.length} 枚のスクリーンショットです。同一口座の連続した画面として扱い、重複行は 1 件にまとめてください。`
-          : "このスクリーンショットから保有ポジションを抽出してください。",
+          ? `${imageDataUrls.length} 枚のスクリーンショットです。同一証券口座の同じ月の画面として扱ってください。重複する保有行、現金性商品、配当明細は1件にまとめ、保有・現金性資産・実際の配当入金をすべて抽出してください。`
+          : "このスクリーンショットから、保有ポジション、現金性資産、実際の配当入金を抽出してください。",
     },
     ...imageDataUrls.map(url => ({
       type: "image_url" as const,
@@ -165,7 +277,7 @@ export async function extractPositions(
   ];
 
   const res = await invokeLLM({
-    model: "gemini-3.1-pro-preview",
+    model: SCREENSHOT_EXTRACTION_MODEL,
     messages: [
       { role: "system", content: systemPrompt },
       { role: "user", content },
@@ -175,40 +287,107 @@ export async function extractPositions(
   });
 
   const text = res.choices?.[0]?.message?.content;
-  // Markdown で返るモデルもあるため、コードフェンス/前置き文があっても JSON を取り出す
-  const parsed = parseLlmJson<OcrResult>(text, "読み取り結果");
+  const parsed = parseLlmJson<Partial<OcrResult>>(text, "読み取り結果");
 
   return {
-    positions: (parsed.positions ?? []).filter(p => p.name && p.tickerCode).map(normalizePosition),
+    positions: (parsed.positions ?? [])
+      .filter(position => position.name && position.tickerCode)
+      .map(normalizePosition),
+    interestAssets: (parsed.interestAssets ?? [])
+      .filter(asset => asset.name)
+      .map(normalizeInterestAsset),
+    dividendIncomes: (parsed.dividendIncomes ?? [])
+      .filter(income => income.name)
+      .map(normalizeDividendIncome),
     account: parsed.account ?? emptyAccount(),
     warnings: parsed.warnings ?? [],
     formatId: format.id,
+    model: SCREENSHOT_EXTRACTION_MODEL,
   };
 }
 
-/**
- * 逆算した取得単価が `3389.315789473684` のような長い小数になることがあるため、
- * 価格系は小数第 2 位、数量は整数に丸める。
- */
-function normalizePosition(p: ParsedPosition): ParsedPosition {
-  return {
-    ...p,
-    quantity: roundTo(p.quantity, 0),
-    avgCost: roundTo(p.avgCost, 2),
-    currentPrice: roundTo(p.currentPrice, 2),
-    marketValue: roundTo(p.marketValue, 2),
-    pnl: roundTo(p.pnl, 2),
-  };
+function finite(value: number | null | undefined): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
 
-function roundTo(value: number | null, digits: number): number | null {
-  if (value === null || !Number.isFinite(value)) return null;
+function roundTo(value: number | null | undefined, digits: number): number | null {
+  const parsed = finite(value);
+  if (parsed === null) return null;
   const factor = 10 ** digits;
-  return Math.round(value * factor) / factor;
+  return Math.round(parsed * factor) / factor;
+}
+
+function nonNegative(value: number | null | undefined, digits: number) {
+  const parsed = roundTo(value, digits);
+  return parsed !== null && parsed >= 0 ? parsed : null;
+}
+
+function confidence(value: number | null | undefined) {
+  const parsed = finite(value);
+  return parsed === null ? 0 : Math.max(0, Math.min(100, Math.round(parsed)));
+}
+
+function currency(value: string | null | undefined) {
+  const normalized = value?.trim().toUpperCase() ?? "";
+  return /^[A-Z]{3,8}$/.test(normalized) ? normalized : null;
+}
+
+function date(value: string | null | undefined) {
+  const normalized = value?.trim() ?? "";
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(normalized)) return null;
+  const parsed = new Date(`${normalized}T00:00:00Z`);
+  return Number.isNaN(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== normalized
+    ? null
+    : normalized;
+}
+
+function normalizePosition(position: ParsedPosition): ParsedPosition {
+  return {
+    ...position,
+    quantity: roundTo(position.quantity, 0),
+    avgCost: roundTo(position.avgCost, 2),
+    currentPrice: roundTo(position.currentPrice, 2),
+    marketValue: roundTo(position.marketValue, 2),
+    pnl: roundTo(position.pnl, 2),
+    confidence: confidence(position.confidence),
+  };
+}
+
+function normalizeInterestAsset(asset: ParsedInterestAsset): ParsedInterestAsset {
+  return {
+    broker: asset.broker?.trim() || null,
+    name: asset.name.trim(),
+    currency: currency(asset.currency),
+    amount: nonNegative(asset.amount, 4),
+    annualRatePct: nonNegative(asset.annualRatePct, 4),
+    dailyIncome: roundTo(asset.dailyIncome, 4),
+    cumulativeIncome: roundTo(asset.cumulativeIncome, 4),
+    asOfDate: date(asset.asOfDate),
+    confidence: confidence(asset.confidence),
+    evidence: asset.evidence?.trim() || null,
+  };
+}
+
+function normalizeDividendIncome(income: ParsedDividendIncome): ParsedDividendIncome {
+  return {
+    broker: income.broker?.trim() || null,
+    symbol: income.symbol?.trim() || null,
+    name: income.name.trim(),
+    currency: currency(income.currency),
+    grossAmount: nonNegative(income.grossAmount, 4),
+    taxAmount: nonNegative(income.taxAmount, 4),
+    feeAmount: nonNegative(income.feeAmount, 4),
+    netAmount: nonNegative(income.netAmount, 4),
+    occurredOn: date(income.occurredOn),
+    confidence: confidence(income.confidence),
+    evidence: income.evidence?.trim() || null,
+  };
 }
 
 /** テスト用エクスポート */
 export const normalizePositionForTest = normalizePosition;
+export const normalizeInterestAssetForTest = normalizeInterestAsset;
+export const normalizeDividendIncomeForTest = normalizeDividendIncome;
 
 function emptyAccount(): ParsedAccount {
   return { netAssets: null, cash: null, currency: null, broker: null };

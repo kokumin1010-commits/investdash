@@ -104,6 +104,35 @@ describe("buildCashIncomeOverview", () => {
     expect(result.actual.interestYtd.recordedDays).toBe(2);
   });
 
+  it("已确认的截图累计差额优先于单日日息，不重复加算同一收益", () => {
+    const result = buildCashIncomeOverview({
+      interestSnapshots: [interest({ dailyIncome: "10", fxRateJpy: "150" })],
+      cashIncomeRecords: [
+        dividend({
+          kind: "INTEREST",
+          occurredOn: "2026-09-13",
+          netAmount: "202.38",
+          fxRateJpy: "150",
+          source: "SCREENSHOT_CUMULATIVE_DELTA",
+        }),
+      ],
+      currentInterestAssetCount: 1,
+      annualDividendJpy: null,
+      annualInterestJpy: 1_000,
+      annualBorrowingInterestJpy: 0,
+      borrowingInterestMtdJpy: null,
+      borrowingInterestMtdAsOfDate: null,
+      now,
+    });
+
+    expect(result.actual.latestDailyInterest.amountJpy).toBe(1_500);
+    expect(result.actual.interestMtd.amountJpy).toBe(30_357);
+    expect(result.actual.interestMtd.sourceLabel).toBe(
+      "月次スクショの累計収益差額"
+    );
+    expect(result.actual.recordedGrossIncomeMtdJpy).toBe(30_357);
+  });
+
   it("无股息现金流水时返回未取得，不用持仓预测冒充已到账", () => {
     const result = buildCashIncomeOverview({
       interestSnapshots: [],

@@ -884,7 +884,8 @@ export const cashIncomeRecords = mysqlTable(
     symbol: varchar("symbol", { length: 24 }),
     name: varchar("name", { length: 160 }).notNull(),
     currency: varchar("currency", { length: 8 }).notNull(),
-    grossAmount: decimal("grossAmount", { precision: 20, scale: 4 }).notNull(),
+    /** 税前金额；截图只显示净入金时保持 null，不以净额冒充税前值 */
+    grossAmount: decimal("grossAmount", { precision: 20, scale: 4 }),
     taxAmount: decimal("taxAmount", { precision: 20, scale: 4 }),
     feeAmount: decimal("feeAmount", { precision: 20, scale: 4 }),
     netAmount: decimal("netAmount", { precision: 20, scale: 4 }).notNull(),

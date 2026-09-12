@@ -1,6 +1,7 @@
 import { DisclaimerNote } from "@/components/investing/DisclaimerNote";
 import { MoneyText } from "@/components/investing/Figures";
 import { MonthlyHistoryCard } from "@/components/investing/MonthlyHistoryCard";
+import { ScreenshotCashIncomeReview } from "@/components/investing/ScreenshotCashIncomeReview";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -25,6 +26,11 @@ import {
 import { trpc } from "@/lib/trpc";
 import { looksLikeImage, prepareImage } from "@/lib/imageFile";
 import { marketLabel, type Market } from "@shared/investing";
+import type {
+  ScreenshotCashIncomeDraft,
+  ScreenshotDividendDraft,
+  ScreenshotInterestDraft,
+} from "@shared/screenshotCashIncome";
 import {
   AlertTriangle,
   CheckCircle2,
@@ -35,6 +41,7 @@ import {
   Upload,
   X,
 } from "lucide-react";
+import * as React from "react";
 import { useRef, useState } from "react";
 import { toast } from "sonner";
 import { useLocation } from "wouter";
@@ -57,7 +64,14 @@ type Row = {
 
 type Picked = { dataUrl: string; fileName: string; preview: string };
 
-type FormatId = "moomoo_jp" | "rakuten_ispeed" | "futu" | "generic";
+type FormatId =
+  | "moomoo_jp"
+  | "rakuten_ispeed"
+  | "ibkr"
+  | "sc_sg"
+  | "futu"
+  | "futu_hk"
+  | "generic";
 
 /** 前回選択した証券アプリを覚えておくためのキー */
 const FORMAT_STORAGE_KEY = "investdesk.import.format";
@@ -74,6 +88,8 @@ export default function ImportScreenshot() {
   const [files, setFiles] = useState<Picked[]>([]);
   const [rows, setRows] = useState<Row[] | null>(null);
   const [jobId, setJobId] = useState<number | null>(null);
+  const [cashIncomeDraft, setCashIncomeDraft] =
+    useState<ScreenshotCashIncomeDraft | null>(null);
   const [warnings, setWarnings] = useState<string[]>([]);
   const [cash, setCash] = useState<string>("");
   const [dragging, setDragging] = useState(false);
@@ -81,8 +97,16 @@ export default function ImportScreenshot() {
   // 一度選べば次回以降も同じアプリが選択された状態になる
   const [formatId, setFormatId] = useState<FormatId>(() => {
     const saved = window.localStorage.getItem(FORMAT_STORAGE_KEY);
-    return saved === "moomoo_jp" || saved === "rakuten_ispeed" || saved === "futu"
-      ? saved
+    return [
+      "moomoo_jp",
+      "rakuten_ispeed",
+      "ibkr",
+      "sc_sg",
+      "futu",
+      "futu_hk",
+      "generic",
+    ].includes(saved ?? "")
+      ? (saved as FormatId)
       : "moomoo_jp";
   });
 
@@ -98,8 +122,14 @@ export default function ImportScreenshot() {
       setRows(res.rows as Row[]);
       setJobId(res.jobId ?? null);
       setWarnings(res.warnings);
+      setCashIncomeDraft(res.cashIncomeDraft as ScreenshotCashIncomeDraft);
       if (res.account.cash !== null) setCash(String(res.account.cash));
-      toast.success(`${res.rows.length} 銘柄を読み取りました。内容をご確認ください。`);
+      const cashDraftCount =
+        res.cashIncomeDraft.interestAssets.length +
+        res.cashIncomeDraft.dividendIncomes.length;
+      toast.success(
+        `${res.rows.length} 銘柄・${cashDraftCount} 件のキャッシュ収入候補を読み取りました。内容をご確認ください。`
+      );
       // 選択と実際の画面が食い違っていた場合は知らせる
       if (
         res.detectedFormatId !== "generic" &&
@@ -122,17 +152,39 @@ export default function ImportScreenshot() {
       const parts: string[] = [];
       if (res.created > 0) parts.push(`新規 ${res.created} 件`);
       if (res.updated > 0) parts.push(`更新 ${res.updated} 件`);
+      if (res.cashIncomeResult.interestAssetsSaved > 0) {
+        parts.push(`現金宝 ${res.cashIncomeResult.interestAssetsSaved} 件`);
+      }
+      if (res.cashIncomeResult.interestIncomeRecordsSaved > 0) {
+        parts.push(`利息差額 ${res.cashIncomeResult.interestIncomeRecordsSaved} 件`);
+      }
+      if (res.cashIncomeResult.dividendRecordsSaved > 0) {
+        parts.push(`配当入金 ${res.cashIncomeResult.dividendRecordsSaved} 件`);
+      }
       toast.success(
         parts.length > 0 ? `${parts.join(" ・ ")} を保存しました` : "保存対象がありませんでした"
       );
       if (res.skipped.length > 0) {
         toast.warning(`${res.skipped.length} 件をスキップしました: ${res.skipped.join(", ")}`);
       }
+      if (res.cashIncomeResult.skipped.length > 0) {
+        toast.warning(
+          `${res.cashIncomeResult.skipped.length} 件のキャッシュ収入を保存しませんでした: ${res.cashIncomeResult.skipped.join(", ")}`
+        );
+      }
       setRows(null);
+      setCashIncomeDraft(null);
       setFiles([]);
       setJobId(null);
       setWarnings([]);
       if (res.created + res.updated > 0) setLocation("/holdings");
+      else if (
+        res.cashIncomeResult.interestAssetsSaved +
+          res.cashIncomeResult.dividendRecordsSaved >
+        0
+      ) {
+        setLocation("/");
+      }
     },
     onError: e => toast.error(e.message),
   });
@@ -178,14 +230,52 @@ export default function ImportScreenshot() {
     setRows(prev => (prev ? prev.map((r, i) => (i === index ? { ...r, ...patch } : r)) : prev));
   };
 
+  const updateInterestDraft = (
+    index: number,
+    patch: Partial<ScreenshotInterestDraft>
+  ) => {
+    setCashIncomeDraft(previous =>
+      previous
+        ? {
+            ...previous,
+            interestAssets: previous.interestAssets.map((row, rowIndex) =>
+              rowIndex === index ? { ...row, ...patch } : row
+            ),
+          }
+        : previous
+    );
+  };
+
+  const updateDividendDraft = (
+    index: number,
+    patch: Partial<ScreenshotDividendDraft>
+  ) => {
+    setCashIncomeDraft(previous =>
+      previous
+        ? {
+            ...previous,
+            dividendIncomes: previous.dividendIncomes.map((row, rowIndex) =>
+              rowIndex === index ? { ...row, ...patch } : row
+            ),
+          }
+        : previous
+    );
+  };
+
   const activeRows = (rows ?? []).filter(r => r.mode !== "SKIP");
+  const activeInterestDrafts =
+    cashIncomeDraft?.interestAssets.filter(row => row.mode === "APPLY") ?? [];
+  const activeDividendDrafts =
+    cashIncomeDraft?.dividendIncomes.filter(row => row.mode === "APPLY") ?? [];
+  const activeCashDraftCount =
+    activeInterestDrafts.length + activeDividendDrafts.length;
 
   return (
     <div className="mx-auto max-w-[1200px] space-y-5 pb-10">
       <header className="space-y-1">
         <h1 className="text-2xl font-semibold tracking-tight">スクリーンショット取込</h1>
         <p className="text-sm text-muted-foreground">
-          証券会社アプリの保有一覧のスクリーンショットから、銘柄コード・株数・取得単価を自動で読み取ります。
+          毎月の証券口座スクショから、保有銘柄・現金宝の実際利息・入金済み配当を自動で読み取ります。
         </p>
       </header>
 
@@ -217,7 +307,7 @@ export default function ImportScreenshot() {
                   <p className="text-xs text-muted-foreground">
                     PNG / JPEG / WebP / HEIC ・ 最大 {MAX_FILES} 枚
                     <br />
-                    保有一覧が画面に収まらない場合は、スクロールして複数枚に分けて撮影してください。
+                    保有一覧、現金宝・貨幣基金、入金済み配当の明細を同じ口座ごとにまとめて選べます。
                   </p>
                 </div>
                 <input
@@ -346,6 +436,14 @@ export default function ImportScreenshot() {
                 </li>
                 <li className="flex gap-2">
                   <span className="text-primary">・</span>
+                  現金宝は商品名・通貨・現在残高・累計収益・基準日が見える画面を送ると、前回スクショとの差額を自動計算します
+                </li>
+                <li className="flex gap-2">
+                  <span className="text-primary">・</span>
+                  配当は「入金済み」「受渡済み」の日付と実際入金額が見える明細だけを実績として候補にします。予想配当は取り込みません
+                </li>
+                <li className="flex gap-2">
+                  <span className="text-primary">・</span>
                   取得単価が画面右端で切れていると読み取れません。横向きにするか、表示項目を切り替えてください
                 </li>
                 <li className="flex gap-2">
@@ -383,6 +481,15 @@ export default function ImportScreenshot() {
                 </ul>
               </AlertDescription>
             </Alert>
+          ) : null}
+
+          {cashIncomeDraft ? (
+            <ScreenshotCashIncomeReview
+              interestAssets={cashIncomeDraft.interestAssets}
+              dividendIncomes={cashIncomeDraft.dividendIncomes}
+              onInterestChange={updateInterestDraft}
+              onDividendChange={updateDividendDraft}
+            />
           ) : null}
 
           {/* スマホ: 1 銘柄 1 カード。横スクロールせずすべての項目が見える */}
@@ -659,7 +766,7 @@ export default function ImportScreenshot() {
 
           <div className="flex flex-wrap items-center justify-between gap-3">
             <p className="w-full text-sm text-muted-foreground sm:w-auto">
-              {activeRows.length} 件を保存します
+              保有 {activeRows.length} 件・キャッシュ収入 {activeCashDraftCount} 件を保存します
               {(rows.length ?? 0) - activeRows.length > 0
                 ? `（${rows.length - activeRows.length} 件はスキップ）`
                 : ""}
@@ -670,6 +777,7 @@ export default function ImportScreenshot() {
                 className="flex-1 sm:flex-none"
                 onClick={() => {
                   setRows(null);
+                  setCashIncomeDraft(null);
                   setWarnings([]);
                   setJobId(null);
                 }}
@@ -678,10 +786,14 @@ export default function ImportScreenshot() {
               </Button>
               <Button
                 className="flex-1 sm:flex-none"
-                disabled={apply.isPending || activeRows.length === 0}
+                disabled={
+                  apply.isPending ||
+                  (activeRows.length === 0 && activeCashDraftCount === 0)
+                }
                 onClick={() =>
                   apply.mutate({
                     jobId: jobId ?? undefined,
+                    batchKey: cashIncomeDraft?.batchKey,
                     rows: rows.map(r => ({
                       name: r.name,
                       tickerCode: r.tickerCode,
@@ -697,6 +809,40 @@ export default function ImportScreenshot() {
                     })),
                     cashBalance: cash === "" ? null : Number(cash),
                     formatId,
+                    interestAssets: (cashIncomeDraft?.interestAssets ?? []).map(
+                      row => ({
+                        draftKey: row.draftKey,
+                        mode: row.mode,
+                        broker: row.broker,
+                        name: row.name,
+                        currency: row.currency,
+                        amount: row.amount,
+                        annualRatePct: row.annualRatePct,
+                        dailyIncome: row.dailyIncome,
+                        cumulativeIncome: row.cumulativeIncome,
+                        asOfDate: row.asOfDate,
+                        dateSource: row.dateSource,
+                        confidence: row.confidence,
+                        evidence: row.evidence,
+                      })
+                    ),
+                    dividendIncomes: (cashIncomeDraft?.dividendIncomes ?? []).map(
+                      row => ({
+                        draftKey: row.draftKey,
+                        mode: row.mode,
+                        broker: row.broker,
+                        symbol: row.symbol,
+                        name: row.name,
+                        currency: row.currency,
+                        grossAmount: row.grossAmount,
+                        taxAmount: row.taxAmount,
+                        feeAmount: row.feeAmount,
+                        netAmount: row.netAmount,
+                        occurredOn: row.occurredOn,
+                        confidence: row.confidence,
+                        evidence: row.evidence,
+                      })
+                    ),
                   })
                 }
               >

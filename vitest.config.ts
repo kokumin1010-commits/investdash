@@ -16,6 +16,7 @@ export default defineConfig({
     environment: "node",
     include: [
       "server/**/*.test.ts",
+      "server/**/*.test.tsx",
       "server/**/*.spec.ts",
       "client/src/**/*.test.ts",
       "shared/**/*.test.ts",

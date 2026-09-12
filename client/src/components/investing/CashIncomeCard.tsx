@@ -36,13 +36,15 @@ import {
   CalendarDays,
   CheckCircle2,
   CircleDollarSign,
+  ImagePlus,
   Landmark,
+  PenLine,
   PiggyBank,
-  Plus,
   ReceiptText,
 } from "lucide-react";
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
+import { Link } from "wouter";
 
 type Props = {
   data: CashIncomeOverview;
@@ -209,7 +211,15 @@ export function CashIncomeCard({ data, interestAssetsJpy, interestRatePct }: Pro
             実際に付与・入金された金額と、現在残高／保有株数からの未来予想を分けています。
           </CardDescription>
         </div>
-        <DividendIncomeDialog />
+        <div className="flex flex-wrap gap-2">
+          <Button asChild type="button" size="sm">
+            <Link href="/import">
+              <ImagePlus className="mr-1.5 h-3.5 w-3.5" />
+              スクショから自動計算
+            </Link>
+          </Button>
+          <DividendIncomeDialog />
+        </div>
       </CardHeader>
       <CardContent className="space-y-5">
         <section className="space-y-3" aria-labelledby="actual-income-heading">
@@ -405,18 +415,18 @@ function DividendIncomeDialog() {
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
         <Button type="button" size="sm" variant="outline" className="bg-background/90">
-          <Plus className="mr-1.5 h-3.5 w-3.5" />
-          配当入金を記録
+          <PenLine className="mr-1.5 h-3.5 w-3.5" />
+          手入力
         </Button>
       </DialogTrigger>
       <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-lg">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <ReceiptText className="h-5 w-5" />
-            実際の配当入金を記録
+            配当入金を手入力
           </DialogTitle>
           <DialogDescription>
-            証券口座に実際に入金された金額だけを登録します。予想配当は登録しません。
+            スクショで読み取れない場合だけ使う例外入力です。証券口座に実際に入金された金額だけを登録し、予想配当は登録しません。
           </DialogDescription>
         </DialogHeader>
         <div className="grid gap-4 py-2 sm:grid-cols-2">

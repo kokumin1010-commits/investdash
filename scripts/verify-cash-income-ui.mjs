@@ -127,6 +127,7 @@ async function verify(width, height, port) {
       const pageText = document.body?.innerText ?? '';
       return {
         present: Boolean(node),
+        screenshotEntry: text.includes('スクショから自動計算'),
         actualHeading: text.includes('実際に増えた金額'),
         recordedYtd: text.includes('本年の実績収入（記録分）'),
         dailyInterest: text.includes('最新記録の日次利息'),
@@ -152,17 +153,17 @@ async function verify(width, height, port) {
 
     await browser.evalValue(`(() => {
       const node = document.querySelector('[data-testid="cash-income-actual-forecast"]');
-      const button = [...(node?.querySelectorAll('button') ?? [])].find(item => item.textContent?.includes('配当入金を記録'));
+      const button = [...(node?.querySelectorAll('button') ?? [])].find(item => item.textContent?.includes('手入力'));
       button?.click();
     })()`);
     await browser.waitUntil(
       "actual dividend dialog",
-      `document.body.innerText.includes('実際の配当入金を記録') && Boolean(document.querySelector('#income-date'))`
+      `document.body.innerText.includes('配当入金を手入力') && Boolean(document.querySelector('#income-date'))`
     );
     const dialog = await browser.evalValue(`(() => {
       const text = document.body.innerText;
       return {
-        title: text.includes('実際の配当入金を記録'),
+        title: text.includes('配当入金を手入力'),
         actualOnly: text.includes('実際に入金された金額だけ'),
         date: Boolean(document.querySelector('#income-date')),
         broker: Boolean(document.querySelector('#income-broker')),

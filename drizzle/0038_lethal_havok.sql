@@ -1,0 +1,1 @@
+ALTER TABLE `cashIncomeRecords` MODIFY COLUMN `grossAmount` decimal(20,4);

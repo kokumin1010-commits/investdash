@@ -173,6 +173,12 @@ export function buildCashIncomeOverview(input: {
   const settledDividends = input.cashIncomeRecords.filter(
     row => row.kind === "DIVIDEND" && row.status === "SETTLED"
   );
+  const settledInterestDeltas = input.cashIncomeRecords.filter(
+    row =>
+      row.kind === "INTEREST" &&
+      row.status === "SETTLED" &&
+      row.source === "SCREENSHOT_CUMULATIVE_DELTA"
+  );
   const monthDividends = filterDate(
     settledDividends,
     row => row.occurredOn,
@@ -181,6 +187,18 @@ export function buildCashIncomeOverview(input: {
   );
   const yearDividends = filterDate(
     settledDividends,
+    row => row.occurredOn,
+    yearStart,
+    asOfDate
+  );
+  const monthInterestDeltas = filterDate(
+    settledInterestDeltas,
+    row => row.occurredOn,
+    monthStart,
+    asOfDate
+  );
+  const yearInterestDeltas = filterDate(
+    settledInterestDeltas,
     row => row.occurredOn,
     yearStart,
     asOfDate
@@ -194,22 +212,42 @@ export function buildCashIncomeOverview(input: {
     "現金宝・貨幣基金の日次利息付与",
     latestInterestRows.length !== input.currentInterestAssetCount
   );
-  const interestMtd = sumConverted(
-    monthInterestRows,
-    row => row.incomeDate,
-    row => row.dailyIncome,
-    row => row.fxRateJpy,
-    "現金宝・貨幣基金の月次記録分",
-    true
-  );
-  const interestYtd = sumConverted(
-    yearInterestRows,
-    row => row.incomeDate,
-    row => row.dailyIncome,
-    row => row.fxRateJpy,
-    "現金宝・貨幣基金の年次記録分",
-    true
-  );
+  const interestMtd =
+    monthInterestDeltas.length > 0
+      ? sumConverted(
+          monthInterestDeltas,
+          row => row.occurredOn,
+          row => row.netAmount,
+          row => row.fxRateJpy,
+          "月次スクショの累計収益差額",
+          true
+        )
+      : sumConverted(
+          monthInterestRows,
+          row => row.incomeDate,
+          row => row.dailyIncome,
+          row => row.fxRateJpy,
+          "現金宝・貨幣基金の月次記録分",
+          true
+        );
+  const interestYtd =
+    yearInterestDeltas.length > 0
+      ? sumConverted(
+          yearInterestDeltas,
+          row => row.occurredOn,
+          row => row.netAmount,
+          row => row.fxRateJpy,
+          "月次スクショの累計収益差額",
+          true
+        )
+      : sumConverted(
+          yearInterestRows,
+          row => row.incomeDate,
+          row => row.dailyIncome,
+          row => row.fxRateJpy,
+          "現金宝・貨幣基金の年次記録分",
+          true
+        );
   const dividendMtd = sumConverted(
     monthDividends,
     row => row.occurredOn,
@@ -291,7 +329,7 @@ export function buildCashIncomeOverview(input: {
             ? "PARTIAL"
             : "AVAILABLE",
       note:
-        "実績は記録済みの利息付与・入金だけを集計し、記録のない日や未連携の配当を推測で補いません。",
+        "実績は確認済みスクショの累計差額と実際の入金だけを集計します。累計差額がある期間は日次利息を重ねず、未記録日や未連携配当も推測で補いません。",
     },
     forecast: {
       asOfDate,
