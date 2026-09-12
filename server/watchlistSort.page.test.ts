@@ -5,6 +5,62 @@ import * as React from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => {
+  const metric = (
+    value: number | null,
+    unit: "PERCENT" | "RATIO" | "CURRENCY",
+    currency: string | null = null
+  ) => ({
+    status: "AVAILABLE" as const,
+    value,
+    unit,
+    currency,
+    asOfDate: "2026-09-11",
+    period: "TTM",
+    basis: "実データに基づくテスト口径",
+    source: "Yahoo Finance fundamentals-timeseries",
+  });
+  const insight = (symbol: string) => ({
+    symbol,
+    financials: {
+      version: "candidate-financial-v1",
+      symbol,
+      source: "Yahoo Finance fundamentals-timeseries",
+      fetchedAt: "2026-09-13T00:00:00.000Z",
+      currency: "USD",
+      currentPrice: 100,
+      priceAsOfDate: "2026-09-11",
+      marketAsOfDate: "2026-09-11",
+      fiscalPeriodEnd: "2025-12-31",
+      industryClass: "ORDINARY" as const,
+      dataQuality: "COMPLETE" as const,
+      notes: [],
+      metrics: {
+        forecastDividendYieldPct: metric(2.4, "PERCENT", "USD"),
+        trailingPe: metric(18.5, "RATIO"),
+        priceToBook: metric(3.2, "RATIO"),
+        marketCap: metric(50_000_000_000, "CURRENCY", "USD"),
+      },
+    },
+    sizing: {
+      status: "PRICE_WAIT" as const,
+      engineStatus: "BUY" as const,
+      currentQuantity: 0,
+      currentWeightPct: 0,
+      recommendedShares: 12,
+      recommendedAmountLocal: 1_080,
+      recommendedAmountBase: 172_000,
+      afterQuantity: 12,
+      afterWeightPct: 0.08,
+      currency: "USD",
+      tranchePct: 25,
+      trancheCount: 4,
+      trancheLabel: "目標枠の25%（初回1回分）",
+      nextTrancheCondition: "目標価格到達後に再確認",
+      constraints: ["現金性資産だけを原資にします"],
+      fundingMode: "CASH_ONLY" as const,
+      basis: "既存portfolioPositionSizingによる分析用参考",
+    },
+  });
   const baseRow = {
     tickerCode: "CODE",
     market: "US",
@@ -32,6 +88,12 @@ const mocks = vi.hoisted(() => {
   };
   return {
     dismissCandidate: vi.fn(),
+    candidateInsights: [
+      insight("TXN"),
+      insight("ALPHA"),
+      insight("BRAVO"),
+      insight("CHARLIE"),
+    ],
     savedCandidates: [
       {
         symbol: "TXN",
@@ -110,6 +172,9 @@ vi.mock("@/lib/trpc", () => ({
     portfolio: {
       syncPrices: { useMutation: idleMutation },
       suggestCandidates: { useMutation: idleMutation },
+      candidateCardInsights: {
+        useQuery: () => ({ data: mocks.candidateInsights, isLoading: false, error: null }),
+      },
       savedCandidates: {
         useQuery: () => ({ data: mocks.savedCandidates, isLoading: false }),
       },
@@ -194,12 +259,25 @@ describe.each([390, 1280])("Watchlist sort at %ipx", width => {
     const candidateChart = within(candidateCard as HTMLElement).getByTestId(
       "watchlist-long-term-chart-TXN"
     );
+    const candidateMetrics = within(candidateCard as HTMLElement).getByTestId(
+      "candidate-metrics-TXN"
+    );
+    expect(within(candidateMetrics).getByText("予想配当利回り")).toBeTruthy();
+    expect(within(candidateMetrics).getByText("18.5倍")).toBeTruthy();
+    expect(within(candidateMetrics).getByText("3.2倍")).toBeTruthy();
+    expect(within(candidateMetrics).getByText("12 株")).toBeTruthy();
     expect(candidateChart.getAttribute("data-default-span")).toBe("MAX");
     expect(candidateChart.getAttribute("data-target-price")).toBe("201.52");
     expect(
       candidateTitle.compareDocumentPosition(candidateChart) &
         Node.DOCUMENT_POSITION_FOLLOWING
     ).toBeTruthy();
+
+    const watchMetrics = within(card as HTMLElement).getByTestId(
+      "candidate-metrics-CHARLIE"
+    );
+    expect(within(watchMetrics).getByText("時価総額")).toBeTruthy();
+    expect(within(watchMetrics).getByText("0.08%")).toBeTruthy();
 
     fireEvent.click(within(candidateCard as HTMLElement).getByRole("button", { name: "今後出さない" }));
     expect(mocks.dismissCandidate).toHaveBeenCalledWith({ symbol: "TXN" });

@@ -89,6 +89,7 @@ import {
   withSchedulerRunLog,
 } from "../services/schedulerRunLog";
 import { buildRankedPlanOverview } from "../services/buyPlanRankingService";
+import { buildCandidateCardInsights } from "../services/candidateFinancialService";
 
 const decimalString = z
   .union([z.number(), z.string()])
@@ -1657,6 +1658,23 @@ export const portfolioRouter = router({
       createdAt: r.createdAt,
     }));
   }),
+
+  /**
+   * 候補・研究・watchカード共用の財務指標と初回建仓参考量。
+   * symbolをまとめて受け、外部sourceとportfolio計算をcardごとに重複させない。
+   */
+  candidateCardInsights: protectedProcedure
+    .input(
+      z.object({
+        symbols: z
+          .array(z.string().trim().min(1).max(24))
+          .min(1)
+          .max(60),
+      })
+    )
+    .query(({ ctx, input }) =>
+      buildCandidateCardInsights(ctx.user.id, input.symbols)
+    ),
 
   unheldResearchIdeas: protectedProcedure.query(({ ctx }) =>
     listUnheldResearchIdeas(ctx.user.id)

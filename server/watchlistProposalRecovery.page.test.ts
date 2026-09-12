@@ -117,6 +117,9 @@ vi.mock("@/lib/trpc", () => {
       portfolio: {
         syncPrices: { useMutation: idleMutation },
         suggestCandidates: { useMutation: idleMutation },
+        candidateCardInsights: {
+          useQuery: () => ({ data: [], isLoading: false, error: null }),
+        },
         savedCandidates: { useQuery: () => ({ data: [], isLoading: false }) },
         dismissCandidate: { useMutation: idleMutation },
         addSuggestedToWatchlist: { useMutation: idleMutation },

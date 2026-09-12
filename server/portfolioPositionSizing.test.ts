@@ -146,4 +146,38 @@ describe("computePortfolioPositionSizing", () => {
       "最低売買単位が今回のリスク予算を超えます"
     );
   });
+
+  it("returns unavailable instead of inventing shares when FX is missing", () => {
+    const result = computePortfolioPositionSizing({
+      ...productionBase,
+      action: "ADD_SMALL",
+      market: "US",
+      localPrice: 100,
+      yenPerLocalUnit: null,
+      currentHoldingBase: 0,
+      sectorValueBase: 0,
+    });
+
+    expect(result.status).toBe("UNAVAILABLE");
+    expect(result.shares).toBe(0);
+    expect(result.amountBase).toBe(0);
+    expect(result.reasons.join(" ")).toContain("円換算レート");
+  });
+
+  it("returns too small when there is no deployable cash liquidity", () => {
+    const result = computePortfolioPositionSizing({
+      ...productionBase,
+      action: "ADD_SMALL",
+      market: "US",
+      localPrice: 100,
+      yenPerLocalUnit: 150,
+      liquidAssetsBase: 0,
+      currentHoldingBase: 0,
+      sectorValueBase: 0,
+    });
+
+    expect(result.status).toBe("TOO_SMALL");
+    expect(result.shares).toBe(0);
+    expect(result.reasons.join(" ")).toContain("現金性資産");
+  });
 });

@@ -1,6 +1,7 @@
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { LongTermAnnualChart } from "@/components/investing/LongTermAnnualChart";
+import { CandidateMetricsAndSizing } from "@/components/investing/CandidateMetricsAndSizing";
 import {
   Card,
   CardContent,
@@ -44,6 +45,7 @@ import {
   UNHELD_PURCHASE_DECISION_LABELS,
   type UnheldPurchaseDecision,
 } from "@shared/buyPlanOpportunity";
+import type { CandidateCardInsight } from "@shared/candidateFinancialMetrics";
 
 /**
  * 買い増しプランの一覧。
@@ -172,6 +174,36 @@ export default function BuyPlans() {
     });
     return showAllResearch ? filtered : filtered.slice(0, 12);
   }, [researchIdeas.data?.ideas, researchKeyword, researchTrack, showAllResearch]);
+
+  const candidateInsightSymbols = useMemo(
+    () =>
+      Array.from(
+        new Set([
+          ...unheldCandidates.map(row => row.symbol),
+          ...(researchIdeas.data?.ideas ?? []).map(idea => idea.symbol),
+        ])
+      ),
+    [unheldCandidates, researchIdeas.data?.ideas]
+  );
+  const candidateInsights = trpc.portfolio.candidateCardInsights.useQuery(
+    {
+      symbols:
+        candidateInsightSymbols.length > 0
+          ? candidateInsightSymbols
+          : ["__NONE__"],
+    },
+    {
+      enabled: candidateInsightSymbols.length > 0,
+      staleTime: 15 * 60 * 1000,
+    }
+  );
+  const candidateInsightMap = useMemo(
+    () =>
+      new Map(
+        (candidateInsights.data ?? []).map(item => [item.symbol, item] as const)
+      ),
+    [candidateInsights.data]
+  );
 
   const pendingRows = useMemo(() => {
     const normalized = keyword.trim().toLowerCase();
@@ -413,7 +445,12 @@ export default function BuyPlans() {
               {visibleUnheldCandidates.length > 0 ? (
                 <div className="grid gap-3 lg:grid-cols-2" data-testid="all-unheld-candidates">
                   {visibleUnheldCandidates.map(row => (
-                    <UnheldCandidateCard key={`unheld-${row.symbol}`} row={row} />
+                    <UnheldCandidateCard
+                      key={`unheld-${row.symbol}`}
+                      row={row}
+                      insight={candidateInsightMap.get(row.symbol)}
+                      insightLoading={candidateInsights.isLoading}
+                    />
                   ))}
                 </div>
               ) : (
@@ -534,6 +571,8 @@ export default function BuyPlans() {
                 <ResearchIdeaCard
                   key={`research-${idea.symbol}`}
                   idea={idea}
+                  insight={candidateInsightMap.get(idea.symbol)}
+                  insightLoading={candidateInsights.isLoading}
                   adding={addResearchIdea.isPending}
                   dismissing={dismissResearchIdea.isPending}
                   onAdd={() =>
@@ -872,7 +911,15 @@ function priceBandText(row: Row): string {
   return "価格条件未取得";
 }
 
-function UnheldCandidateCard({ row }: { row: UnheldRow }) {
+function UnheldCandidateCard({
+  row,
+  insight,
+  insightLoading,
+}: {
+  row: UnheldRow;
+  insight: CandidateCardInsight | undefined;
+  insightLoading: boolean;
+}) {
   const style =
     row.purchaseDecision.decision === "BUY_NOW"
       ? "border-emerald-300 bg-emerald-50/50 dark:border-emerald-800 dark:bg-emerald-950/20"
@@ -881,7 +928,10 @@ function UnheldCandidateCard({ row }: { row: UnheldRow }) {
         : row.purchaseDecision.decision === "DATA_WAIT"
           ? "border-amber-200 bg-amber-50/40 dark:border-amber-900 dark:bg-amber-950/20"
           : "border-slate-200 bg-slate-50/50 dark:border-slate-800 dark:bg-slate-950/20";
-  const executable = row.sizing.shares > 0 && row.sizing.amountBase > 0;
+  const executable =
+    row.purchaseDecision.decision === "BUY_NOW" &&
+    row.sizing.shares > 0 &&
+    row.sizing.amountBase > 0;
 
   return (
     <Card className={`overflow-hidden ${style}`} data-testid={`unheld-candidate-${row.symbol}`}>
@@ -917,10 +967,10 @@ function UnheldCandidateCard({ row }: { row: UnheldRow }) {
             <p className="mt-1 font-mono text-sm font-semibold">
               {executable
                 ? `${row.sizing.shares.toLocaleString("ja-JP", { maximumFractionDigits: 4 })} 株`
-                : "条件未達"}
+                : "暫定計算不可"}
             </p>
             <p className="text-[11px] text-muted-foreground">
-              {executable ? manYen(row.sizing.amountBase) : "金額は提案しません"}
+              {executable ? manYen(row.sizing.amountBase) : "条件通過後に再計算"}
             </p>
           </div>
           <div className="rounded-lg bg-background/70 p-2.5">
@@ -930,6 +980,11 @@ function UnheldCandidateCard({ row }: { row: UnheldRow }) {
             </p>
           </div>
         </div>
+        <CandidateMetricsAndSizing
+          insight={insight}
+          loading={insightLoading}
+          strictDecision={row.purchaseDecision.decision}
+        />
         <div className="rounded-xl border bg-background/70 px-3 py-2.5">
           <p className="text-xs font-semibold">この判断の理由</p>
           <ul className="mt-1.5 space-y-1 text-xs leading-5 text-muted-foreground">
@@ -953,12 +1008,16 @@ function UnheldCandidateCard({ row }: { row: UnheldRow }) {
 
 function ResearchIdeaCard({
   idea,
+  insight,
+  insightLoading,
   adding,
   dismissing,
   onAdd,
   onDismiss,
 }: {
   idea: ResearchIdea;
+  insight: CandidateCardInsight | undefined;
+  insightLoading: boolean;
   adding: boolean;
   dismissing: boolean;
   onAdd: () => void;
@@ -996,6 +1055,7 @@ function ResearchIdeaCard({
         />
       </div>
       <CardContent className="space-y-3 p-4">
+        <CandidateMetricsAndSizing insight={insight} loading={insightLoading} />
         <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
           <div className="rounded-lg bg-muted/45 p-2.5">
             <p className="text-[11px] text-muted-foreground">提案時株価</p>

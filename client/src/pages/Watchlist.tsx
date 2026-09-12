@@ -1,5 +1,6 @@
 import { DisclaimerNote } from "@/components/investing/DisclaimerNote";
 import { ExpandableText } from "@/components/investing/ExpandableText";
+import { CandidateMetricsAndSizing } from "@/components/investing/CandidateMetricsAndSizing";
 import { MoneyText, PctText } from "@/components/investing/Figures";
 import { LongTermAnnualChart } from "@/components/investing/LongTermAnnualChart";
 import { SignalBadge, SignalPlaceholder } from "@/components/investing/SignalBadge";
@@ -363,6 +364,43 @@ export default function Watchlist() {
   });
 
   const rows = (list.data ?? []) as unknown as WatchRow[];
+  const activeSavedCandidates = useMemo(
+    () =>
+      (saved.data ?? []).filter(
+        candidate => !candidate.dismissed && !candidate.addedToWatchlist
+      ),
+    [saved.data]
+  );
+  const candidateInsightSymbols = useMemo(
+    () =>
+      Array.from(
+        new Set([
+          ...((list.data ?? []) as unknown as WatchRow[]).map(row => row.symbol),
+          ...activeSavedCandidates.map(candidate => candidate.symbol),
+          ...(suggestion?.candidates ?? []).map(candidate => candidate.symbol),
+        ])
+      ),
+    [activeSavedCandidates, list.data, suggestion]
+  );
+  const candidateInsights = trpc.portfolio.candidateCardInsights.useQuery(
+    {
+      symbols:
+        candidateInsightSymbols.length > 0
+          ? candidateInsightSymbols
+          : ["__NONE__"],
+    },
+    {
+      enabled: candidateInsightSymbols.length > 0,
+      staleTime: 15 * 60 * 1000,
+    }
+  );
+  const candidateInsightMap = useMemo(
+    () =>
+      new Map(
+        (candidateInsights.data ?? []).map(item => [item.symbol, item] as const)
+      ),
+    [candidateInsights.data]
+  );
   const filteredRows = useMemo(
     () => filterWatchlistRows(rows, watchQuery),
     [rows, watchQuery]
@@ -497,6 +535,12 @@ export default function Watchlist() {
                     targetLabel="買いたい値段"
                     className="mt-3"
                   />
+                  <div className="mt-3">
+                    <CandidateMetricsAndSizing
+                      insight={candidateInsightMap.get(s.symbol)}
+                      loading={candidateInsights.isLoading}
+                    />
+                  </div>
                   <div className="mt-1 flex flex-wrap items-baseline gap-x-4 gap-y-1 text-xs">
                     <span className="tabular">
                       提案時 {formatMoney(s.priceAtSuggestion, s.currency ?? "USD")}
@@ -660,6 +704,11 @@ export default function Watchlist() {
                                 symbol={c.symbol}
                                 targetPrice={c.targetPrice}
                                 targetLabel="買いたい値段"
+                              />
+
+                              <CandidateMetricsAndSizing
+                                insight={candidateInsightMap.get(c.symbol)}
+                                loading={candidateInsights.isLoading}
                               />
 
                               {/*
@@ -1038,6 +1087,10 @@ export default function Watchlist() {
                 />
               </div>
               <CardContent className="space-y-3">
+                <CandidateMetricsAndSizing
+                  insight={candidateInsightMap.get(r.symbol)}
+                  loading={candidateInsights.isLoading}
+                />
                 {/*
                   保有済みの場合は取得単価と損益を出す。買い増しの判断では
                   「今いくらで持っているか」が目標価格と同じくらい効く。

@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import * as React from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -8,6 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   useOverview: vi.fn(),
   useResearchIdeas: vi.fn(),
+  useCandidateInsights: vi.fn(),
   useLongTermChart: vi.fn(),
   useAddProposals: vi.fn(),
   mutateProposal: vi.fn(),
@@ -38,6 +39,7 @@ vi.mock("@/lib/trpc", () => ({
     portfolio: {
       priceBandOverview: { useQuery: mocks.useOverview },
       unheldResearchIdeas: { useQuery: mocks.useResearchIdeas },
+      candidateCardInsights: { useQuery: mocks.useCandidateInsights },
       longTermChart: { useQuery: mocks.useLongTermChart },
       suggestCandidates: {
         useMutation: () => ({ mutate: mocks.mutateGenerateResearch, isPending: false }),
@@ -387,10 +389,85 @@ const longTermChartData = {
   },
 };
 
+const candidateInsight = (symbol: string) => {
+  const metric = (
+    value: number | null,
+    unit: "PERCENT" | "RATIO" | "CURRENCY",
+    status: "AVAILABLE" | "NOT_MEANINGFUL" | "UNAVAILABLE" = "AVAILABLE",
+    currency: string | null = null
+  ) => ({
+    status,
+    value,
+    unit,
+    currency,
+    asOfDate: "2026-09-11",
+    period: "TTM",
+    basis: "実データに基づくテスト口径",
+    source: "Yahoo Finance fundamentals-timeseries",
+  });
+  return {
+    symbol,
+    financials: {
+      version: "candidate-financial-v1",
+      symbol,
+      source: "Yahoo Finance fundamentals-timeseries",
+      fetchedAt: "2026-09-13T00:00:00.000Z",
+      currency: "USD",
+      currentPrice: 298.22,
+      priceAsOfDate: "2026-09-11",
+      marketAsOfDate: "2026-09-11",
+      fiscalPeriodEnd: "2025-12-31",
+      industryClass: "ORDINARY",
+      dataQuality: "COMPLETE",
+      notes: [],
+      metrics: {
+        forecastDividendYieldPct: metric(1.2, "PERCENT", "AVAILABLE", "USD"),
+        trailingPe: metric(24.5, "RATIO"),
+        priceToBook: metric(9.1, "RATIO"),
+        marketCap: metric(120_000_000_000, "CURRENCY", "AVAILABLE", "USD"),
+        roePct: metric(28, "PERCENT"),
+        roicPct: metric(20, "PERCENT"),
+        operatingMarginPct: metric(30, "PERCENT"),
+        freeCashFlow: metric(5_000_000_000, "CURRENCY", "AVAILABLE", "USD"),
+        fcfYieldPct: metric(4.1, "PERCENT"),
+        netCash: metric(2_000_000_000, "CURRENCY", "AVAILABLE", "USD"),
+        revenueGrowthPct: metric(8, "PERCENT"),
+        epsGrowthPct: metric(10, "PERCENT"),
+        payoutRatioPct: metric(35, "PERCENT"),
+        dividendGrowthPct: metric(null, "PERCENT", "UNAVAILABLE"),
+      },
+    },
+    sizing: {
+      status: "RESEARCH_ONLY",
+      engineStatus: "BUY",
+      currentQuantity: 0,
+      currentWeightPct: 0,
+      recommendedShares: 21,
+      recommendedAmountLocal: 6_262.62,
+      recommendedAmountBase: 998_000,
+      afterQuantity: 21,
+      afterWeightPct: 0.14,
+      currency: "USD",
+      tranchePct: 25,
+      trancheCount: 4,
+      trancheLabel: "目標枠の25%（初回1回分）",
+      nextTrancheCondition: "次回決算確認後に再判定",
+      constraints: ["借入は増やさず、現金性資産だけを原資にします"],
+      fundingMode: "CASH_ONLY",
+      basis: "既存portfolioPositionSizingによる分析用参考",
+    },
+  };
+};
+
 beforeEach(() => {
   vi.stubGlobal("React", React);
   mocks.useOverview.mockReturnValue({ data: overviewData, isLoading: false, error: null });
   mocks.useResearchIdeas.mockReturnValue({ data: researchIdeasData, isLoading: false, error: null });
+  mocks.useCandidateInsights.mockReturnValue({
+    data: [candidateInsight("LRCX"), candidateInsight("GOOGL")],
+    isLoading: false,
+    error: null,
+  });
   mocks.useLongTermChart.mockReturnValue({ data: longTermChartData, isLoading: false, error: null });
   mocks.useAddProposals.mockReturnValue({ data: [proposal], isLoading: false });
 });
@@ -402,6 +479,18 @@ afterEach(() => {
 });
 
 describe("BuyPlans page interactions", () => {
+  it("shows required valuation and first-buy fields on a research candidate card", () => {
+    render(React.createElement(BuyPlans));
+    const card = screen.getByTestId("research-idea-LRCX");
+    expect(within(card).getByText("予想配当利回り")).toBeTruthy();
+    expect(within(card).getByText("PER")).toBeTruthy();
+    expect(within(card).getByText("PBR")).toBeTruthy();
+    expect(within(card).getByText("時価総額")).toBeTruthy();
+    expect(within(card).getByText("21 株")).toBeTruthy();
+    expect(within(card).getByText("0.14%")).toBeTruthy();
+    expect(within(card).getByText(/4回想定/)).toBeTruthy();
+    expect(within(card).getByText(/市場基準 2026-09-11/)).toBeTruthy();
+  });
   it.each([390, 1280])(
     "%dpx 相当で全候補を10名ごとに表示し、上位5名を優先強調する",
     width => {

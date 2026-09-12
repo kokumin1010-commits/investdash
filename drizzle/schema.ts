@@ -1880,3 +1880,36 @@ export const candidateSuggestions = mysqlTable(
 export type CandidateSuggestionRow = typeof candidateSuggestions.$inferSelect;
 export type InsertCandidateSuggestion =
   typeof candidateSuggestions.$inferInsert;
+
+/**
+ * 候補・ウォッチカードで共用する企業財務スナップショット。
+ *
+ * 公開企業の数値はユーザー固有ではないため symbol 単位で1件を共有する。
+ * 候補表やwatchlistへ値を複製せず、source/date/basisを含む正規化payloadを
+ * まとめて保持し、画面ごとの外部API多重呼び出しを防ぐ。
+ */
+export const candidateFinancialSnapshots = mysqlTable(
+  "candidateFinancialSnapshots",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    symbol: varchar("symbol", { length: 24 }).notNull(),
+    source: varchar("source", { length: 120 }).notNull(),
+    payload: json("payload").notNull(),
+    lastError: text("lastError"),
+    fetchedAt: timestamp("fetchedAt").notNull(),
+    expiresAt: timestamp("expiresAt").notNull(),
+    createdAt: timestamp("createdAt").defaultNow().notNull(),
+    updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+  },
+  table => ({
+    symbolUnique: uniqueIndex("candidate_financial_symbol_unique").on(
+      table.symbol
+    ),
+    expiresIdx: index("candidate_financial_expires_idx").on(table.expiresAt),
+  })
+);
+
+export type CandidateFinancialSnapshotRow =
+  typeof candidateFinancialSnapshots.$inferSelect;
+export type InsertCandidateFinancialSnapshot =
+  typeof candidateFinancialSnapshots.$inferInsert;
