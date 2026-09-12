@@ -40,6 +40,11 @@ import {
   summarizeInterestAssets,
   type InterestAssetView,
 } from "./interestAssets";
+import {
+  buildCashIncomeOverview,
+  type CashIncomeOverview,
+} from "./cashIncome";
+import { jstDayKey } from "../../shared/jstDate";
 import { groupPositionsBySymbol, type GroupedPosition } from "./groupPositions";
 import {
   buildHoldingDuration,
@@ -455,9 +460,13 @@ export async function buildPortfolio(userId: number): Promise<{
   /**
    * 利息で増える現金性資産（貨幣市場基金・現金宝）の明細。
    * 株式の一覧とは別に返す。
-   */
+  */
   interestAssets: InterestAssetView[];
+  /** 实际计提／到账与未来预计严格分层后的现金收入 */
+  cashIncome: CashIncomeOverview;
 }> {
+  const now = new Date();
+  const yearStart = `${jstDayKey(now).slice(0, 4)}-01-01`;
   const [
     rows,
     settings,
@@ -467,6 +476,8 @@ export async function buildPortfolio(userId: number): Promise<{
     snapshots,
     brokerBalances,
     interestAssetRows,
+    interestIncomeSnapshots,
+    cashIncomeRecords,
     earliestMonthlyDates,
   ] = await Promise.all([
     db.listHoldings(userId),
@@ -480,6 +491,10 @@ export async function buildPortfolio(userId: number): Promise<{
     db.listBrokerBalances(userId),
     // 利息で増える現金性資産（貨幣市場基金）。株式とは別枠で純資産に加える
     db.listInterestAssets(userId),
+    // 实际收益只读取已保存快照，不按缺失日期推算
+    db.listInterestAssetIncomeSnapshots(userId),
+    // 实际到账股息只来自现金流水
+    db.listCashIncomeRecords(userId, yearStart),
     db.earliestMonthlyHoldingDates(userId),
   ]);
 
@@ -1018,6 +1033,89 @@ export async function buildPortfolio(userId: number): Promise<{
     }
   }
 
+  const dividendSummary = buildDividendSummary(
+    positions,
+    groups,
+    totalValueBase,
+    totalCostBase
+  );
+  const annualDividendStatus =
+    groups.length === 0 || dividendSummary.unknownCount >= groups.length
+      ? ("UNAVAILABLE" as const)
+      : dividendSummary.unknownCount > 0
+        ? ("PARTIAL" as const)
+        : ("AVAILABLE" as const);
+  const interestForecastKnown = interestViews.filter(
+    item => item.projectedAnnualIncomeBase !== null
+  ).length;
+  const annualInterestStatus =
+    interestViews.length === 0 || interestForecastKnown === interestViews.length
+      ? ("AVAILABLE" as const)
+      : interestForecastKnown === 0
+        ? ("UNAVAILABLE" as const)
+        : ("PARTIAL" as const);
+  let borrowingInterestMtdJpy = 0;
+  let borrowingInterestMtdAvailable = true;
+  let borrowingInterestMtdAsOfDate: string | null = null;
+  for (const balance of brokerBalances) {
+    const cash = n(balance.cashBalance) ?? 0;
+    const margin = n(balance.maintenanceMargin) ?? 0;
+    if (cash >= 0 && margin <= 0) continue;
+    const actual = n(balance.interestMtd);
+    const converted = convertToJpy(actual, balance.currency, rates);
+    if (actual === null || converted === null) {
+      borrowingInterestMtdAvailable = false;
+      continue;
+    }
+    borrowingInterestMtdJpy += Math.abs(converted);
+    const updatedDate = jstDayKey(balance.updatedAt);
+    if (!borrowingInterestMtdAsOfDate || updatedDate > borrowingInterestMtdAsOfDate) {
+      borrowingInterestMtdAsOfDate = updatedDate;
+    }
+  }
+  const borrowedLeverage = Array.from(leverageByBroker.values()).filter(
+    leverage => leverage.borrowedBase > 0
+  );
+  const borrowingInterestKnown = borrowedLeverage.filter(
+    leverage => leverage.interest !== null
+  );
+  const annualBorrowingInterestStatus =
+    borrowedLeverage.length === 0 ||
+    borrowingInterestKnown.length === borrowedLeverage.length
+      ? ("AVAILABLE" as const)
+      : borrowingInterestKnown.length === 0
+        ? ("UNAVAILABLE" as const)
+        : ("PARTIAL" as const);
+  const annualBorrowingInterestJpy = borrowingInterestKnown.reduce(
+    (total, leverage) => total + (leverage.interest?.annualInterestBase ?? 0),
+    0
+  );
+  const cashIncome = buildCashIncomeOverview({
+    interestSnapshots: interestIncomeSnapshots,
+    cashIncomeRecords,
+    currentInterestAssetCount: interestViews.length,
+    annualDividendJpy:
+      annualDividendStatus === "UNAVAILABLE"
+        ? null
+        : dividendSummary.annualIncomeBase,
+    annualDividendStatus,
+    annualInterestJpy:
+      annualInterestStatus === "UNAVAILABLE"
+        ? null
+        : interestSummary.projectedAnnualIncomeBase,
+    annualInterestStatus,
+    annualBorrowingInterestJpy:
+      annualBorrowingInterestStatus === "UNAVAILABLE"
+        ? null
+        : annualBorrowingInterestJpy,
+    annualBorrowingInterestStatus,
+    borrowingInterestMtdJpy: borrowingInterestMtdAvailable
+      ? borrowingInterestMtdJpy
+      : null,
+    borrowingInterestMtdAsOfDate,
+    now,
+  });
+
   return {
     positions,
     groups,
@@ -1028,12 +1126,7 @@ export async function buildPortfolio(userId: number): Promise<{
      * 配当の全体集計。銘柄単位ではなく口座レコード単位で合計する
      * （同一銘柄を複数口座で持っていれば、その分だけ配当も増えるため）。
      */
-    dividends: buildDividendSummary(
-      positions,
-      groups,
-      totalValueBase,
-      totalCostBase
-    ),
+    dividends: dividendSummary,
     /**
      * 月別の配当の銘柄内訳。どの月にどの銘柄から配当が入るかを見るため、
      * 口座レコード単位で保持する（同一銘柄を複数口座で持つ場合は分けて出す）。
@@ -1075,6 +1168,7 @@ export async function buildPortfolio(userId: number): Promise<{
     interestAssets: interestViews.sort(
       (a, b) => (b.amountBase ?? 0) - (a.amountBase ?? 0)
     ),
+    cashIncome,
   };
 }
 

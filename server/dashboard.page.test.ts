@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => ({
   assetTrend: vi.fn(),
   settings: vi.fn(),
   updateSettings: vi.fn(),
+  recordDividendIncome: vi.fn(),
   mutateAsync: vi.fn(),
 }));
 
@@ -20,6 +21,7 @@ vi.mock("@/lib/trpc", () => ({
       portfolio: {
         invalidate: vi.fn(),
         settings: { invalidate: vi.fn() },
+        overview: { invalidate: vi.fn() },
       },
     }),
     portfolio: {
@@ -30,6 +32,12 @@ vi.mock("@/lib/trpc", () => ({
       updateSettings: {
         useMutation: () => ({
           mutate: mocks.updateSettings,
+          isPending: false,
+        }),
+      },
+      recordDividendIncome: {
+        useMutation: () => ({
+          mutate: mocks.recordDividendIncome,
           isPending: false,
         }),
       },
@@ -186,6 +194,88 @@ function overviewData(unknownCount: number) {
     brokers: [],
     alerts: [],
     interestAssets: [],
+    cashIncome: {
+      actual: {
+        asOfDate: "2026-09-13",
+        latestDailyInterest: {
+          amountJpy: 8_530,
+          status: "AVAILABLE",
+          recordCount: 4,
+          recordedDays: 1,
+          lastDate: "2026-08-24",
+          sourceLabel: "現金宝・貨幣基金の日次利息付与",
+        },
+        interestMtd: {
+          amountJpy: null,
+          status: "UNAVAILABLE",
+          recordCount: 0,
+          recordedDays: 0,
+          lastDate: null,
+          sourceLabel: "現金宝・貨幣基金の月次記録分",
+        },
+        interestYtd: {
+          amountJpy: 8_530,
+          status: "PARTIAL",
+          recordCount: 4,
+          recordedDays: 1,
+          lastDate: "2026-08-24",
+          sourceLabel: "現金宝・貨幣基金の年次記録分",
+        },
+        lifetimeInterest: {
+          amountJpy: 586_970,
+          status: "PARTIAL",
+          recordCount: 4,
+          recordedDays: 1,
+          lastDate: "2026-08-24",
+          sourceLabel: "現金宝・貨幣基金の最新累計収益",
+        },
+        dividendMtd: {
+          amountJpy: null,
+          status: "UNAVAILABLE",
+          recordCount: 0,
+          recordedDays: 0,
+          lastDate: null,
+          sourceLabel: "券商の実際入金記録",
+        },
+        dividendYtd: {
+          amountJpy: null,
+          status: "UNAVAILABLE",
+          recordCount: 0,
+          recordedDays: 0,
+          lastDate: null,
+          sourceLabel: "券商の実際入金記録",
+        },
+        recordedGrossIncomeMtdJpy: null,
+        recordedGrossIncomeMtdStatus: "UNAVAILABLE",
+        recordedGrossIncomeYtdJpy: 8_530,
+        recordedGrossIncomeYtdStatus: "PARTIAL",
+        borrowingInterestMtd: {
+          amountJpy: 152_530,
+          status: "PARTIAL",
+          recordCount: 1,
+          recordedDays: 0,
+          lastDate: "2026-08-25",
+          sourceLabel: "証券口座の月初来支払利息",
+        },
+        netCashMtdJpy: null,
+        netCashMtdStatus: "UNAVAILABLE",
+        note: "実績は記録済みの計提・入金だけを集計します。",
+      },
+      forecast: {
+        asOfDate: "2026-09-13",
+        annualDividendJpy: 22_000_000,
+        annualDividendStatus: "AVAILABLE",
+        annualInterestJpy: 3_000_000,
+        annualInterestStatus: "AVAILABLE",
+        annualBorrowingInterestJpy: 4_000_000,
+        annualBorrowingInterestStatus: "AVAILABLE",
+        annualNetCashJpy: 21_000_000,
+        annualNetCashStatus: "AVAILABLE",
+        dividendBasis: "現在保有株数 × 直近12か月の1株配当実績（税引前）",
+        interestBasis: "現在の現金宝・貨幣基金残高 × 記録年率の日次複利試算",
+        borrowingBasis: "現在の借入残高 × 通貨別金利の年換算試算",
+      },
+    },
     dividendCalendar: {},
     dividends: {
       annualIncomeBase: 0,
@@ -307,9 +397,13 @@ describe("Dashboard actual page", () => {
       expect(screen.getByText("1,000 億円")).toBeTruthy();
       expect(screen.getByText("2030-12-31 まで")).toBeTruthy();
       expect(screen.getByText("高い挑戦目標")).toBeTruthy();
-      expect(screen.getByText("現在の年間配当（税引前）")).toBeTruthy();
-      expect(screen.getByText("年間利息（見込み）")).toBeTruthy();
-      expect(screen.getByText("年間純キャッシュ収入")).toBeTruthy();
+      expect(screen.getByText("キャッシュ収入：実績と予想")).toBeTruthy();
+      expect(screen.getByText("本年の実績収入（記録分）")).toBeTruthy();
+      expect(screen.getByText("本年の入金済み配当")).toBeTruthy();
+      expect(screen.getAllByText("未連携").length).toBeGreaterThan(0);
+      expect(screen.getByText("未来の年間配当予想（税引前）")).toBeTruthy();
+      expect(screen.getByText("未来の年間利息予想")).toBeTruthy();
+      expect(screen.getByText("未来の年間純キャッシュ収入予想")).toBeTruthy();
       expect(screen.getByText("2030年末の3つの達成情景")).toBeTruthy();
       expect(screen.getByText("年率仮定 4.0%")).toBeTruthy();
       expect(screen.getByText("年率仮定 8.0%")).toBeTruthy();
@@ -349,6 +443,41 @@ describe("Dashboard actual page", () => {
         "目標純資産と目標日がまだ設定されていません。「目標を編集」から登録できます。"
       )
     ).toBeTruthy();
+  });
+
+  it("records only an actual settled dividend through the protected income form", () => {
+    render(React.createElement(Dashboard));
+
+    fireEvent.click(screen.getByRole("button", { name: "配当入金を記録" }));
+    fireEvent.change(screen.getByLabelText("入金日"), {
+      target: { value: "2026-09-10" },
+    });
+    fireEvent.change(screen.getByLabelText("銘柄・配当名"), {
+      target: { value: "Texas Instruments 配当" },
+    });
+    fireEvent.change(screen.getByLabelText("配当総額（原通貨）"), {
+      target: { value: "100" },
+    });
+    fireEvent.change(screen.getByLabelText("源泉税（原通貨）"), {
+      target: { value: "15" },
+    });
+    fireEvent.change(screen.getByLabelText("手数料（原通貨）"), {
+      target: { value: "1" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "実績として保存" }));
+
+    expect(mocks.recordDividendIncome).toHaveBeenCalledWith(
+      expect.objectContaining({
+        requestId: expect.stringMatching(/^[0-9a-f-]{36}$/),
+        occurredOn: "2026-09-10",
+        broker: "futu_hk",
+        name: "Texas Instruments 配当",
+        currency: "USD",
+        grossAmount: 100,
+        taxAmount: 15,
+        feeAmount: 1,
+      })
+    );
   });
 
   it("edits the asset target in oku-yen and optional income goals in man-yen", () => {

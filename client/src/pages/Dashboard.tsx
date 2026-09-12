@@ -81,6 +81,7 @@ import { Link } from "wouter";
 import { DataHealthCard } from "@/components/investing/DataHealthCard";
 import { AttentionEmptyState } from "@/components/investing/AttentionEmptyState";
 import { LongTermGoalCard } from "@/components/investing/LongTermGoalCard";
+import { CashIncomeCard } from "@/components/investing/CashIncomeCard";
 
 export default function Dashboard() {
   const utils = trpc.useUtils();
@@ -673,6 +674,14 @@ export default function Dashboard() {
             正常なときは 1 行に収めて邪魔にならないようにする。
           */}
           <DataHealthCard showSyncButton={false} />
+
+          {data?.cashIncome ? (
+            <CashIncomeCard
+              data={data.cashIncome}
+              interestAssetsJpy={summary?.interestAssetsBase}
+              interestRatePct={summary?.interestRatePct}
+            />
+          ) : null}
 
           <LongTermGoalCard
             currentNetAssetsJpy={summary?.netAssetsBase}
@@ -1403,17 +1412,17 @@ export default function Dashboard() {
                         </span>
                       </span>
                       {/*
-                        前日の受取利息から逆算した実績利回り。
-                        記録した年利（3.4%）と大きくずれていれば記録が古い可能性がある。
+                        最新记录の日次利息から逆算した実绩利回り。
+                        capturedAt を必ず示し、古い截图を「前日」と誤認させない。
                       */}
                       {a.impliedRatePct !== null ? (
                         <span className="w-full text-[11px] text-muted-foreground">
-                          前日の利息 {a.currency}{" "}
+                          {new Date(a.capturedAt).toLocaleDateString("ja-JP")} 記録の日次利息 {a.currency}{" "}
                           {a.dailyIncome?.toLocaleString(undefined, {
                             minimumFractionDigits: 2,
                             maximumFractionDigits: 2,
                           })}{" "}
-                          から逆算すると年 {a.impliedRatePct.toFixed(2)}%
+                          から逆算した年率 {a.impliedRatePct.toFixed(2)}%
                           {a.cumulativeIncomeBase !== null ? (
                             <>
                               {" "}

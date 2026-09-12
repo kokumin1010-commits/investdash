@@ -13,6 +13,8 @@ import {
   watchlist,
   brokerBalances,
   interestAssets,
+  interestAssetIncomeSnapshots,
+  cashIncomeRecords,
   candidateSuggestions,
   monthlyHoldings,
   monthlySnapshots,
@@ -27,6 +29,8 @@ import {
   type InsertWatchlistItem,
   type InsertBrokerBalance,
   type InsertInterestAsset,
+  type InsertInterestAssetIncomeSnapshot,
+  type InsertCashIncomeRecord,
   type InsertCandidateSuggestion,
   type InsertSystemEvent,
 } from "../drizzle/schema";
@@ -346,6 +350,98 @@ export async function upsertInterestAsset(data: InsertInterestAsset): Promise<nu
     )
     .limit(1);
   return after[0]?.id ?? 0;
+}
+
+/** 同一商品・同一收益日的快照只保留最新捕获值，避免重复计入。 */
+export async function upsertInterestAssetIncomeSnapshot(
+  data: InsertInterestAssetIncomeSnapshot
+): Promise<void> {
+  const db = await requireDb();
+  await db
+    .insert(interestAssetIncomeSnapshots)
+    .values(data)
+    .onDuplicateKeyUpdate({
+      set: {
+        broker: data.broker,
+        name: data.name,
+        currency: data.currency,
+        amount: data.amount,
+        annualRatePct: data.annualRatePct ?? null,
+        dailyIncome: data.dailyIncome ?? null,
+        cumulativeIncome: data.cumulativeIncome ?? null,
+        fxRateJpy: data.fxRateJpy ?? null,
+        source: data.source ?? "MANUAL_CAPTURE",
+        capturedAt: data.capturedAt,
+      },
+    });
+}
+
+export async function listInterestAssetIncomeSnapshots(
+  userId: number,
+  fromDate?: string
+) {
+  const db = await requireDb();
+  return db
+    .select()
+    .from(interestAssetIncomeSnapshots)
+    .where(
+      fromDate
+        ? and(
+            eq(interestAssetIncomeSnapshots.userId, userId),
+            gte(interestAssetIncomeSnapshots.incomeDate, fromDate)
+          )
+        : eq(interestAssetIncomeSnapshots.userId, userId)
+    )
+    .orderBy(desc(interestAssetIncomeSnapshots.incomeDate));
+}
+
+export async function insertCashIncomeRecord(
+  data: InsertCashIncomeRecord
+): Promise<number> {
+  const db = await requireDb();
+  await db
+    .insert(cashIncomeRecords)
+    .values(data)
+    .onDuplicateKeyUpdate({
+      set: {
+        status: data.status ?? "SETTLED",
+        grossAmount: data.grossAmount,
+        taxAmount: data.taxAmount ?? null,
+        feeAmount: data.feeAmount ?? null,
+        netAmount: data.netAmount,
+        fxRateJpy: data.fxRateJpy ?? null,
+        source: data.source ?? "MANUAL",
+        sourceReference: data.sourceReference ?? null,
+        notes: data.notes ?? null,
+      },
+    });
+  const rows = await db
+    .select({ id: cashIncomeRecords.id })
+    .from(cashIncomeRecords)
+    .where(
+      and(
+        eq(cashIncomeRecords.userId, data.userId),
+        eq(cashIncomeRecords.dedupeKey, data.dedupeKey)
+      )
+    )
+    .limit(1);
+  return rows[0]?.id ?? 0;
+}
+
+export async function listCashIncomeRecords(userId: number, fromDate?: string) {
+  const db = await requireDb();
+  return db
+    .select()
+    .from(cashIncomeRecords)
+    .where(
+      fromDate
+        ? and(
+            eq(cashIncomeRecords.userId, userId),
+            gte(cashIncomeRecords.occurredOn, fromDate)
+          )
+        : eq(cashIncomeRecords.userId, userId)
+    )
+    .orderBy(desc(cashIncomeRecords.occurredOn), desc(cashIncomeRecords.id));
 }
 export async function updateInterestAsset(
   userId: number,

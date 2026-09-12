@@ -78,6 +78,7 @@ import {
   syncPrices,
 } from "../services/portfolio";
 import { BROKERS, normalizeSymbol } from "../../shared/investing";
+import { jstDayKey } from "../../shared/jstDate";
 import { BAND_ACTIONS } from "../../shared/priceBands";
 import { computePortfolioPositionSizing } from "../../shared/portfolioPositionSizing";
 import { buildHoldingActionPlan } from "../../shared/holdingActionPlan";
@@ -432,6 +433,7 @@ export const portfolioRouter = router({
       })
     )
     .mutation(async ({ ctx, input }) => {
+      const capturedAt = new Date();
       const id = await db.upsertInterestAsset({
         userId: ctx.user.id,
         broker: input.broker,
@@ -450,7 +452,116 @@ export const portfolioRouter = router({
             : String(input.cumulativeIncome),
         compounding: input.compounding,
         notes: input.notes ?? null,
-        capturedAt: new Date(),
+        capturedAt,
+      });
+      const settings = await db.getSettings(ctx.user.id);
+      const currency = input.currency.toUpperCase();
+      const fxRateJpy =
+        currency === "JPY"
+          ? 1
+          : currency === "USD"
+            ? Number(settings.usdJpyRate)
+            : currency === "SGD"
+              ? Number(settings.sgdJpyRate)
+              : currency === "HKD"
+                ? Number(settings.hkdJpyRate)
+                : null;
+      const incomeDate = jstDayKey(
+        new Date(capturedAt.getTime() - 24 * 60 * 60 * 1000)
+      );
+      if (id > 0 && (input.dailyIncome !== undefined || input.cumulativeIncome !== undefined)) {
+        await db.upsertInterestAssetIncomeSnapshot({
+          userId: ctx.user.id,
+          interestAssetId: id,
+          broker: input.broker,
+          name: input.name,
+          currency,
+          incomeDate,
+          amount: String(input.amount),
+          annualRatePct:
+            input.annualRatePct === undefined
+              ? null
+              : String(input.annualRatePct),
+          dailyIncome:
+            input.dailyIncome === undefined ? null : String(input.dailyIncome),
+          cumulativeIncome:
+            input.cumulativeIncome === undefined
+              ? null
+              : String(input.cumulativeIncome),
+          fxRateJpy: fxRateJpy === null ? null : String(fxRateJpy),
+          source: "MANUAL_CAPTURE",
+          capturedAt,
+        });
+      }
+      return { id } as const;
+    }),
+
+  /** 券商现金账本中实际到账的股息；预测配当不得写入此端点。 */
+  recordDividendIncome: protectedProcedure
+    .input(
+      z.object({
+        requestId: z.string().uuid(),
+        occurredOn: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+        broker: z.enum(BROKERS),
+        symbol: z.string().trim().min(1).max(24).optional(),
+        name: z.string().trim().min(1).max(160),
+        currency: z.string().trim().min(1).max(8),
+        grossAmount: z.number().nonnegative(),
+        taxAmount: z.number().nonnegative().default(0),
+        feeAmount: z.number().nonnegative().default(0),
+        netAmount: z.number().nonnegative().optional(),
+        fxRateJpy: z.number().positive().optional(),
+        sourceReference: z.string().trim().max(255).optional(),
+        notes: z.string().trim().max(2000).optional(),
+      })
+    )
+    .mutation(async ({ ctx, input }) => {
+      const settings = await db.getSettings(ctx.user.id);
+      const currency = input.currency.toUpperCase();
+      const fxRateJpy =
+        input.fxRateJpy ??
+        (currency === "JPY"
+          ? 1
+          : currency === "USD"
+            ? Number(settings.usdJpyRate)
+            : currency === "SGD"
+              ? Number(settings.sgdJpyRate)
+              : currency === "HKD"
+                ? Number(settings.hkdJpyRate)
+                : null);
+      if (fxRateJpy === null || !Number.isFinite(fxRateJpy)) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: `${currency} のJPY換算レートを入力してください`,
+        });
+      }
+      const netAmount =
+        input.netAmount ??
+        input.grossAmount - input.taxAmount - input.feeAmount;
+      if (netAmount < 0) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "税・手数料控除後の入金額が0未満です",
+        });
+      }
+      const id = await db.insertCashIncomeRecord({
+        userId: ctx.user.id,
+        kind: "DIVIDEND",
+        status: "SETTLED",
+        occurredOn: input.occurredOn,
+        broker: input.broker,
+        symbol: input.symbol ? normalizeSymbol(input.symbol).symbol : null,
+        name: input.name,
+        currency,
+        grossAmount: String(input.grossAmount),
+        taxAmount: String(input.taxAmount),
+        feeAmount: String(input.feeAmount),
+        netAmount: String(netAmount),
+        fxRateJpy: String(fxRateJpy),
+        source: "MANUAL",
+        sourceReference: input.sourceReference ?? null,
+        dedupeKey: `manual:${input.requestId}`,
+        notes: input.notes ?? null,
       });
       return { id } as const;
     }),

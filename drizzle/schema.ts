@@ -818,6 +818,99 @@ export type InsertBrokerBalance = typeof brokerBalances.$inferInsert;
 export type InsertInterestAsset = typeof interestAssets.$inferInsert;
 
 /**
+ * 现金性资产的历史收益快照。
+ *
+ * interestAssets 只保存每个商品的最新状态；这里按收益日保留日次利息和累计收益，
+ * 避免下一次截图覆盖后无法计算本月／本年的实际增加。缺失日期绝不按利率补齐。
+ */
+export const interestAssetIncomeSnapshots = mysqlTable(
+  "interestAssetIncomeSnapshots",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    userId: int("userId").notNull(),
+    interestAssetId: int("interestAssetId").notNull(),
+    broker: mysqlEnum("broker", BROKER_ENUM).notNull(),
+    name: varchar("name", { length: 160 }).notNull(),
+    currency: varchar("currency", { length: 8 }).notNull(),
+    /** dailyIncome 对应的收益日（JST 日历日） */
+    incomeDate: date("incomeDate", { mode: "string" }).notNull(),
+    amount: decimal("amount", { precision: 20, scale: 2 }).notNull(),
+    annualRatePct: decimal("annualRatePct", { precision: 8, scale: 4 }),
+    dailyIncome: decimal("dailyIncome", { precision: 20, scale: 4 }),
+    cumulativeIncome: decimal("cumulativeIncome", {
+      precision: 20,
+      scale: 2,
+    }),
+    /** 捕获时使用的 1 单位原币兑 JPY 汇率；缺失时不做JPY实际汇总 */
+    fxRateJpy: decimal("fxRateJpy", { precision: 20, scale: 8 }),
+    source: varchar("source", { length: 40 }).default("MANUAL_CAPTURE").notNull(),
+    capturedAt: timestamp("capturedAt").notNull(),
+    createdAt: timestamp("createdAt").defaultNow().notNull(),
+    updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+  },
+  table => ({
+    userDateIdx: index("interest_income_user_date_idx").on(
+      table.userId,
+      table.incomeDate
+    ),
+    assetDateUnique: uniqueIndex("interest_income_asset_date_unique").on(
+      table.userId,
+      table.interestAssetId,
+      table.incomeDate
+    ),
+  })
+);
+export type InterestAssetIncomeSnapshot =
+  typeof interestAssetIncomeSnapshots.$inferSelect;
+export type InsertInterestAssetIncomeSnapshot =
+  typeof interestAssetIncomeSnapshots.$inferInsert;
+
+/**
+ * 券商现金账本中的实际收入。
+ *
+ * 第一阶段主要记录已到账股息；预测股息和预测利息不得写入本表。
+ */
+export const cashIncomeRecords = mysqlTable(
+  "cashIncomeRecords",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    userId: int("userId").notNull(),
+    kind: mysqlEnum("kind", ["DIVIDEND", "INTEREST"]).notNull(),
+    status: mysqlEnum("status", ["ACCRUED", "SETTLED"])
+      .default("SETTLED")
+      .notNull(),
+    occurredOn: date("occurredOn", { mode: "string" }).notNull(),
+    broker: mysqlEnum("broker", BROKER_ENUM).notNull(),
+    symbol: varchar("symbol", { length: 24 }),
+    name: varchar("name", { length: 160 }).notNull(),
+    currency: varchar("currency", { length: 8 }).notNull(),
+    grossAmount: decimal("grossAmount", { precision: 20, scale: 4 }).notNull(),
+    taxAmount: decimal("taxAmount", { precision: 20, scale: 4 }),
+    feeAmount: decimal("feeAmount", { precision: 20, scale: 4 }),
+    netAmount: decimal("netAmount", { precision: 20, scale: 4 }).notNull(),
+    fxRateJpy: decimal("fxRateJpy", { precision: 20, scale: 8 }),
+    source: varchar("source", { length: 40 }).default("MANUAL").notNull(),
+    sourceReference: varchar("sourceReference", { length: 255 }),
+    dedupeKey: varchar("dedupeKey", { length: 191 }).notNull(),
+    notes: text("notes"),
+    createdAt: timestamp("createdAt").defaultNow().notNull(),
+    updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+  },
+  table => ({
+    userDateIdx: index("cash_income_user_date_idx").on(
+      table.userId,
+      table.occurredOn
+    ),
+    userDedupeUnique: uniqueIndex("cash_income_user_dedupe_unique").on(
+      table.userId,
+      table.dedupeKey
+    ),
+  })
+);
+export type CashIncomeRecord = typeof cashIncomeRecords.$inferSelect;
+export type InsertCashIncomeRecord = typeof cashIncomeRecords.$inferInsert;
+
+/**
  * 買い増しプラン（価格帯ごとの行動）。
  *
  * ユーザーは「この値段になったらこうする」という段組みで判断している。

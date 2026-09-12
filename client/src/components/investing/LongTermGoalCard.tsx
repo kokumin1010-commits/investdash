@@ -390,10 +390,10 @@ export function LongTermGoalCard(props: Props) {
             </div>
 
             <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
-              <IncomeBox label="現在の年間配当（税引前）" current={progress.annualDividend.currentJpy} target={progress.annualDividend.targetJpy} progressPct={progress.annualDividend.progressPct} />
-              <IncomeBox label="年間利息（見込み）" current={progress.annualInterest.currentJpy} target={progress.annualInterest.targetJpy} progressPct={progress.annualInterest.progressPct} />
-              <IncomeBox label="借入の年間利息" current={progress.annualBorrowingInterestJpy} target={null} negative />
-              <IncomeBox label="年間純キャッシュ収入" current={progress.annualNetCash.currentJpy} target={progress.annualNetCash.targetJpy} progressPct={progress.annualNetCash.progressPct} emphasized />
+              <IncomeBox label="未来の年間配当予想（税引前）" current={progress.annualDividend.currentJpy} target={progress.annualDividend.targetJpy} progressPct={progress.annualDividend.progressPct} />
+              <IncomeBox label="未来の年間利息予想" current={progress.annualInterest.currentJpy} target={progress.annualInterest.targetJpy} progressPct={progress.annualInterest.progressPct} />
+              <IncomeBox label="借入の年間利息予想" current={progress.annualBorrowingInterestJpy} target={null} negative />
+              <IncomeBox label="未来の年間純キャッシュ収入予想" current={progress.annualNetCash.currentJpy} target={progress.annualNetCash.targetJpy} progressPct={progress.annualNetCash.progressPct} emphasized />
             </div>
 
             <div className="rounded-xl border bg-background/75 p-4" data-testid="long-term-scenarios">
@@ -429,7 +429,7 @@ export function LongTermGoalCard(props: Props) {
 
             <p className="flex items-start gap-2 text-xs leading-relaxed text-muted-foreground">
               <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-emerald-700" />
-              純キャッシュ収入は「税引前配当＋利息収入－借入利息」の概算です。税金・手数料・為替差損益は含みません。
+              ここでの収入達成率は「現在保有の配当予想＋現金宝の利息予想－借入利息予想」の未来ランレートです。実際に入金済みの金額は上の実績欄で別に確認し、純資産へ重ねて加算しません。
             </p>
           </>
         ) : (
