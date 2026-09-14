@@ -20,3 +20,7 @@
 |---:|---|---|---|
 | 390px | 通过 | 无（390/390） | `/tmp/investdash-global-stock-search-390.png` |
 | 1280px | 通过 | 无（1265/1265） | `/tmp/investdash-global-stock-search-1280.png` |
+
+## SalesDash正式环境
+
+Railway功能提交 `5cd1861` 于2026-09-14部署到SalesDash正式入口。正式环境以1010认证执行只读验证：`V03` 与 `Venture` 都把 `V03.SI / Venture Corporation Limited` 放在首项，显示“シンガポール株”、SGD价格与日期；390px和1280px均无横向溢出，输入框在固定页头下保持可见。验收脚本未点击添加按钮，`writePerformed=false`。

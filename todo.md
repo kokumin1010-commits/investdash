@@ -407,5 +407,5 @@
 - [x] 搜索结果区分已持有／已观察／未登记，分别进入持仓、定位观察卡或明确确认后加入Watchlist并启动AI提案
 - [x] 修复Watchlist新增弹窗的SGX裸代码搜索，并保存已验证完整symbol
 - [x] 完成V03、5DD、DCRU、日美港台韩、重复状态、无结果及390px／1280px测试；155个测试文件／1207项、TypeScript与production build通过
-- [ ] 推送Railway并完成SalesDash正式V03／Venture双视口只读验收
-- [ ] 更新正式验证文档、GitHub与最终checkpoint
+- [x] 推送Railway并完成SalesDash正式V03／Venture双视口只读验收；功能提交5cd1861，155文件／1207项、类型与构建通过
+- [ ] 更新正式验证文档、GitHub与最终checkpoint；正式5cd1861双视口只读验收已通过
