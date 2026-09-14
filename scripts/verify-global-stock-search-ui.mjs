@@ -205,7 +205,9 @@ async function verify(width, height, port) {
       nameResult,
       recentResult,
       screenshot: screenshotPath,
-      writePerformed: false,
+      recentHistoryRecorded: true,
+      watchlistWritePerformed: false,
+      deletePerformed: false,
     };
   } finally {
     browser.socket.close();
