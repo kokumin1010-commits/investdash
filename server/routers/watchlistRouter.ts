@@ -25,6 +25,7 @@ import {
   listLatestWatchProposals,
   reviewWatchProposal,
 } from "../services/watchProposalService";
+import { resolveSecurityCode } from "../services/securitySearchService";
 
 export const watchlistRouter = router({
   list: protectedProcedure.query(async ({ ctx }) => {
@@ -139,10 +140,33 @@ export const watchlistRouter = router({
       })
     )
     .mutation(async ({ ctx, input }) => {
-      const { symbol, tickerCode, market } = normalizeSymbol(input.code);
-      if (!symbol) throw new TRPCError({ code: "BAD_REQUEST", message: "銘柄コードが不正です" });
+      const rawCode = input.code.trim().toUpperCase();
+      const deterministicLegacyCode =
+        rawCode.includes(".") ||
+        /^[0-9]{4}$/.test(rawCode) ||
+        /^[0-9]{3}[0-9A-Z]$/.test(rawCode);
+      if (deterministicLegacyCode) {
+        const initial = normalizeSymbol(rawCode);
+        const initialExisting = await db.getWatchBySymbol(ctx.user.id, initial.symbol);
+        if (initialExisting) {
+          throw new TRPCError({
+            code: "CONFLICT",
+            message: `${initial.symbol} は既にウォッチリストにあります`,
+          });
+        }
+      }
+      const resolved = await resolveSecurityCode(input.code);
+      if (!resolved) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: `${input.code} の相場情報が見つかりませんでした。会社名、完全な銘柄コード、または市場サフィックスを確認してください。`,
+        });
+      }
+      const { symbol, tickerCode, market } = normalizeSymbol(resolved.symbol);
 
-      const existing = await db.getWatchBySymbol(ctx.user.id, symbol);
+      const existing = deterministicLegacyCode
+        ? null
+        : await db.getWatchBySymbol(ctx.user.id, symbol);
       if (existing) {
         throw new TRPCError({ code: "CONFLICT", message: `${symbol} は既にウォッチリストにあります` });
       }

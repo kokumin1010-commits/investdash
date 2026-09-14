@@ -340,11 +340,89 @@ type ProfileResponse = {
 type SearchResponse = {
   quotes?: Array<{
     symbol?: unknown;
+    shortname?: unknown;
+    longname?: unknown;
+    exchange?: unknown;
+    exchDisp?: unknown;
+    currency?: unknown;
+    regularMarketPrice?: unknown;
+    regularMarketPreviousClose?: unknown;
     sector?: unknown;
     industry?: unknown;
     quoteType?: unknown;
   }>;
 };
+
+export type SecuritySearchHit = {
+  symbol: string;
+  shortName: string | null;
+  longName: string | null;
+  exchange: string | null;
+  exchangeDisplay: string | null;
+  currency: string | null;
+  price: number | null;
+  previousClose: number | null;
+  quoteType: string | null;
+};
+
+/**
+ * Yahoo の公開検索を候補発見にだけ使う。保存前には fetchQuote で実在を再確認する。
+ */
+export async function searchPublicSecurities(
+  query: string,
+  limit = 8
+): Promise<SecuritySearchHit[]> {
+  const normalizedQuery = query.trim();
+  if (!normalizedQuery) return [];
+  const params = new URLSearchParams({
+    q: normalizedQuery,
+    quotesCount: String(Math.max(1, Math.min(limit, 12))),
+    newsCount: "0",
+    listsCount: "0",
+    region: "SG",
+    lang: "en-SG",
+  });
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 15_000);
+  try {
+    const response = await fetch(`${PUBLIC_YAHOO_SEARCH}?${params.toString()}`, {
+      headers: {
+        Accept: "application/json",
+        "User-Agent": "Mozilla/5.0 (compatible; InvestDash/1.0)",
+      },
+      signal: controller.signal,
+    });
+    if (!response.ok) return [];
+    const payload = (await response.json()) as SearchResponse;
+    const allowedTypes = new Set(["EQUITY", "ETF"]);
+    const seen = new Set<string>();
+    const hits: SecuritySearchHit[] = [];
+    for (const raw of payload.quotes ?? []) {
+      const symbol = str(raw.symbol)?.toUpperCase() ?? "";
+      const quoteType = str(raw.quoteType)?.toUpperCase() ?? null;
+      if (!symbol || seen.has(symbol) || (quoteType && !allowedTypes.has(quoteType))) continue;
+      seen.add(symbol);
+      hits.push({
+        symbol,
+        shortName: str(raw.shortname),
+        longName: str(raw.longname),
+        exchange: str(raw.exchange),
+        exchangeDisplay: str(raw.exchDisp),
+        currency: str(raw.currency),
+        price: num(raw.regularMarketPrice),
+        previousClose: num(raw.regularMarketPreviousClose),
+        quoteType,
+      });
+      if (hits.length >= limit) break;
+    }
+    return hits;
+  } catch (error) {
+    console.warn(`[marketData] searchPublicSecurities failed for ${normalizedQuery}:`, error);
+    return [];
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
 function classificationFromQuoteType(quoteType: string | null): {
   sector: string;

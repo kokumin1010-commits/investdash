@@ -91,6 +91,10 @@ import {
 } from "../services/schedulerRunLog";
 import { buildRankedPlanOverview } from "../services/buyPlanRankingService";
 import { buildCandidateCardInsights } from "../services/candidateFinancialService";
+import {
+  resolveSecurityCode,
+  searchSecurityCandidates,
+} from "../services/securitySearchService";
 
 const decimalString = z
   .union([z.number(), z.string()])
@@ -578,12 +582,13 @@ export const portfolioRouter = router({
   lookup: protectedProcedure
     .input(z.object({ code: z.string().min(1).max(24) }))
     .mutation(async ({ ctx, input }) => {
-      const { symbol, tickerCode, market } = normalizeSymbol(input.code);
-      if (!symbol)
+      const resolved = await resolveSecurityCode(input.code);
+      if (!resolved)
         throw new TRPCError({
-          code: "BAD_REQUEST",
-          message: "銘柄コードを入力してください",
+          code: "NOT_FOUND",
+          message: `${input.code} の相場情報が見つかりませんでした。会社名、完全な銘柄コード、または市場サフィックス（例: V03.SI）を確認してください。`,
         });
+      const { symbol, tickerCode, market } = normalizeSymbol(resolved.symbol);
 
       /*
        * 相場プレビューと同時に、現在の利用者がすでに登録している場所も解決する。
@@ -598,7 +603,7 @@ export const portfolioRouter = router({
       if (!quote || quote.price === null) {
         throw new TRPCError({
           code: "NOT_FOUND",
-          message: `${input.code} の相場情報が見つかりませんでした。日本株は4桁コード、米国株はティッカーを入力してください。`,
+          message: `${input.code} の相場情報が見つかりませんでした。会社名、銘柄コード、または市場サフィックスを確認してください。`,
         });
       }
       const profile = await fetchCompanyProfile(symbol);
@@ -635,6 +640,68 @@ export const portfolioRouter = router({
           broker: holding.broker,
         })),
       };
+    }),
+
+  /** 会社名・コードから複数市場を横断して候補を検索する */
+  searchSecurities: protectedProcedure
+    .input(
+      z.object({
+        query: z.string().trim().min(1).max(80),
+        limit: z.number().int().min(1).max(8).default(8),
+      })
+    )
+    .mutation(async ({ ctx, input }) => {
+      const [holdings, watchItems] = await Promise.all([
+        db.listHoldings(ctx.user.id),
+        db.listWatchlist(ctx.user.id),
+      ]);
+      const candidates = await searchSecurityCandidates(
+        input.query,
+        [
+          ...holdings.map(item => ({ symbol: item.symbol, name: item.name })),
+          ...watchItems.map(item => ({ symbol: item.symbol, name: item.name })),
+        ],
+        input.limit
+      );
+      const holdingMap = new Map<string, typeof holdings>();
+      holdings.forEach(item => {
+        const key = item.symbol.toUpperCase();
+        const rows = holdingMap.get(key) ?? [];
+        rows.push(item);
+        holdingMap.set(key, rows);
+      });
+      const watchMap = new Map(
+        watchItems.map(item => [item.symbol.toUpperCase(), item])
+      );
+
+      return candidates.map(candidate => {
+        const existingHoldings = holdingMap.get(candidate.symbol) ?? [];
+        const existingWatch = watchMap.get(candidate.symbol) ?? null;
+        return {
+          ...candidate,
+          registrationStatus:
+            existingHoldings.length > 0
+              ? ("HELD" as const)
+              : existingWatch
+                ? ("WATCHED" as const)
+                : ("UNREGISTERED" as const),
+          existingWatch: existingWatch
+            ? {
+                id: existingWatch.id,
+                symbol: existingWatch.symbol,
+                name: existingWatch.name,
+              }
+            : null,
+          existingHoldings: existingHoldings
+            .sort((a, b) => a.id - b.id)
+            .map(item => ({
+              id: item.id,
+              broker: item.broker,
+              symbol: item.symbol,
+              name: item.name,
+            })),
+        };
+      });
     }),
 
   addHolding: protectedProcedure

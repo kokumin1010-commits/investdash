@@ -25,7 +25,9 @@ vi.mock("@/lib/trpc", () => ({
     },
     watchlist: {
       add: { useMutation: () => ({ mutate: mocks.add, isPending: false }) },
-      update: { useMutation: () => ({ mutate: mocks.update, isPending: false }) },
+      update: {
+        useMutation: () => ({ mutate: mocks.update, isPending: false }),
+      },
     },
   },
 }));
@@ -60,12 +62,17 @@ describe("WatchFormDialog add flow", () => {
         onAdded: vi.fn(),
       })
     );
-    fireEvent.change(screen.getByLabelText("銘柄コード"), { target: { value: "PYPL" } });
+    fireEvent.change(screen.getByLabelText("会社名・銘柄コード"), {
+      target: { value: "PYPL" },
+    });
     expect(screen.queryByLabelText("目標買付価格")).toBeNull();
     expect(screen.queryByLabelText("投資予定額")).toBeNull();
     expect(screen.getByText(/この銘柄だけ先に保存します/)).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "この銘柄を追加" }));
-    expect(mocks.add).toHaveBeenCalledWith({ code: "PYPL", name: "PayPal Holdings, Inc." });
+    expect(mocks.add).toHaveBeenCalledWith({
+      code: "PYPL",
+      name: "PayPal Holdings, Inc.",
+    });
   });
 
   it("replaces add with the existing watch-card action", () => {
@@ -85,7 +92,9 @@ describe("WatchFormDialog add flow", () => {
 
     expect(screen.getByText("ウォッチリスト登録済み")).toBeTruthy();
     expect(screen.queryByRole("button", { name: "この銘柄を追加" })).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "登録済みの銘柄を見る" }));
+    fireEvent.click(
+      screen.getByRole("button", { name: "登録済みの銘柄を見る" })
+    );
     expect(onExistingWatch).toHaveBeenCalledWith(41);
     expect(mocks.add).not.toHaveBeenCalled();
   });
@@ -94,7 +103,12 @@ describe("WatchFormDialog add flow", () => {
     mocks.lookupData = {
       ...mocks.lookupData,
       existingHoldings: [
-        { id: 77, symbol: "PYPL", name: "PayPal Holdings, Inc.", broker: "ibkr" },
+        {
+          id: 77,
+          symbol: "PYPL",
+          name: "PayPal Holdings, Inc.",
+          broker: "ibkr",
+        },
       ],
     };
     const onExistingHolding = vi.fn();
@@ -119,8 +133,18 @@ describe("WatchFormDialog add flow", () => {
       ...mocks.lookupData,
       existingWatch: { id: 41, symbol: "PYPL", name: "PayPal Holdings, Inc." },
       existingHoldings: [
-        { id: 77, symbol: "PYPL", name: "PayPal Holdings, Inc.", broker: "ibkr" },
-        { id: 88, symbol: "PYPL", name: "PayPal Holdings, Inc.", broker: "rakuten" },
+        {
+          id: 77,
+          symbol: "PYPL",
+          name: "PayPal Holdings, Inc.",
+          broker: "ibkr",
+        },
+        {
+          id: 88,
+          symbol: "PYPL",
+          name: "PayPal Holdings, Inc.",
+          broker: "rakuten",
+        },
       ],
     };
     const onExistingWatch = vi.fn();
@@ -138,7 +162,9 @@ describe("WatchFormDialog add flow", () => {
     expect(screen.getByText("ウォッチリスト登録済み")).toBeTruthy();
     expect(screen.getByText("保有銘柄として登録済み")).toBeTruthy();
     expect(screen.getByText(/2口座で保有しています/)).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "ウォッチカードを見る" }));
+    fireEvent.click(
+      screen.getByRole("button", { name: "ウォッチカードを見る" })
+    );
     fireEvent.click(screen.getByRole("button", { name: "保有詳細を見る" }));
     expect(onExistingWatch).toHaveBeenCalledWith(41);
     expect(onExistingHolding).toHaveBeenCalledWith(77);

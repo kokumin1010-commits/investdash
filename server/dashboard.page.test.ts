@@ -11,6 +11,9 @@ const mocks = vi.hoisted(() => ({
   settings: vi.fn(),
   updateSettings: vi.fn(),
   recordDividendIncome: vi.fn(),
+  searchSecurities: vi.fn(),
+  addWatch: vi.fn(),
+  generateWatchProposal: vi.fn(),
   mutateAsync: vi.fn(),
 }));
 
@@ -23,6 +26,7 @@ vi.mock("@/lib/trpc", () => ({
         settings: { invalidate: vi.fn() },
         overview: { invalidate: vi.fn() },
       },
+      watchlist: { invalidate: vi.fn() },
     }),
     portfolio: {
       overview: { useQuery: mocks.overview },
@@ -39,6 +43,16 @@ vi.mock("@/lib/trpc", () => ({
         useMutation: () => ({
           mutate: mocks.recordDividendIncome,
           isPending: false,
+        }),
+      },
+      searchSecurities: {
+        useMutation: () => ({
+          mutate: mocks.searchSecurities,
+          data: [],
+          error: null,
+          isPending: false,
+          isSuccess: false,
+          reset: vi.fn(),
         }),
       },
       dataHealth: { useQuery: () => ({ data: null, isLoading: false }) },
@@ -60,6 +74,20 @@ vi.mock("@/lib/trpc", () => ({
         useMutation: () => ({
           mutate: vi.fn(),
           mutateAsync: mocks.mutateAsync,
+          isPending: false,
+        }),
+      },
+    },
+    watchlist: {
+      add: {
+        useMutation: () => ({
+          mutate: mocks.addWatch,
+          isPending: false,
+        }),
+      },
+      generateProposal: {
+        useMutation: () => ({
+          mutate: mocks.generateWatchProposal,
           isPending: false,
         }),
       },

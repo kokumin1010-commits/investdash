@@ -399,3 +399,13 @@
 - [x] 为多券商、多币种、截图缺失、跨月、累计值回退、重复截图、低置信度及390px／1280px补充测试；152个测试文件、1195项通过
 - [x] 运行完整Vitest、TypeScript与production build，同步Railway并完成SalesDash正式只读验收；正式功能提交5b380d9，152个测试文件／1195项通过
 - [x] 更新验证文档与GitHub，最终checkpoint在本次交付保存；正式版本5b380d9双视口只读验收通过
+- [x] 核对两张苹果供应链图片中的上市公司与正式代码，去重后加入SalesDash正式Watchlist；17只上市标的新增成功、0重复，日亚化因非上市排除
+- [x] 基于真实全账户持仓、IBKR借款、新加坡现有仓位和8万新币现金，完成15只候选的巴菲特式护城河／财务韧性／估值安全边际比较，并给出Singtel、CICT、Keppel DC REIT首买股数、金额、买后权重、分批与暂停条件
+- [x] 审计Dashboard顶部、Watchlist新增、portfolio.lookup和证券代码标准化，确认V03被默认当作美股是根因
+- [x] 实现顶部全市场股票搜索，支持公司名／代码和日本、美国、新加坡、香港、台湾、韩国候选
+- [x] 输入V03／5DD／DCRU等SGX裸代码时自动验证`.SI`，显示名称、市场、币种、价格与数据日期
+- [x] 搜索结果区分已持有／已观察／未登记，分别进入持仓、定位观察卡或明确确认后加入Watchlist并启动AI提案
+- [x] 修复Watchlist新增弹窗的SGX裸代码搜索，并保存已验证完整symbol
+- [x] 完成V03、5DD、DCRU、日美港台韩、重复状态、无结果及390px／1280px测试；155个测试文件／1207项、TypeScript与production build通过
+- [ ] 推送Railway并完成SalesDash正式V03／Venture双视口只读验收
+- [ ] 更新正式验证文档、GitHub与最终checkpoint

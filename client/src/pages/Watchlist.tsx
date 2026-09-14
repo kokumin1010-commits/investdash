@@ -1567,7 +1567,7 @@ export function WatchFormDialog({
           <DialogDescription>
             {isEdit
               ? "目標価格や買付条件を更新できます。"
-              : "最初は銘柄コードだけで追加できます。追加後、AI の下書きを確認してから目標価格や買付条件を保存します。"}
+              : "会社名または銘柄コードで検索できます。SGXは V03 のような裸コードにも対応します。追加後、AI の下書きを確認してから目標価格や買付条件を保存します。"}
           </DialogDescription>
         </DialogHeader>
 
@@ -1582,7 +1582,7 @@ export function WatchFormDialog({
         <div className="space-y-4">
           {!isEdit ? (
             <div className="space-y-2">
-              <Label htmlFor="w-code">銘柄コード</Label>
+              <Label htmlFor="w-code">会社名・銘柄コード</Label>
               <div className="flex gap-2">
                 <Input
                   id="w-code"
@@ -1591,7 +1591,7 @@ export function WatchFormDialog({
                     setCode(e.target.value);
                     if (lookup.data) lookup.reset();
                   }}
-                  placeholder="7203 / MSFT"
+                  placeholder="V03 / Venture / 7203 / MSFT"
                   onKeyDown={e => {
                     if (e.key === "Enter" && code.trim()) {
                       e.preventDefault();
@@ -1766,7 +1766,7 @@ export function WatchFormDialog({
                 if (isEdit) {
                   update.mutate({ id: editing!.id, ...payload });
                 } else {
-                  add.mutate({ code: code.trim(), name: preview?.name });
+                  add.mutate({ code: preview?.symbol ?? code.trim(), name: preview?.name });
                 }
               }}
             >

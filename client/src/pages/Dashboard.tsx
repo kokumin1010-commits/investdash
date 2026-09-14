@@ -82,6 +82,7 @@ import { DataHealthCard } from "@/components/investing/DataHealthCard";
 import { AttentionEmptyState } from "@/components/investing/AttentionEmptyState";
 import { LongTermGoalCard } from "@/components/investing/LongTermGoalCard";
 import { CashIncomeCard } from "@/components/investing/CashIncomeCard";
+import { GlobalStockSearch } from "@/components/investing/GlobalStockSearch";
 
 export default function Dashboard() {
   const utils = trpc.useUtils();
@@ -589,18 +590,19 @@ export default function Dashboard() {
 
   return (
     <div className="mx-auto max-w-[1400px] space-y-6 pb-10">
-      <header className="flex flex-wrap items-end justify-between gap-4">
-        <div className="space-y-1">
-          <h1 className="text-2xl font-semibold tracking-tight">
-            総資産ダッシュボード
-          </h1>
-          <p className="text-sm text-muted-foreground">
-            {summary?.lastPriceSyncAt
-              ? `株価最終更新: ${new Date(summary.lastPriceSyncAt).toLocaleString("ja-JP")}`
-              : "株価はまだ更新されていません"}
-          </p>
-        </div>
-        <div className="flex flex-wrap gap-2">
+      <header className="space-y-3">
+        <div className="flex flex-wrap items-end justify-between gap-4">
+          <div className="space-y-1">
+            <h1 className="text-2xl font-semibold tracking-tight">
+              総資産ダッシュボード
+            </h1>
+            <p className="text-sm text-muted-foreground">
+              {summary?.lastPriceSyncAt
+                ? `株価最終更新: ${new Date(summary.lastPriceSyncAt).toLocaleString("ja-JP")}`
+                : "株価はまだ更新されていません"}
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-2">
           {/*
             金額の表示通貨。保有一覧と同じ選択を共有するので、
             どちらの画面でも同じ通貨で数字を突き合わせられる。
@@ -661,7 +663,9 @@ export default function Dashboard() {
               ? `AI分析中 ${signalRun.progress.processed}/${signalRun.progress.total || "…"}`
               : "全銘柄をAI分析"}
           </Button>
+          </div>
         </div>
+        <GlobalStockSearch />
       </header>
 
       {isEmpty ? (
