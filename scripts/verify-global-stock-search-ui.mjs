@@ -160,6 +160,31 @@ async function verify(width, height, port) {
         clientWidth: document.documentElement.clientWidth,
       };
     })()`);
+
+    await browser.evalValue(`(() => {
+      const input = document.querySelector('#global-stock-query');
+      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
+      setter?.call(input, '');
+      input?.dispatchEvent(new Event('input', { bubbles: true }));
+    })()`);
+    await browser.waitUntil(
+      "recent V03.SI search",
+      `Boolean(document.querySelector('[data-testid="recent-stock-search-V03.SI"]'))`
+    );
+    const recentResult = await browser.evalValue(`(() => {
+      const region = document.querySelector('[data-testid="recent-stock-searches"]');
+      const rows = [...document.querySelectorAll('[data-testid^="recent-stock-search-"]')];
+      const node = document.querySelector('[data-testid="recent-stock-search-V03.SI"]');
+      const text = node?.innerText ?? '';
+      return {
+        region: Boolean(region),
+        oneVenture: rows.filter(row => row.getAttribute('data-testid') === 'recent-stock-search-V03.SI').length === 1,
+        name: text.includes('Venture Corporation Limited'),
+        symbol: text.includes('V03.SI'),
+        market: text.includes('シンガポール株'),
+        clearAction: Boolean([...document.querySelectorAll('button')].find(button => button.textContent?.includes('すべて削除'))),
+      };
+    })()`);
     await browser.evalValue(
       `document.querySelector('[data-testid="global-stock-search"]')?.scrollIntoView({ block: 'start' })`
     );
@@ -171,12 +196,14 @@ async function verify(width, height, port) {
       nameResult.topSearch &&
       nameResult.inputVisible &&
       nameResult.noInvalid &&
-      nameResult.scrollWidth <= nameResult.clientWidth;
+      nameResult.scrollWidth <= nameResult.clientWidth &&
+      Object.values(recentResult).every(Boolean);
     return {
       width,
       passed,
       codeResult,
       nameResult,
+      recentResult,
       screenshot: screenshotPath,
       writePerformed: false,
     };

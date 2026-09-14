@@ -18,6 +18,7 @@ import {
   candidateSuggestions,
   monthlyHoldings,
   monthlySnapshots,
+  recentSecuritySearches,
   systemEvents,
   type Holding,
   type InsertHolding,
@@ -32,10 +33,12 @@ import {
   type InsertInterestAssetIncomeSnapshot,
   type InsertCashIncomeRecord,
   type InsertCandidateSuggestion,
+  type InsertRecentSecuritySearch,
   type InsertSystemEvent,
 } from "../drizzle/schema";
 import { ENV } from "./_core/env";
 import { jstDayBounds } from "../shared/jstDate";
+import { recentSecuritySearchIdsToPrune } from "../shared/securitySearch";
 
 let _db: ReturnType<typeof drizzle> | null = null;
 
@@ -55,6 +58,64 @@ async function requireDb() {
   const db = await getDb();
   if (!db) throw new Error("データベースに接続できません");
   return db;
+}
+
+export async function listRecentSecuritySearches(userId: number, limit = 8) {
+  const db = await requireDb();
+  return db
+    .select()
+    .from(recentSecuritySearches)
+    .where(eq(recentSecuritySearches.userId, userId))
+    .orderBy(desc(recentSecuritySearches.searchedAt), desc(recentSecuritySearches.id))
+    .limit(Math.min(Math.max(limit, 1), 8));
+}
+
+export async function recordRecentSecuritySearch(
+  entry: Omit<InsertRecentSecuritySearch, "id" | "createdAt" | "updatedAt" | "searchedAt">
+) {
+  const db = await requireDb();
+  const searchedAt = new Date();
+  await db
+    .insert(recentSecuritySearches)
+    .values({ ...entry, searchedAt })
+    .onDuplicateKeyUpdate({
+      set: {
+        tickerCode: entry.tickerCode,
+        name: entry.name,
+        market: entry.market,
+        currency: entry.currency ?? null,
+        searchedAt,
+      },
+    });
+
+  const ordered = await db
+    .select({ id: recentSecuritySearches.id })
+    .from(recentSecuritySearches)
+    .where(eq(recentSecuritySearches.userId, entry.userId))
+    .orderBy(desc(recentSecuritySearches.searchedAt), desc(recentSecuritySearches.id));
+  const staleIds = recentSecuritySearchIdsToPrune(ordered, 8);
+  if (staleIds.length > 0) {
+    await db
+      .delete(recentSecuritySearches)
+      .where(
+        and(
+          eq(recentSecuritySearches.userId, entry.userId),
+          inArray(recentSecuritySearches.id, staleIds)
+        )
+      );
+  }
+}
+
+export async function deleteRecentSecuritySearch(userId: number, id: number) {
+  const db = await requireDb();
+  await db
+    .delete(recentSecuritySearches)
+    .where(and(eq(recentSecuritySearches.userId, userId), eq(recentSecuritySearches.id, id)));
+}
+
+export async function clearRecentSecuritySearches(userId: number) {
+  const db = await requireDb();
+  await db.delete(recentSecuritySearches).where(eq(recentSecuritySearches.userId, userId));
 }
 
 /** symbol ごとに、保有が確認できる最古の月次スナップショット日時を返す。 */

@@ -34,6 +34,13 @@ export function displayTickerForSearch(symbol: string): string {
   return symbol.trim().toUpperCase().split(".")[0] ?? symbol;
 }
 
+export function recentSecuritySearchIdsToPrune<T extends { id: number }>(
+  orderedNewestFirst: readonly T[],
+  limit = 8
+): number[] {
+  return orderedNewestFirst.slice(Math.max(0, limit)).map(item => item.id);
+}
+
 /**
  * コードだけを入力したときに、相場の存在確認に使う候補。
  * 推測した値を保存せず、実在する相場だけを採用する前提で使う。

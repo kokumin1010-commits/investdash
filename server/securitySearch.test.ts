@@ -3,6 +3,7 @@ import {
   buildDirectSecurityCandidates,
   displayTickerForSearch,
   inferSecuritySearchMarket,
+  recentSecuritySearchIdsToPrune,
   securitySearchMarketLabel,
 } from "../shared/securitySearch";
 
@@ -61,6 +62,12 @@ describe("security search market rules", () => {
     expect(inferSecuritySearchMarket("005930.KS")).toBe("KR");
     expect(securitySearchMarketLabel("SG")).toBe("シンガポール株");
     expect(displayTickerForSearch("V03.SI")).toBe("V03");
+  });
+
+  it("keeps the newest eight recent searches and prunes only older ids", () => {
+    const ordered = Array.from({ length: 11 }, (_, index) => ({ id: index + 1 }));
+    expect(recentSecuritySearchIdsToPrune(ordered, 8)).toEqual([9, 10, 11]);
+    expect(recentSecuritySearchIdsToPrune(ordered.slice(0, 8), 8)).toEqual([]);
   });
 
   it("resolves V03 to the validated SGX quote instead of inventing a US quote", async () => {

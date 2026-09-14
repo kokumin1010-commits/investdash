@@ -6,9 +6,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   searchMutate: vi.fn(),
   addMutate: vi.fn(),
+  clearRecentMutate: vi.fn(),
+  deleteRecentMutate: vi.fn(),
   generateMutate: vi.fn(),
   navigate: vi.fn(),
+  searchSuccess: true,
   searchResult: [] as Array<Record<string, unknown>>,
+  recentResult: [] as Array<Record<string, unknown>>,
 }));
 
 vi.mock("wouter", () => ({
@@ -17,15 +21,27 @@ vi.mock("wouter", () => ({
 
 vi.mock("@/lib/trpc", () => ({
   trpc: {
-    useUtils: () => ({ watchlist: { invalidate: vi.fn() } }),
+    useUtils: () => ({
+      watchlist: { invalidate: vi.fn() },
+      portfolio: { recentSecuritySearches: { invalidate: vi.fn() } },
+    }),
     portfolio: {
+      recentSecuritySearches: {
+        useQuery: () => ({ data: mocks.recentResult }),
+      },
+      deleteRecentSecuritySearch: {
+        useMutation: () => ({ mutate: mocks.deleteRecentMutate, isPending: false }),
+      },
+      clearRecentSecuritySearches: {
+        useMutation: () => ({ mutate: mocks.clearRecentMutate, isPending: false }),
+      },
       searchSecurities: {
         useMutation: () => ({
           mutate: mocks.searchMutate,
-          data: mocks.searchResult,
+          data: mocks.searchSuccess ? mocks.searchResult : undefined,
           error: null,
           isPending: false,
-          isSuccess: true,
+          isSuccess: mocks.searchSuccess,
           reset: vi.fn(),
         }),
       },
@@ -63,7 +79,9 @@ const baseResult = {
 beforeEach(() => {
   vi.stubGlobal("React", React);
   vi.clearAllMocks();
+  mocks.searchSuccess = true;
   mocks.searchResult = [baseResult];
+  mocks.recentResult = [];
 });
 
 afterEach(() => cleanup());
@@ -120,5 +138,56 @@ describe("GlobalStockSearch", () => {
     fireEvent.click(screen.getByRole("button", { name: /ウォッチカードを見る/ }));
     expect(mocks.navigate).toHaveBeenCalledWith("/watchlist?focus=9");
     expect(mocks.addMutate).not.toHaveBeenCalled();
+  });
+
+  for (const width of [390, 1280]) {
+    it(`shows recent searches and reruns the selected symbol at ${width}px`, () => {
+      Object.defineProperty(window, "innerWidth", { configurable: true, value: width });
+      mocks.searchSuccess = false;
+      mocks.recentResult = [
+        {
+          id: 7,
+          symbol: "V03.SI",
+          tickerCode: "V03",
+          name: "Venture Corporation Limited",
+          market: "SG",
+          currency: "SGD",
+          searchedAt: new Date("2026-09-14T00:00:00Z"),
+        },
+      ];
+
+      render(<GlobalStockSearch />);
+      expect(screen.getByText("最近の検索")).toBeTruthy();
+      fireEvent.click(screen.getByText("Venture Corporation Limited"));
+      expect(mocks.searchMutate).toHaveBeenCalledWith({ query: "V03.SI", limit: 8 });
+      expect(
+        (screen.getByLabelText("会社名または銘柄コードを検索") as HTMLInputElement)
+          .value
+      ).toBe("V03.SI");
+    });
+  }
+
+  it("deletes one recent item or clears all items only after an explicit click", () => {
+    mocks.searchSuccess = false;
+    mocks.recentResult = [
+      {
+        id: 7,
+        symbol: "V03.SI",
+        tickerCode: "V03",
+        name: "Venture Corporation Limited",
+        market: "SG",
+        currency: "SGD",
+        searchedAt: new Date("2026-09-14T00:00:00Z"),
+      },
+    ];
+    render(<GlobalStockSearch />);
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Venture Corporation Limitedを最近の検索から削除" })
+    );
+    expect(mocks.deleteRecentMutate).toHaveBeenCalledWith({ id: 7 });
+
+    fireEvent.click(screen.getByRole("button", { name: "すべて削除" }));
+    expect(mocks.clearRecentMutate).toHaveBeenCalledTimes(1);
   });
 });

@@ -12,6 +12,8 @@ const mocks = vi.hoisted(() => ({
   updateSettings: vi.fn(),
   recordDividendIncome: vi.fn(),
   searchSecurities: vi.fn(),
+  deleteRecentSecuritySearch: vi.fn(),
+  clearRecentSecuritySearches: vi.fn(),
   addWatch: vi.fn(),
   generateWatchProposal: vi.fn(),
   mutateAsync: vi.fn(),
@@ -25,6 +27,7 @@ vi.mock("@/lib/trpc", () => ({
         invalidate: vi.fn(),
         settings: { invalidate: vi.fn() },
         overview: { invalidate: vi.fn() },
+        recentSecuritySearches: { invalidate: vi.fn() },
       },
       watchlist: { invalidate: vi.fn() },
     }),
@@ -53,6 +56,21 @@ vi.mock("@/lib/trpc", () => ({
           isPending: false,
           isSuccess: false,
           reset: vi.fn(),
+        }),
+      },
+      recentSecuritySearches: {
+        useQuery: () => ({ data: [] }),
+      },
+      deleteRecentSecuritySearch: {
+        useMutation: () => ({
+          mutate: mocks.deleteRecentSecuritySearch,
+          isPending: false,
+        }),
+      },
+      clearRecentSecuritySearches: {
+        useMutation: () => ({
+          mutate: mocks.clearRecentSecuritySearches,
+          isPending: false,
         }),
       },
       dataHealth: { useQuery: () => ({ data: null, isLoading: false }) },

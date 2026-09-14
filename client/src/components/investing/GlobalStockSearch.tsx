@@ -3,13 +3,16 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { trpc } from "@/lib/trpc";
 import { formatMoney } from "@shared/investing";
+import { securitySearchMarketLabel } from "@shared/securitySearch";
 import {
   ArrowRight,
   BriefcaseBusiness,
   Eye,
+  History,
   Loader2,
   Plus,
   Search,
+  Trash2,
 } from "lucide-react";
 import { FormEvent, useState } from "react";
 import { toast } from "sonner";
@@ -26,7 +29,17 @@ export function GlobalStockSearch() {
   const [, setLocation] = useLocation();
   const [query, setQuery] = useState("");
   const [pendingSymbol, setPendingSymbol] = useState<string | null>(null);
+  const recent = trpc.portfolio.recentSecuritySearches.useQuery();
   const search = trpc.portfolio.searchSecurities.useMutation({
+    onSuccess: () => utils.portfolio.recentSecuritySearches.invalidate(),
+    onError: error => toast.error(error.message),
+  });
+  const deleteRecent = trpc.portfolio.deleteRecentSecuritySearch.useMutation({
+    onSuccess: () => utils.portfolio.recentSecuritySearches.invalidate(),
+    onError: error => toast.error(error.message),
+  });
+  const clearRecent = trpc.portfolio.clearRecentSecuritySearches.useMutation({
+    onSuccess: () => utils.portfolio.recentSecuritySearches.invalidate(),
     onError: error => toast.error(error.message),
   });
   const generateProposal = trpc.watchlist.generateProposal.useMutation({
@@ -46,11 +59,15 @@ export function GlobalStockSearch() {
     onSettled: () => setPendingSymbol(null),
   });
 
-  const submit = (event?: FormEvent) => {
-    event?.preventDefault();
-    const normalized = query.trim();
+  const runSearch = (value: string) => {
+    const normalized = value.trim();
     if (!normalized || search.isPending) return;
     search.mutate({ query: normalized, limit: 8 });
+  };
+
+  const submit = (event?: FormEvent) => {
+    event?.preventDefault();
+    runSearch(query);
   };
 
   const results = search.data ?? [];
@@ -99,6 +116,67 @@ export function GlobalStockSearch() {
       <p className="mt-1.5 text-[11px] leading-relaxed text-muted-foreground">
         日本・米国・シンガポール・香港・台湾・韓国に対応。SGXは V03 のような裸コードでも検索できます。
       </p>
+
+      {!search.isSuccess && (recent.data?.length ?? 0) > 0 ? (
+        <div
+          className="mt-3 rounded-xl border bg-white/75 p-3 dark:bg-slate-950/60"
+          role="region"
+          aria-label="最近の株式検索"
+          data-testid="recent-stock-searches"
+        >
+          <div className="mb-2 flex items-center justify-between gap-3">
+            <div className="flex items-center gap-2 text-sm font-semibold">
+              <History className="h-4 w-4 text-emerald-700 dark:text-emerald-300" />
+              最近の検索
+            </div>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="h-7 px-2 text-xs text-muted-foreground"
+              disabled={clearRecent.isPending}
+              onClick={() => clearRecent.mutate()}
+            >
+              すべて削除
+            </Button>
+          </div>
+          <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+            {recent.data?.map(item => (
+              <div
+                key={item.id}
+                className="flex min-w-0 items-center gap-1 rounded-lg border bg-background/90 p-1"
+                data-testid={`recent-stock-search-${item.symbol}`}
+              >
+                <button
+                  type="button"
+                  className="min-w-0 flex-1 rounded-md px-2 py-1.5 text-left transition-colors hover:bg-emerald-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600 dark:hover:bg-emerald-950/40"
+                  onClick={() => {
+                    setQuery(item.symbol);
+                    runSearch(item.symbol);
+                  }}
+                >
+                  <span className="block truncate text-xs font-semibold">{item.name}</span>
+                  <span className="mt-0.5 flex items-center gap-1.5 text-[10px] text-muted-foreground">
+                    <span className="font-mono">{item.symbol}</span>
+                    <span>{securitySearchMarketLabel(item.market)}</span>
+                  </span>
+                </button>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  className="h-8 w-8 shrink-0 text-muted-foreground hover:text-destructive"
+                  aria-label={`${item.name}を最近の検索から削除`}
+                  disabled={deleteRecent.isPending}
+                  onClick={() => deleteRecent.mutate({ id: item.id })}
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                </Button>
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : null}
 
       {search.isSuccess ? (
         <div className="mt-3 space-y-2" role="region" aria-label="株式検索結果">

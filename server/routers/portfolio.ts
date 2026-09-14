@@ -643,6 +643,22 @@ export const portfolioRouter = router({
     }),
 
   /** 会社名・コードから複数市場を横断して候補を検索する */
+  recentSecuritySearches: protectedProcedure.query(async ({ ctx }) =>
+    db.listRecentSecuritySearches(ctx.user.id, 8)
+  ),
+
+  deleteRecentSecuritySearch: protectedProcedure
+    .input(z.object({ id: z.number().int().positive() }))
+    .mutation(async ({ ctx, input }) => {
+      await db.deleteRecentSecuritySearch(ctx.user.id, input.id);
+      return { success: true } as const;
+    }),
+
+  clearRecentSecuritySearches: protectedProcedure.mutation(async ({ ctx }) => {
+    await db.clearRecentSecuritySearches(ctx.user.id);
+    return { success: true } as const;
+  }),
+
   searchSecurities: protectedProcedure
     .input(
       z.object({
@@ -674,7 +690,7 @@ export const portfolioRouter = router({
         watchItems.map(item => [item.symbol.toUpperCase(), item])
       );
 
-      return candidates.map(candidate => {
+      const results = candidates.map(candidate => {
         const existingHoldings = holdingMap.get(candidate.symbol) ?? [];
         const existingWatch = watchMap.get(candidate.symbol) ?? null;
         return {
@@ -702,6 +718,24 @@ export const portfolioRouter = router({
             })),
         };
       });
+
+      const first = results[0];
+      if (first) {
+        try {
+          await db.recordRecentSecuritySearch({
+            userId: ctx.user.id,
+            symbol: first.symbol,
+            tickerCode: first.tickerCode,
+            name: first.name,
+            market: first.market,
+            currency: first.currency,
+          });
+        } catch (error) {
+          console.warn("[security search] failed to save recent item", error);
+        }
+      }
+
+      return results;
     }),
 
   addHolding: protectedProcedure

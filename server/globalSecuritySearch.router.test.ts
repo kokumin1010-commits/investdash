@@ -6,6 +6,10 @@ const mocks = vi.hoisted(() => ({
   listWatchlist: vi.fn(),
   getWatchBySymbol: vi.fn(),
   insertWatchItem: vi.fn(),
+  listRecentSecuritySearches: vi.fn(),
+  recordRecentSecuritySearch: vi.fn(),
+  deleteRecentSecuritySearch: vi.fn(),
+  clearRecentSecuritySearches: vi.fn(),
   searchSecurityCandidates: vi.fn(),
   resolveSecurityCode: vi.fn(),
   fetchQuote: vi.fn(),
@@ -20,6 +24,10 @@ vi.mock("./db", async importOriginal => {
     listWatchlist: mocks.listWatchlist,
     getWatchBySymbol: mocks.getWatchBySymbol,
     insertWatchItem: mocks.insertWatchItem,
+    listRecentSecuritySearches: mocks.listRecentSecuritySearches,
+    recordRecentSecuritySearch: mocks.recordRecentSecuritySearch,
+    deleteRecentSecuritySearch: mocks.deleteRecentSecuritySearch,
+    clearRecentSecuritySearches: mocks.clearRecentSecuritySearches,
   };
 });
 
@@ -83,6 +91,10 @@ beforeEach(() => {
   mocks.listWatchlist.mockResolvedValue([]);
   mocks.getWatchBySymbol.mockResolvedValue(null);
   mocks.insertWatchItem.mockResolvedValue(91);
+  mocks.listRecentSecuritySearches.mockResolvedValue([]);
+  mocks.recordRecentSecuritySearch.mockResolvedValue(undefined);
+  mocks.deleteRecentSecuritySearch.mockResolvedValue(undefined);
+  mocks.clearRecentSecuritySearches.mockResolvedValue(undefined);
   mocks.searchSecurityCandidates.mockResolvedValue([ventureCandidate]);
   mocks.resolveSecurityCode.mockResolvedValue(ventureCandidate);
   mocks.fetchQuote.mockResolvedValue({
@@ -110,7 +122,7 @@ beforeEach(() => {
 });
 
 describe("portfolio.searchSecurities", () => {
-  it("uses only the authenticated user's holdings and watchlist", async () => {
+  it("uses only the authenticated user's portfolio and records the verified first result", async () => {
     await createCaller(37).portfolio.searchSecurities({ query: "V03", limit: 8 });
     await createCaller(88).portfolio.searchSecurities({ query: "5DD", limit: 5 });
 
@@ -119,6 +131,10 @@ describe("portfolio.searchSecurities", () => {
     expect(mocks.searchSecurityCandidates.mock.calls).toEqual([
       ["V03", [], 8],
       ["5DD", [], 5],
+    ]);
+    expect(mocks.recordRecentSecuritySearch.mock.calls).toEqual([
+      [expect.objectContaining({ userId: 37, symbol: "V03.SI" })],
+      [expect.objectContaining({ userId: 88, symbol: "V03.SI" })],
     ]);
   });
 
@@ -141,6 +157,34 @@ describe("portfolio.searchSecurities", () => {
       existingWatch: { id: 9 },
       existingHoldings: [{ id: 42, broker: "ibkr" }],
     });
+  });
+
+  it("does not record an unsuccessful search", async () => {
+    mocks.searchSecurityCandidates.mockResolvedValue([]);
+    const result = await createCaller().portfolio.searchSecurities({
+      query: "NOT-A-STOCK",
+      limit: 8,
+    });
+    expect(result).toEqual([]);
+    expect(mocks.recordRecentSecuritySearch).not.toHaveBeenCalled();
+  });
+});
+
+describe("portfolio recent security searches", () => {
+  it("lists, deletes and clears only the authenticated user's records", async () => {
+    mocks.listRecentSecuritySearches.mockResolvedValue([
+      { id: 7, userId: 37, symbol: "V03.SI", name: "Venture" },
+    ]);
+    const caller = createCaller(37);
+
+    const listed = await caller.portfolio.recentSecuritySearches();
+    await caller.portfolio.deleteRecentSecuritySearch({ id: 7 });
+    await caller.portfolio.clearRecentSecuritySearches();
+
+    expect(listed).toHaveLength(1);
+    expect(mocks.listRecentSecuritySearches).toHaveBeenCalledWith(37, 8);
+    expect(mocks.deleteRecentSecuritySearch).toHaveBeenCalledWith(37, 7);
+    expect(mocks.clearRecentSecuritySearches).toHaveBeenCalledWith(37);
   });
 });
 

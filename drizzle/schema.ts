@@ -1330,6 +1330,39 @@ export type SystemEvent = typeof systemEvents.$inferSelect;
 export type InsertSystemEvent = typeof systemEvents.$inferInsert;
 
 /**
+ * トップ検索で正常に解決できた銘柄の直近履歴。
+ * 検索文字列そのものではなく、相場で検証済みの銘柄実体だけを保存する。
+ */
+export const recentSecuritySearches = mysqlTable(
+  "recentSecuritySearches",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    userId: int("userId").notNull(),
+    symbol: varchar("symbol", { length: 24 }).notNull(),
+    tickerCode: varchar("tickerCode", { length: 16 }).notNull(),
+    name: varchar("name", { length: 160 }).notNull(),
+    market: mysqlEnum("market", ["JP", "US", "SG", "HK", "TW", "KR", "OTHER"]).notNull(),
+    currency: varchar("currency", { length: 8 }),
+    searchedAt: timestamp("searchedAt").defaultNow().notNull(),
+    createdAt: timestamp("createdAt").defaultNow().notNull(),
+    updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+  },
+  table => ({
+    userSymbolUnique: uniqueIndex("recent_security_searches_user_symbol_unique").on(
+      table.userId,
+      table.symbol
+    ),
+    userSearchedIdx: index("recent_security_searches_user_searched_idx").on(
+      table.userId,
+      table.searchedAt
+    ),
+  })
+);
+
+export type RecentSecuritySearch = typeof recentSecuritySearches.$inferSelect;
+export type InsertRecentSecuritySearch = typeof recentSecuritySearches.$inferInsert;
+
+/**
  * 簡易パスコード認証。
  *
  * Manus OAuth の代わりに、4〜6 桁の数字だけでアクセスできるようにする。
