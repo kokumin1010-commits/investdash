@@ -408,4 +408,4 @@
 - [x] 修复Watchlist新增弹窗的SGX裸代码搜索，并保存已验证完整symbol
 - [x] 完成V03、5DD、DCRU、日美港台韩、重复状态、无结果及390px／1280px测试；155个测试文件／1207项、TypeScript与production build通过
 - [x] 推送Railway并完成SalesDash正式V03／Venture双视口只读验收；功能提交5cd1861，155文件／1207项、类型与构建通过
-- [ ] 更新正式验证文档、GitHub与最终checkpoint；正式5cd1861双视口只读验收已通过
+- [x] 更新正式验证文档与GitHub；正式功能5cd1861、验证提交1541328均已上线，最终checkpoint在本次交付保存
