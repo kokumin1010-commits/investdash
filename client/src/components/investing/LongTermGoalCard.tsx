@@ -352,9 +352,9 @@ export function LongTermGoalCard(props: Props) {
                     </p>
                     <p className="mt-1 text-xs text-muted-foreground">{oku(progress.currentNetAssetsJpy)}</p>
                     <div className="mt-3 grid gap-1 text-xs sm:grid-cols-3">
-                      <TrendLine label="前日比" amount={netAssetsTrend?.dayChangeJpy ?? null} pct={netAssetsTrend?.dayChangePct ?? null} unavailable="前日値未取得" />
-                      <TrendLine label="7日比" amount={netAssetsTrend?.sevenDayChangeJpy ?? null} pct={netAssetsTrend?.sevenDayChangePct ?? null} unavailable="7日前未取得" />
-                      <TrendLine label="30日比" amount={netAssetsTrend?.thirtyDayChangeJpy ?? null} pct={netAssetsTrend?.thirtyDayChangePct ?? null} unavailable="30日前未取得" />
+                      <TrendLine label="前日／前回比" amount={netAssetsTrend?.dayChangeJpy ?? null} pct={netAssetsTrend?.dayChangePct ?? null} unavailable="前回値未取得" />
+                      <TrendLine label="7日比" amount={netAssetsTrend?.sevenDayChangeJpy ?? null} pct={netAssetsTrend?.sevenDayChangePct ?? null} unavailable="7日前未取得" basisDate={netAssetsTrend?.sevenDayAsOfDate ?? null} />
+                      <TrendLine label="30日比" amount={netAssetsTrend?.thirtyDayChangeJpy ?? null} pct={netAssetsTrend?.thirtyDayChangePct ?? null} unavailable="30日前未取得" basisDate={netAssetsTrend?.thirtyDayAsOfDate ?? null} />
                     </div>
                     {netAssetsTrend?.previousJpy !== null && netAssetsTrend?.previousJpy !== undefined ? <p className="mt-2 text-[11px] text-muted-foreground">前日純資産 {yen(netAssetsTrend.previousJpy)}（{netAssetsTrend.previousAsOfDate}）</p> : null}
                   </div>
@@ -491,18 +491,20 @@ function TrendLine({
   amount,
   pct,
   unavailable,
+  basisDate = null,
 }: {
   label: string;
   amount: number | null;
   pct: number | null;
   unavailable: string;
+  basisDate?: string | null;
 }) {
   if (amount === null)
     return <p className="text-muted-foreground">{label} {unavailable}</p>;
   const positive = amount >= 0;
   return (
     <p className={`tabular font-medium ${positive ? "text-emerald-700" : "text-loss"}`}>
-      {label} {positive ? "+" : ""}{yen(amount)} {pct === null ? "" : `(${positive ? "+" : ""}${pct.toFixed(2)}%)`}
+      {label}{basisDate ? `（${basisDate}基準）` : ""} {positive ? "+" : ""}{yen(amount)} {pct === null ? "" : `(${positive ? "+" : ""}${pct.toFixed(2)}%)`}
     </p>
   );
 }

@@ -413,6 +413,11 @@ export type DailyCashFlowSnapshotLike = {
   annualNetCashJpy: string | number | null;
 };
 
+export type PortfolioNetAssetSnapshotLike = {
+  capturedAt: Date;
+  netAssets: string | number | null;
+};
+
 function dateOffset(date: string, days: number): string {
   const value = new Date(`${date}T00:00:00+09:00`);
   value.setUTCDate(value.getUTCDate() + days);
@@ -424,15 +429,38 @@ function dateOffset(date: string, days: number): string {
   }).format(value);
 }
 
+export function mergeCashFlowAndPortfolioSnapshots(
+  cashFlowSnapshots: DailyCashFlowSnapshotLike[],
+  portfolioSnapshots: PortfolioNetAssetSnapshotLike[]
+): DailyCashFlowSnapshotLike[] {
+  const byDate = new Map<string, DailyCashFlowSnapshotLike>();
+  for (const row of portfolioSnapshots) {
+    if (finite(row.netAssets) === null) continue;
+    const asOfDate = jstDate(row.capturedAt);
+    byDate.set(asOfDate, {
+      asOfDate,
+      netAssetsJpy: row.netAssets!,
+      annualDividendJpy: null,
+      annualInterestJpy: null,
+      annualBorrowingInterestJpy: null,
+      annualNetCashJpy: null,
+    });
+  }
+  for (const row of cashFlowSnapshots) byDate.set(row.asOfDate, row);
+  return Array.from(byDate.values()).sort((a, b) => b.asOfDate.localeCompare(a.asOfDate));
+}
+
 export function attachCashIncomeComparisons(
   overview: CashIncomeOverview,
   currentNetAssetsJpy: number,
   snapshots: DailyCashFlowSnapshotLike[]
 ): CashIncomeOverview {
-  const byDate = new Map(snapshots.map(row => [row.asOfDate, row]));
-  const previous = byDate.get(dateOffset(overview.forecast.asOfDate, -1)) ?? null;
-  const seven = byDate.get(dateOffset(overview.forecast.asOfDate, -7)) ?? null;
-  const thirty = byDate.get(dateOffset(overview.forecast.asOfDate, -30)) ?? null;
+  const sorted = [...snapshots].sort((a, b) => b.asOfDate.localeCompare(a.asOfDate));
+  const latestOnOrBefore = (target: string) =>
+    sorted.find(row => row.asOfDate <= target && finite(row.netAssetsJpy) !== null) ?? null;
+  const previous = latestOnOrBefore(dateOffset(overview.forecast.asOfDate, -1));
+  const seven = latestOnOrBefore(dateOffset(overview.forecast.asOfDate, -7));
+  const thirty = latestOnOrBefore(dateOffset(overview.forecast.asOfDate, -30));
   const change = (prior: DailyCashFlowSnapshotLike | null) => {
     const value = prior ? finite(prior.netAssetsJpy) : null;
     return {
@@ -471,8 +499,10 @@ export function attachCashIncomeComparisons(
         previousAsOfDate: previous?.asOfDate ?? null,
         sevenDayChangeJpy: priorSeven.amount,
         sevenDayChangePct: priorSeven.pct,
+        sevenDayAsOfDate: seven?.asOfDate ?? null,
         thirtyDayChangeJpy: priorThirty.amount,
         thirtyDayChangePct: priorThirty.pct,
+        thirtyDayAsOfDate: thirty?.asOfDate ?? null,
       },
       dividendRunRate: withPrevious(
         overview.forecast.dividendRunRate,

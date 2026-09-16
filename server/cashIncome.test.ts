@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { attachCashIncomeComparisons, buildCashIncomeOverview } from "./services/cashIncome";
+import { attachCashIncomeComparisons, buildCashIncomeOverview, mergeCashFlowAndPortfolioSnapshots } from "./services/cashIncome";
 
 const now = new Date("2026-09-13T03:00:00.000Z");
 
@@ -48,6 +48,23 @@ function dividend(overrides: Partial<{
 }
 
 describe("buildCashIncomeOverview", () => {
+  it("旧portfolioSnapshotsを合并し、新现金流快照优先で休场日前最近有效日を取得する", () => {
+    const base = buildCashIncomeOverview({ interestSnapshots: [], cashIncomeRecords: [], currentInterestAssetCount: 0, annualDividendJpy: 22_000_000, annualInterestJpy: 3_000_000, annualBorrowingInterestJpy: 4_000_000, borrowingInterestMtdJpy: null, borrowingInterestMtdAsOfDate: null, now: new Date("2026-09-14T03:00:00.000Z") });
+    const history = mergeCashFlowAndPortfolioSnapshots(
+      [{ asOfDate: "2026-09-11", netAssetsJpy: "711000000", annualDividendJpy: "21500000", annualInterestJpy: "3000000", annualBorrowingInterestJpy: "4000000", annualNetCashJpy: "20500000" }],
+      [
+        { capturedAt: new Date("2026-09-11T06:30:00.000Z"), netAssets: "710000000" },
+        { capturedAt: new Date("2026-09-07T06:30:00.000Z"), netAssets: "700000000" },
+        { capturedAt: new Date("2026-08-14T06:30:00.000Z"), netAssets: "680000000" },
+      ]
+    );
+    const result = attachCashIncomeComparisons(base, 713_000_000, history);
+    expect(result.forecast.netAssets?.previousAsOfDate).toBe("2026-09-11");
+    expect(result.forecast.netAssets?.previousJpy).toBe(711_000_000);
+    expect(result.forecast.netAssets?.sevenDayAsOfDate).toBe("2026-09-07");
+    expect(result.forecast.netAssets?.thirtyDayAsOfDate).toBe("2026-08-14");
+    expect(result.forecast.dividendRunRate.previousAnnualJpy).toBe(21_500_000);
+  });
   it("按精确日历日计算净资产前日／7日／30日变化与预测年额前日比", () => {
     const base = buildCashIncomeOverview({ interestSnapshots: [], cashIncomeRecords: [], currentInterestAssetCount: 0, annualDividendJpy: 22_000_000, annualInterestJpy: 3_000_000, annualBorrowingInterestJpy: 4_000_000, borrowingInterestMtdJpy: null, borrowingInterestMtdAsOfDate: null, now });
     const result = attachCashIncomeComparisons(base, 713_456_789, [

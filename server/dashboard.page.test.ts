@@ -451,7 +451,7 @@ describe("Dashboard actual page", () => {
       expect(screen.getByText("未来の利息予想")).toBeTruthy();
       expect(screen.getByText("未来の純キャッシュ収入予想")).toBeTruthy();
       expect(screen.getByText("¥737,103,099")).toBeTruthy();
-      expect(screen.getByText(/前日比 前日値未取得/)).toBeTruthy();
+      expect(screen.getByText(/前日／前回比 前回値未取得/)).toBeTruthy();
       expect(screen.getByText("2030年末の3つの達成情景")).toBeTruthy();
       expect(screen.getByText("年率仮定 4.0%")).toBeTruthy();
       expect(screen.getByText("年率仮定 8.0%")).toBeTruthy();

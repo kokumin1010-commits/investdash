@@ -43,6 +43,7 @@ import {
 import {
   attachCashIncomeComparisons,
   buildCashIncomeOverview,
+  mergeCashFlowAndPortfolioSnapshots,
   type CashIncomeOverview,
 } from "./cashIncome";
 import { jstDayKey } from "../../shared/jstDate";
@@ -1117,10 +1118,14 @@ export async function buildPortfolio(userId: number): Promise<{
     now,
   });
   const cashFlowSnapshots = await db.listDailyCashFlowSnapshots(userId, 40).catch(() => []);
+  const comparisonSnapshots = mergeCashFlowAndPortfolioSnapshots(
+    cashFlowSnapshots,
+    snapshots
+  );
   const cashIncome = attachCashIncomeComparisons(
     baseCashIncome,
     summary.netAssetsBase,
-    cashFlowSnapshots
+    comparisonSnapshots
   );
   await db
     .upsertDailyCashFlowSnapshot({

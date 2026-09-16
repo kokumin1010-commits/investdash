@@ -55,8 +55,10 @@ export type CashIncomeOverview = {
       previousAsOfDate: string | null;
       sevenDayChangeJpy: number | null;
       sevenDayChangePct: number | null;
+      sevenDayAsOfDate: string | null;
       thirtyDayChangeJpy: number | null;
       thirtyDayChangePct: number | null;
+      thirtyDayAsOfDate: string | null;
     } | null;
     dividendRunRate: ForecastRunRateMetric;
     interestRunRate: ForecastRunRateMetric;
