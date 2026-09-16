@@ -117,7 +117,7 @@ async function verify(width, height, port) {
     );
     await browser.waitUntil(
       "long-term income state",
-      `(document.body.innerText.includes('未来の年間配当予想（税引前）') && document.body.innerText.includes('未来の年間純キャッシュ収入予想')) || document.body.innerText.includes('目標純資産と目標日がまだ設定されていません')`
+      `(document.body.innerText.includes('未来の配当予想（税引前）') && document.body.innerText.includes('未来の純キャッシュ収入予想')) || document.body.innerText.includes('目標純資産と目標日がまだ設定されていません')`
     );
     await browser.evalValue(`document.querySelector('[data-testid="cash-income-actual-forecast"]')?.scrollIntoView({ block: 'start' })`);
     await sleep(300);
@@ -140,16 +140,33 @@ async function verify(width, height, port) {
         noDoubleCount: text.includes('純資産へもう一度加算しません'),
         dated: /20\\d{2}\\/\\d{1,2}\\/\\d{1,2}/.test(text),
         noInvalid: !text.includes('NaN') && !text.includes('undefined'),
+        exactNetAssets: /現在の純資産[^¥]*¥[0-9,]+/.test(pageText),
+        previousNetAssets: /前日純資産[^¥]*¥[0-9,]+（[0-9]{4}-[0-9]{2}-[0-9]{2}）/.test(pageText),
+        previousChange: pageText.includes('前日／前回比') && !pageText.includes('前日／前回比 前回値未取得'),
+        sevenDayBasis: /7日比（[0-9]{4}-[0-9]{2}-[0-9]{2}基準）/.test(pageText),
+        thirtyDayHonest: /30日比（[0-9]{4}-[0-9]{2}-[0-9]{2}基準）/.test(pageText) || pageText.includes('30日比 30日前未取得'),
         longTermIncomeHonest:
-          (pageText.includes('未来の年間配当予想（税引前）') &&
-            pageText.includes('未来の年間利息予想') &&
-            pageText.includes('未来の年間純キャッシュ収入予想')) ||
+          (pageText.includes('未来の配当予想（税引前）') &&
+            pageText.includes('未来の利息予想') &&
+            pageText.includes('未来の純キャッシュ収入予想')) ||
           pageText.includes('目標純資産と目標日がまだ設定されていません'),
         scrollWidth: document.documentElement.scrollWidth,
         clientWidth: document.documentElement.clientWidth,
       };
     })()`);
     const cardScreenshot = await browser.screenshot("cash-income-card");
+
+    const longTermPresent = await browser.evalValue(`(() => {
+      const marker = [...document.querySelectorAll('p')].find(item => item.textContent?.trim() === 'LONG-TERM NORTH STAR');
+      const node = marker?.closest('[data-slot="card"]');
+      node?.scrollIntoView({ block: 'start' });
+      return Boolean(node);
+    })()`);
+    await sleep(300);
+    const longTermScreenshot = await browser.screenshot("long-term-goal");
+
+    await browser.evalValue(`document.querySelector('[data-testid="cash-income-actual-forecast"]')?.scrollIntoView({ block: 'start' })`);
+    await sleep(300);
 
     await browser.evalValue(`(() => {
       const node = document.querySelector('[data-testid="cash-income-actual-forecast"]');
@@ -179,9 +196,10 @@ async function verify(width, height, port) {
       Object.entries(card)
         .filter(([key]) => !["scrollWidth", "clientWidth"].includes(key))
         .every(([, value]) => value === true) &&
+      longTermPresent &&
       card.scrollWidth <= card.clientWidth &&
       Object.values(dialog).every(Boolean);
-    return { width, passed, card, dialog, screenshot: cardScreenshot };
+    return { width, passed, card, dialog, screenshots: { cashIncome: cardScreenshot, longTermGoal: longTermScreenshot } };
   } finally {
     browser.socket.close();
     browser.chrome.kill("SIGTERM");

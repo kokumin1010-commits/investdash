@@ -433,5 +433,5 @@
 - [x] 定义休场日使用目标日前最近有效快照、显示实际基准日且不把同日多次更新当作前日的规则
 - [x] 将真实portfolioSnapshots作为dailyCashFlowSnapshots不足时的净资产历史回退，并继续幂等保存新日次基线
 - [x] 为已有历史、休场日、同日多快照、缺失净资产和用户隔离补充测试；155文件／1215项通过
-- [ ] 完整测试、TypeScript与production build已通过；待同步Railway并确认SalesDash前日／7日／30日不再无故未取得
-- [ ] 更新验证文档、GitHub与最终checkpoint
+- [x] 完整测试、TypeScript与production build已通过；Railway正式功能34291d9上线，SalesDash API与390px／1280px只读验收确认前日及7日真实基准已显示、30日因真实历史不足诚实未取得
+- [x] 更新验证文档与GitHub；正式功能34291d9及最终双视口验收记录已同步，最终checkpoint在本次交付保存
