@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildCashIncomeOverview } from "./services/cashIncome";
+import { attachCashIncomeComparisons, buildCashIncomeOverview } from "./services/cashIncome";
 
 const now = new Date("2026-09-13T03:00:00.000Z");
 
@@ -48,6 +48,19 @@ function dividend(overrides: Partial<{
 }
 
 describe("buildCashIncomeOverview", () => {
+  it("按精确日历日计算净资产前日／7日／30日变化与预测年额前日比", () => {
+    const base = buildCashIncomeOverview({ interestSnapshots: [], cashIncomeRecords: [], currentInterestAssetCount: 0, annualDividendJpy: 22_000_000, annualInterestJpy: 3_000_000, annualBorrowingInterestJpy: 4_000_000, borrowingInterestMtdJpy: null, borrowingInterestMtdAsOfDate: null, now });
+    const result = attachCashIncomeComparisons(base, 713_456_789, [
+      { asOfDate: "2026-09-12", netAssetsJpy: "710000000", annualDividendJpy: "21000000", annualInterestJpy: "2900000", annualBorrowingInterestJpy: "3900000", annualNetCashJpy: "20000000" },
+      { asOfDate: "2026-09-06", netAssetsJpy: "700000000", annualDividendJpy: null, annualInterestJpy: null, annualBorrowingInterestJpy: null, annualNetCashJpy: null },
+      { asOfDate: "2026-08-14", netAssetsJpy: "680000000", annualDividendJpy: null, annualInterestJpy: null, annualBorrowingInterestJpy: null, annualNetCashJpy: null },
+    ]);
+    expect(result.forecast.netAssets?.dayChangeJpy).toBe(3_456_789);
+    expect(result.forecast.netAssets?.sevenDayChangeJpy).toBe(13_456_789);
+    expect(result.forecast.netAssets?.thirtyDayChangeJpy).toBe(33_456_789);
+    expect(result.forecast.dividendRunRate.annualDayChangeJpy).toBe(1_000_000);
+    expect(result.forecast.interestRunRate.dailyJpy).toBeCloseTo(3_000_000 / 365);
+  });
   it("实际日息和已到账股息按记录FX汇总，不与未来预测混合", () => {
     const result = buildCashIncomeOverview({
       interestSnapshots: [

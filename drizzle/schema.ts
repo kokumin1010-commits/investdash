@@ -1363,6 +1363,39 @@ export type RecentSecuritySearch = typeof recentSecuritySearches.$inferSelect;
 export type InsertRecentSecuritySearch = typeof recentSecuritySearches.$inferInsert;
 
 /**
+ * 長期目標カードに表示する日次キャッシュフロー予想の履歴。
+ * JST同日内は更新し、前営業日ではなく暦日の前日比を厳密に判定する。
+ */
+export const dailyCashFlowSnapshots = mysqlTable(
+  "dailyCashFlowSnapshots",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    userId: int("userId").notNull(),
+    asOfDate: varchar("asOfDate", { length: 10 }).notNull(),
+    netAssetsJpy: decimal("netAssetsJpy", { precision: 22, scale: 2 }).notNull(),
+    annualDividendJpy: decimal("annualDividendJpy", { precision: 22, scale: 2 }),
+    annualInterestJpy: decimal("annualInterestJpy", { precision: 22, scale: 2 }),
+    annualBorrowingInterestJpy: decimal("annualBorrowingInterestJpy", { precision: 22, scale: 2 }),
+    annualNetCashJpy: decimal("annualNetCashJpy", { precision: 22, scale: 2 }),
+    createdAt: timestamp("createdAt").defaultNow().notNull(),
+    updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+  },
+  table => ({
+    userDateUnique: uniqueIndex("dailyCashFlowSnapshots_user_date_uq").on(
+      table.userId,
+      table.asOfDate
+    ),
+    userDateIdx: index("dailyCashFlowSnapshots_user_date_idx").on(
+      table.userId,
+      table.asOfDate
+    ),
+  })
+);
+
+export type DailyCashFlowSnapshot = typeof dailyCashFlowSnapshots.$inferSelect;
+export type InsertDailyCashFlowSnapshot = typeof dailyCashFlowSnapshots.$inferInsert;
+
+/**
  * 簡易パスコード認証。
  *
  * Manus OAuth の代わりに、4〜6 桁の数字だけでアクセスできるようにする。

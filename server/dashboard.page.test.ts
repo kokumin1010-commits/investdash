@@ -447,9 +447,11 @@ describe("Dashboard actual page", () => {
       expect(screen.getByText("本年の実績収入（記録分）")).toBeTruthy();
       expect(screen.getByText("本年の入金済み配当")).toBeTruthy();
       expect(screen.getAllByText("未連携").length).toBeGreaterThan(0);
-      expect(screen.getByText("未来の年間配当予想（税引前）")).toBeTruthy();
-      expect(screen.getByText("未来の年間利息予想")).toBeTruthy();
-      expect(screen.getByText("未来の年間純キャッシュ収入予想")).toBeTruthy();
+      expect(screen.getByText("未来の配当予想（税引前）")).toBeTruthy();
+      expect(screen.getByText("未来の利息予想")).toBeTruthy();
+      expect(screen.getByText("未来の純キャッシュ収入予想")).toBeTruthy();
+      expect(screen.getByText("¥737,103,099")).toBeTruthy();
+      expect(screen.getByText(/前日比 前日値未取得/)).toBeTruthy();
       expect(screen.getByText("2030年末の3つの達成情景")).toBeTruthy();
       expect(screen.getByText("年率仮定 4.0%")).toBeTruthy();
       expect(screen.getByText("年率仮定 8.0%")).toBeTruthy();

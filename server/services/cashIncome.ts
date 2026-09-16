@@ -306,6 +306,15 @@ export function buildCashIncomeOverview(input: {
       : null;
   const recordedGrossIncomeMtd = knownIncomeTotal([interestMtd, dividendMtd]);
   const recordedGrossIncomeYtd = knownIncomeTotal([interestYtd, dividendYtd]);
+  const runRate = (annualJpy: number | null, status: CashIncomeStatus) => ({
+    annualJpy,
+    monthlyJpy: annualJpy === null ? null : annualJpy / 12,
+    dailyJpy: annualJpy === null ? null : annualJpy / 365,
+    status,
+    previousAnnualJpy: null,
+    annualDayChangeJpy: null,
+    previousAsOfDate: null,
+  });
 
   return {
     actual: {
@@ -358,9 +367,129 @@ export function buildCashIncomeOverview(input: {
               ].includes("PARTIAL")
             ? "PARTIAL"
             : "UNAVAILABLE",
+      netAssets: null,
+      dividendRunRate: runRate(
+        finite(input.annualDividendJpy),
+        input.annualDividendStatus ??
+          (finite(input.annualDividendJpy) === null ? "UNAVAILABLE" : "AVAILABLE")
+      ),
+      interestRunRate: runRate(
+        finite(input.annualInterestJpy),
+        input.annualInterestStatus ??
+          (finite(input.annualInterestJpy) === null ? "UNAVAILABLE" : "AVAILABLE")
+      ),
+      borrowingRunRate: runRate(
+        finite(input.annualBorrowingInterestJpy),
+        input.annualBorrowingInterestStatus ??
+          (finite(input.annualBorrowingInterestJpy) === null
+            ? "UNAVAILABLE"
+            : "AVAILABLE")
+      ),
+      netCashRunRate: runRate(
+        annualNetCashJpy,
+        annualNetCashJpy !== null
+          ? "AVAILABLE"
+          : [
+                input.annualDividendStatus,
+                input.annualInterestStatus,
+                input.annualBorrowingInterestStatus,
+              ].includes("PARTIAL")
+            ? "PARTIAL"
+            : "UNAVAILABLE"
+      ),
       dividendBasis: "現在保有株数 × 直近12か月の1株配当実績（税引前）",
       interestBasis: "現在の現金宝・貨幣基金残高 × 記録年率の日次複利試算",
       borrowingBasis: "現在の借入残高 × 通貨別金利の年換算試算",
+    },
+  };
+}
+
+export type DailyCashFlowSnapshotLike = {
+  asOfDate: string;
+  netAssetsJpy: string | number;
+  annualDividendJpy: string | number | null;
+  annualInterestJpy: string | number | null;
+  annualBorrowingInterestJpy: string | number | null;
+  annualNetCashJpy: string | number | null;
+};
+
+function dateOffset(date: string, days: number): string {
+  const value = new Date(`${date}T00:00:00+09:00`);
+  value.setUTCDate(value.getUTCDate() + days);
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Tokyo",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(value);
+}
+
+export function attachCashIncomeComparisons(
+  overview: CashIncomeOverview,
+  currentNetAssetsJpy: number,
+  snapshots: DailyCashFlowSnapshotLike[]
+): CashIncomeOverview {
+  const byDate = new Map(snapshots.map(row => [row.asOfDate, row]));
+  const previous = byDate.get(dateOffset(overview.forecast.asOfDate, -1)) ?? null;
+  const seven = byDate.get(dateOffset(overview.forecast.asOfDate, -7)) ?? null;
+  const thirty = byDate.get(dateOffset(overview.forecast.asOfDate, -30)) ?? null;
+  const change = (prior: DailyCashFlowSnapshotLike | null) => {
+    const value = prior ? finite(prior.netAssetsJpy) : null;
+    return {
+      value,
+      amount: value === null ? null : currentNetAssetsJpy - value,
+      pct: value && value !== 0 ? ((currentNetAssetsJpy - value) / value) * 100 : null,
+    };
+  };
+  const priorDay = change(previous);
+  const priorSeven = change(seven);
+  const priorThirty = change(thirty);
+  const withPrevious = (
+    metric: CashIncomeOverview["forecast"]["dividendRunRate"],
+    prior: string | number | null | undefined
+  ) => {
+    const previousAnnualJpy = finite(prior);
+    return {
+      ...metric,
+      previousAnnualJpy,
+      annualDayChangeJpy:
+        metric.annualJpy === null || previousAnnualJpy === null
+          ? null
+          : metric.annualJpy - previousAnnualJpy,
+      previousAsOfDate: previous?.asOfDate ?? null,
+    };
+  };
+  return {
+    ...overview,
+    forecast: {
+      ...overview.forecast,
+      netAssets: {
+        currentJpy: currentNetAssetsJpy,
+        previousJpy: priorDay.value,
+        dayChangeJpy: priorDay.amount,
+        dayChangePct: priorDay.pct,
+        previousAsOfDate: previous?.asOfDate ?? null,
+        sevenDayChangeJpy: priorSeven.amount,
+        sevenDayChangePct: priorSeven.pct,
+        thirtyDayChangeJpy: priorThirty.amount,
+        thirtyDayChangePct: priorThirty.pct,
+      },
+      dividendRunRate: withPrevious(
+        overview.forecast.dividendRunRate,
+        previous?.annualDividendJpy
+      ),
+      interestRunRate: withPrevious(
+        overview.forecast.interestRunRate,
+        previous?.annualInterestJpy
+      ),
+      borrowingRunRate: withPrevious(
+        overview.forecast.borrowingRunRate,
+        previous?.annualBorrowingInterestJpy
+      ),
+      netCashRunRate: withPrevious(
+        overview.forecast.netCashRunRate,
+        previous?.annualNetCashJpy
+      ),
     },
   };
 }

@@ -41,6 +41,7 @@ import {
   type InterestAssetView,
 } from "./interestAssets";
 import {
+  attachCashIncomeComparisons,
   buildCashIncomeOverview,
   type CashIncomeOverview,
 } from "./cashIncome";
@@ -1090,7 +1091,7 @@ export async function buildPortfolio(userId: number): Promise<{
     (total, leverage) => total + (leverage.interest?.annualInterestBase ?? 0),
     0
   );
-  const cashIncome = buildCashIncomeOverview({
+  const baseCashIncome = buildCashIncomeOverview({
     interestSnapshots: interestIncomeSnapshots,
     cashIncomeRecords,
     currentInterestAssetCount: interestViews.length,
@@ -1115,6 +1116,35 @@ export async function buildPortfolio(userId: number): Promise<{
     borrowingInterestMtdAsOfDate,
     now,
   });
+  const cashFlowSnapshots = await db.listDailyCashFlowSnapshots(userId, 40).catch(() => []);
+  const cashIncome = attachCashIncomeComparisons(
+    baseCashIncome,
+    summary.netAssetsBase,
+    cashFlowSnapshots
+  );
+  await db
+    .upsertDailyCashFlowSnapshot({
+      userId,
+      asOfDate: cashIncome.forecast.asOfDate,
+      netAssetsJpy: summary.netAssetsBase.toFixed(2),
+      annualDividendJpy:
+        cashIncome.forecast.annualDividendJpy === null
+          ? null
+          : cashIncome.forecast.annualDividendJpy.toFixed(2),
+      annualInterestJpy:
+        cashIncome.forecast.annualInterestJpy === null
+          ? null
+          : cashIncome.forecast.annualInterestJpy.toFixed(2),
+      annualBorrowingInterestJpy:
+        cashIncome.forecast.annualBorrowingInterestJpy === null
+          ? null
+          : cashIncome.forecast.annualBorrowingInterestJpy.toFixed(2),
+      annualNetCashJpy:
+        cashIncome.forecast.annualNetCashJpy === null
+          ? null
+          : cashIncome.forecast.annualNetCashJpy.toFixed(2),
+    })
+    .catch(error => console.warn("[Portfolio] cash-flow snapshot save failed", error));
 
   return {
     positions,

@@ -9,6 +9,16 @@ export type ActualIncomeMetric = {
   sourceLabel: string;
 };
 
+export type ForecastRunRateMetric = {
+  annualJpy: number | null;
+  monthlyJpy: number | null;
+  dailyJpy: number | null;
+  status: CashIncomeStatus;
+  previousAnnualJpy: number | null;
+  annualDayChangeJpy: number | null;
+  previousAsOfDate: string | null;
+};
+
 export type CashIncomeOverview = {
   actual: {
     asOfDate: string;
@@ -37,6 +47,21 @@ export type CashIncomeOverview = {
     annualBorrowingInterestStatus: CashIncomeStatus;
     annualNetCashJpy: number | null;
     annualNetCashStatus: CashIncomeStatus;
+    netAssets: {
+      currentJpy: number;
+      previousJpy: number | null;
+      dayChangeJpy: number | null;
+      dayChangePct: number | null;
+      previousAsOfDate: string | null;
+      sevenDayChangeJpy: number | null;
+      sevenDayChangePct: number | null;
+      thirtyDayChangeJpy: number | null;
+      thirtyDayChangePct: number | null;
+    } | null;
+    dividendRunRate: ForecastRunRateMetric;
+    interestRunRate: ForecastRunRateMetric;
+    borrowingRunRate: ForecastRunRateMetric;
+    netCashRunRate: ForecastRunRateMetric;
     dividendBasis: string;
     interestBasis: string;
     borrowingBasis: string;

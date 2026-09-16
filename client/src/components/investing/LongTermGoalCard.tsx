@@ -24,6 +24,7 @@ import {
   DEFAULT_LONG_TERM_SCENARIO_RATES,
   type LongTermGoalScenario,
 } from "@shared/longTermGoal";
+import type { CashIncomeOverview, ForecastRunRateMetric } from "@shared/cashIncome";
 import { Flag, Pencil, ShieldCheck, Target } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
@@ -33,6 +34,7 @@ type Props = {
   annualDividendJpy: number | null | undefined;
   annualInterestIncomeJpy: number | null | undefined;
   annualBorrowingInterestJpy: number | null | undefined;
+  cashIncome?: CashIncomeOverview | null;
 };
 
 const JPY_PER_OKU = 100_000_000;
@@ -188,6 +190,7 @@ export function LongTermGoalCard(props: Props) {
       }),
     [props, settings.data]
   );
+  const netAssetsTrend = props.cashIncome?.forecast.netAssets ?? null;
 
   const update = trpc.portfolio.updateSettings.useMutation({
     onSuccess: async () => {
@@ -344,9 +347,16 @@ export function LongTermGoalCard(props: Props) {
                 <div className="flex flex-wrap items-baseline justify-between gap-2">
                   <div>
                     <p className="text-xs text-muted-foreground">現在の純資産</p>
-                    <p className="tabular mt-1 text-2xl font-semibold">
-                      {oku(progress.currentNetAssetsJpy)}
+                    <p className="tabular mt-1 break-all text-2xl font-semibold sm:text-3xl">
+                      {yen(progress.currentNetAssetsJpy)}
                     </p>
+                    <p className="mt-1 text-xs text-muted-foreground">{oku(progress.currentNetAssetsJpy)}</p>
+                    <div className="mt-3 grid gap-1 text-xs sm:grid-cols-3">
+                      <TrendLine label="前日比" amount={netAssetsTrend?.dayChangeJpy ?? null} pct={netAssetsTrend?.dayChangePct ?? null} unavailable="前日値未取得" />
+                      <TrendLine label="7日比" amount={netAssetsTrend?.sevenDayChangeJpy ?? null} pct={netAssetsTrend?.sevenDayChangePct ?? null} unavailable="7日前未取得" />
+                      <TrendLine label="30日比" amount={netAssetsTrend?.thirtyDayChangeJpy ?? null} pct={netAssetsTrend?.thirtyDayChangePct ?? null} unavailable="30日前未取得" />
+                    </div>
+                    {netAssetsTrend?.previousJpy !== null && netAssetsTrend?.previousJpy !== undefined ? <p className="mt-2 text-[11px] text-muted-foreground">前日純資産 {yen(netAssetsTrend.previousJpy)}（{netAssetsTrend.previousAsOfDate}）</p> : null}
                   </div>
                   <div className="text-right">
                     <p className="text-xs text-muted-foreground">目標</p>
@@ -390,10 +400,10 @@ export function LongTermGoalCard(props: Props) {
             </div>
 
             <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
-              <IncomeBox label="未来の年間配当予想（税引前）" current={progress.annualDividend.currentJpy} target={progress.annualDividend.targetJpy} progressPct={progress.annualDividend.progressPct} />
-              <IncomeBox label="未来の年間利息予想" current={progress.annualInterest.currentJpy} target={progress.annualInterest.targetJpy} progressPct={progress.annualInterest.progressPct} />
-              <IncomeBox label="借入の年間利息予想" current={progress.annualBorrowingInterestJpy} target={null} negative />
-              <IncomeBox label="未来の年間純キャッシュ収入予想" current={progress.annualNetCash.currentJpy} target={progress.annualNetCash.targetJpy} progressPct={progress.annualNetCash.progressPct} emphasized />
+              <IncomeBox label="未来の配当予想（税引前）" current={progress.annualDividend.currentJpy} target={progress.annualDividend.targetJpy} progressPct={progress.annualDividend.progressPct} runRate={props.cashIncome?.forecast.dividendRunRate} />
+              <IncomeBox label="未来の利息予想" current={progress.annualInterest.currentJpy} target={progress.annualInterest.targetJpy} progressPct={progress.annualInterest.progressPct} runRate={props.cashIncome?.forecast.interestRunRate} />
+              <IncomeBox label="借入利息予想" current={progress.annualBorrowingInterestJpy} target={null} negative runRate={props.cashIncome?.forecast.borrowingRunRate} />
+              <IncomeBox label="未来の純キャッシュ収入予想" current={progress.annualNetCash.currentJpy} target={progress.annualNetCash.targetJpy} progressPct={progress.annualNetCash.progressPct} emphasized runRate={props.cashIncome?.forecast.netCashRunRate} />
             </div>
 
             <div className="rounded-xl border bg-background/75 p-4" data-testid="long-term-scenarios">
@@ -449,6 +459,7 @@ function IncomeBox({
   negative = false,
   emphasized = false,
   progressPct = null,
+  runRate,
 }: {
   label: string;
   current: number | null;
@@ -456,6 +467,7 @@ function IncomeBox({
   negative?: boolean;
   emphasized?: boolean;
   progressPct?: number | null;
+  runRate?: ForecastRunRateMetric;
 }) {
   return (
     <div className={`rounded-lg border p-3 ${emphasized ? "bg-emerald-50/70 dark:bg-emerald-950/20" : "bg-background/70"}`}>
@@ -463,6 +475,7 @@ function IncomeBox({
       <p className={`tabular mt-1 text-base font-semibold ${negative ? "text-loss" : emphasized ? "text-emerald-800 dark:text-emerald-200" : ""}`}>
         {negative && current !== null ? "−" : ""}{yen(current)}
       </p>
+      {runRate ? <div className="mt-2 space-y-0.5 text-[11px] text-muted-foreground"><p>年額 {yen(runRate.annualJpy)}</p><p>月額換算 {yen(runRate.monthlyJpy)}</p><p>日額換算 {yen(runRate.dailyJpy)} <span className="text-[10px]">（予想÷365、実入金ではありません）</span></p><p>予想年額の前日比 {runRate.annualDayChangeJpy === null ? "未取得" : `${runRate.annualDayChangeJpy >= 0 ? "+" : ""}${yen(runRate.annualDayChangeJpy)}`}</p></div> : null}
       <p className="mt-1 text-[11px] text-muted-foreground">{targetLabel(target)}</p>
       {progressPct !== null ? (
         <p className="tabular mt-1 text-[11px] font-medium text-emerald-700">
@@ -470,6 +483,27 @@ function IncomeBox({
         </p>
       ) : null}
     </div>
+  );
+}
+
+function TrendLine({
+  label,
+  amount,
+  pct,
+  unavailable,
+}: {
+  label: string;
+  amount: number | null;
+  pct: number | null;
+  unavailable: string;
+}) {
+  if (amount === null)
+    return <p className="text-muted-foreground">{label} {unavailable}</p>;
+  const positive = amount >= 0;
+  return (
+    <p className={`tabular font-medium ${positive ? "text-emerald-700" : "text-loss"}`}>
+      {label} {positive ? "+" : ""}{yen(amount)} {pct === null ? "" : `(${positive ? "+" : ""}${pct.toFixed(2)}%)`}
+    </p>
   );
 }
 

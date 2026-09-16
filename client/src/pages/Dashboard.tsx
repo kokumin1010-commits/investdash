@@ -692,6 +692,7 @@ export default function Dashboard() {
             annualDividendJpy={dividends?.annualIncomeBase}
             annualInterestIncomeJpy={summary?.interestIncomeBase}
             annualBorrowingInterestJpy={annualBorrowingInterestBase}
+            cashIncome={data?.cashIncome}
           />
 
           {/* サマリーカード */}

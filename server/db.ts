@@ -19,6 +19,7 @@ import {
   monthlyHoldings,
   monthlySnapshots,
   recentSecuritySearches,
+  dailyCashFlowSnapshots,
   systemEvents,
   type Holding,
   type InsertHolding,
@@ -34,6 +35,7 @@ import {
   type InsertCashIncomeRecord,
   type InsertCandidateSuggestion,
   type InsertRecentSecuritySearch,
+  type InsertDailyCashFlowSnapshot,
   type InsertSystemEvent,
 } from "../drizzle/schema";
 import { ENV } from "./_core/env";
@@ -116,6 +118,31 @@ export async function deleteRecentSecuritySearch(userId: number, id: number) {
 export async function clearRecentSecuritySearches(userId: number) {
   const db = await requireDb();
   await db.delete(recentSecuritySearches).where(eq(recentSecuritySearches.userId, userId));
+}
+
+export async function listDailyCashFlowSnapshots(userId: number, limit = 40) {
+  const db = await requireDb();
+  return db
+    .select()
+    .from(dailyCashFlowSnapshots)
+    .where(eq(dailyCashFlowSnapshots.userId, userId))
+    .orderBy(desc(dailyCashFlowSnapshots.asOfDate), desc(dailyCashFlowSnapshots.id))
+    .limit(Math.min(Math.max(limit, 1), 90));
+}
+
+export async function upsertDailyCashFlowSnapshot(
+  values: Omit<InsertDailyCashFlowSnapshot, "id" | "createdAt" | "updatedAt">
+) {
+  const db = await requireDb();
+  await db.insert(dailyCashFlowSnapshots).values(values).onDuplicateKeyUpdate({
+    set: {
+      netAssetsJpy: values.netAssetsJpy,
+      annualDividendJpy: values.annualDividendJpy ?? null,
+      annualInterestJpy: values.annualInterestJpy ?? null,
+      annualBorrowingInterestJpy: values.annualBorrowingInterestJpy ?? null,
+      annualNetCashJpy: values.annualNetCashJpy ?? null,
+    },
+  });
 }
 
 /** symbol ごとに、保有が確認できる最古の月次スナップショット日時を返す。 */
