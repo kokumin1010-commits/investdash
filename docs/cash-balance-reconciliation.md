@@ -33,3 +33,9 @@
 Railway版c0efa97の初回正式検証では、`portfolio.overview`が長いAI判断理由を含む大型JSONを未圧縮で返し、SalesDashとRailway直結の双方で外部検証環境への転送が120〜450秒以内に完了しなかった。レスポンスはHTTP 200で先頭から継続取得でき、DB待ちやAPI例外ではなく転送量がボトルネックだった。
 
 Expressへ標準HTTP圧縮を追加した。ローカル実測では同じ`portfolio.overview`が非圧縮405,691 bytesに対しgzip 51,059 bytesとなり、`Content-Encoding: gzip`と`Vary: trpc-accept, Accept-Encoding`を確認した。解凍後JSONの`cashBalanceTracking.status`は`LEGACY_TOTAL_ONLY`で正常だった。
+
+## SalesDash正式検証
+
+正式版`8759de3`で`portfolio.overview`は`Content-Encoding: br`を返し、解凍後1,892,577 bytesの実データを4,963 msで取得できた。`cashBalanceTracking`は口座別スクショがまだ0件のため`LEGACY_TOTAL_ONLY`で、旧全体現金JPY 1,255,302を口座へ推測配分せず、5券商を次回スクショ待ちとして返した。
+
+390pxと1280pxのSalesDash読取専用UI検証は全断言を通過した。正式表示は最新スクショ確定残高JPY 1,255,302（旧全体値・口座未分類）、基準後の入金済み配当は未取得、暫定現在残高は未取得、入金確認待ちの年間配当予想JPY 22,096,246。予想配当を暫定残高へ加算せず、両幅で横方向のはみ出しやカード重なりはなかった。検証中に画像アップロード、配当・現金・取引・保有・目標の書込みは行っていない。

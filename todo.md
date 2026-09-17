@@ -447,6 +447,6 @@
 - [x] 将未来配当按入金確認待ち独立显示，仅在截图或实际入金记录确认后转为入金済み配当，未确定预测不计入暂定现金
 - [x] 下次月次截图导入时自动对照上次基准、期间已记录配当与新现金余额，显示未识别差额且不自动猜测卖买／税费／入出金来源
 - [x] 复用顶部“スクショから自動計算”与现有追加截图入口，显示最終確定日／暫定余额／次回スクショ待ち，不要求连接券商API或新增后台调度
-- [ ] 补充服务、路由、截图取入、页面及390px／1280px回归测试，运行完整Vitest、TypeScript与production build
-- [ ] 同步Railway与GitHub，完成SalesDash正式只读验收、验证文档与最终checkpoint
-- [ ] 为大型portfolio.overview启用HTTP压缩，缩短SalesDash Dashboard传输时间并完成压缩响应回归验证
+- [x] 补充服务、路由、截图取入、页面及390px／1280px回归测试；重建及Railway工作树158个测试文件／1227项、TypeScript与production build通过，SalesDash双视口正式验收无横向溢出
+- [x] 同步Railway与GitHub；账户现金功能c0efa97、响应压缩8759de3已上线，SalesDash正式API及390px／1280px只读验收通过，验证文档与最终checkpoint在本次交付保存
+- [x] 为大型portfolio.overview启用HTTP压缩；正式返回Brotli，解压后1,892,577 bytes的实数据由超时降至4,963 ms并通过完整Dashboard验收
