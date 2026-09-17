@@ -24,13 +24,18 @@ import {
   DEFAULT_LONG_TERM_SCENARIO_RATES,
   type LongTermGoalScenario,
 } from "@shared/longTermGoal";
-import type { CashIncomeOverview, ForecastRunRateMetric } from "@shared/cashIncome";
+import type {
+  ActualIncomeMetric,
+  CashIncomeOverview,
+  ForecastRunRateMetric,
+} from "@shared/cashIncome";
 import { Flag, Pencil, ShieldCheck, Target } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 
 type Props = {
   currentNetAssetsJpy: number | null | undefined;
+  unrealizedPnlJpy: number | null | undefined;
   annualDividendJpy: number | null | undefined;
   annualInterestIncomeJpy: number | null | undefined;
   annualBorrowingInterestJpy: number | null | undefined;
@@ -191,6 +196,7 @@ export function LongTermGoalCard(props: Props) {
     [props, settings.data]
   );
   const netAssetsTrend = props.cashIncome?.forecast.netAssets ?? null;
+  const actualIncome = props.cashIncome?.actual ?? null;
 
   const update = trpc.portfolio.updateSettings.useMutation({
     onSuccess: async () => {
@@ -346,17 +352,23 @@ export function LongTermGoalCard(props: Props) {
               <div className="rounded-xl border bg-background/75 p-4">
                 <div className="flex flex-wrap items-baseline justify-between gap-2">
                   <div>
-                    <p className="text-xs text-muted-foreground">現在の純資産</p>
+                    <p className="text-xs text-muted-foreground">現在の純資産（評価額）</p>
                     <p className="tabular mt-1 break-all text-2xl font-semibold sm:text-3xl">
                       {yen(progress.currentNetAssetsJpy)}
                     </p>
                     <p className="mt-1 text-xs text-muted-foreground">{oku(progress.currentNetAssetsJpy)}</p>
+                    <p className="mt-3 text-[11px] font-medium text-muted-foreground">
+                      純資産の評価変動（未確定を含む）
+                    </p>
                     <div className="mt-3 grid gap-1 text-xs sm:grid-cols-3">
                       <TrendLine label="前日／前回比" amount={netAssetsTrend?.dayChangeJpy ?? null} pct={netAssetsTrend?.dayChangePct ?? null} unavailable="前回値未取得" />
                       <TrendLine label="7日比" amount={netAssetsTrend?.sevenDayChangeJpy ?? null} pct={netAssetsTrend?.sevenDayChangePct ?? null} unavailable="7日前未取得" basisDate={netAssetsTrend?.sevenDayAsOfDate ?? null} />
                       <TrendLine label="30日比" amount={netAssetsTrend?.thirtyDayChangeJpy ?? null} pct={netAssetsTrend?.thirtyDayChangePct ?? null} unavailable="30日前未取得" basisDate={netAssetsTrend?.thirtyDayAsOfDate ?? null} />
                     </div>
                     {netAssetsTrend?.previousJpy !== null && netAssetsTrend?.previousJpy !== undefined ? <p className="mt-2 text-[11px] text-muted-foreground">前日純資産 {yen(netAssetsTrend.previousJpy)}（{netAssetsTrend.previousAsOfDate}）</p> : null}
+                    <p className="mt-2 max-w-2xl text-[10px] leading-relaxed text-muted-foreground">
+                      前日・7日・30日の数字は純資産総額の差です。株価・為替・入出金・現金性資産・借入などを含み、確定した利益や実際の入金だけを示すものではありません。
+                    </p>
                   </div>
                   <div className="text-right">
                     <p className="text-xs text-muted-foreground">目標</p>
@@ -399,11 +411,49 @@ export function LongTermGoalCard(props: Props) {
               </div>
             </div>
 
-            <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
-              <IncomeBox label="未来の配当予想（税引前）" current={progress.annualDividend.currentJpy} target={progress.annualDividend.targetJpy} progressPct={progress.annualDividend.progressPct} runRate={props.cashIncome?.forecast.dividendRunRate} />
-              <IncomeBox label="未来の利息予想" current={progress.annualInterest.currentJpy} target={progress.annualInterest.targetJpy} progressPct={progress.annualInterest.progressPct} runRate={props.cashIncome?.forecast.interestRunRate} />
-              <IncomeBox label="借入利息予想" current={progress.annualBorrowingInterestJpy} target={null} negative runRate={props.cashIncome?.forecast.borrowingRunRate} />
-              <IncomeBox label="未来の純キャッシュ収入予想" current={progress.annualNetCash.currentJpy} target={progress.annualNetCash.targetJpy} progressPct={progress.annualNetCash.progressPct} emphasized runRate={props.cashIncome?.forecast.netCashRunRate} />
+            <div className="rounded-xl border bg-background/75 p-4" data-testid="return-classification">
+              <div>
+                <p className="text-sm font-semibold">利益の種類を分けて表示</p>
+                <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground">
+                  株式は売却前の含み損益、現金宝利息と配当は付与・入金が記録された分だけを確定収益として表示します。
+                </p>
+              </div>
+              <div className="mt-3 grid gap-2 sm:grid-cols-3">
+                <div className="rounded-lg border border-amber-200 bg-amber-50/60 p-3 dark:border-amber-900/60 dark:bg-amber-950/20">
+                  <div className="flex flex-wrap items-center justify-between gap-1.5">
+                    <p className="text-[11px] text-muted-foreground">株式：含み損益</p>
+                    <Badge variant="outline" className="border-amber-300 text-[10px] text-amber-700 dark:border-amber-800 dark:text-amber-200">
+                      未実現
+                    </Badge>
+                  </div>
+                  <p className={`tabular mt-1 text-lg font-semibold ${(props.unrealizedPnlJpy ?? 0) < 0 ? "text-loss" : "text-emerald-700"}`}>
+                    {yen(props.unrealizedPnlJpy)}
+                  </p>
+                  <p className="mt-1 text-[10px] leading-relaxed text-muted-foreground">
+                    現在価格による評価損益。売却前のため確定収益ではありません。
+                  </p>
+                </div>
+                <ConfirmedIncomeBox label="現金宝：付与済み利息" metric={actualIncome?.interestYtd} />
+                <ConfirmedIncomeBox label="株式：入金済み配当" metric={actualIncome?.dividendYtd} />
+              </div>
+              <p className="mt-3 text-[10px] leading-relaxed text-muted-foreground">
+                純資産差のうち、株価・為替・入出金・借入の寄与は同時点の明細が揃うまで分解しません。純資産差から推測して埋めることもしません。
+              </p>
+            </div>
+
+            <div className="space-y-3">
+              <div>
+                <p className="text-sm font-semibold">将来予想（未確定）</p>
+                <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground">
+                  現在の保有株数・残高・記録利率からのランレートです。実際に付与・入金されるまでは確定収益ではありません。
+                </p>
+              </div>
+              <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+                <IncomeBox label="未来の配当予想（税引前）" current={progress.annualDividend.currentJpy} target={progress.annualDividend.targetJpy} progressPct={progress.annualDividend.progressPct} runRate={props.cashIncome?.forecast.dividendRunRate} />
+                <IncomeBox label="未来の利息予想" current={progress.annualInterest.currentJpy} target={progress.annualInterest.targetJpy} progressPct={progress.annualInterest.progressPct} runRate={props.cashIncome?.forecast.interestRunRate} />
+                <IncomeBox label="借入利息予想" current={progress.annualBorrowingInterestJpy} target={null} negative runRate={props.cashIncome?.forecast.borrowingRunRate} />
+                <IncomeBox label="未来の純キャッシュ収入予想" current={progress.annualNetCash.currentJpy} target={progress.annualNetCash.targetJpy} progressPct={progress.annualNetCash.progressPct} emphasized runRate={props.cashIncome?.forecast.netCashRunRate} />
+              </div>
             </div>
 
             <div className="rounded-xl border bg-background/75 p-4" data-testid="long-term-scenarios">
@@ -449,6 +499,40 @@ export function LongTermGoalCard(props: Props) {
         )}
       </CardContent>
     </Card>
+  );
+}
+
+function ConfirmedIncomeBox({
+  label,
+  metric,
+}: {
+  label: string;
+  metric: ActualIncomeMetric | undefined;
+}) {
+  const status = metric?.status ?? "UNAVAILABLE";
+  const statusLabel =
+    status === "AVAILABLE"
+      ? "確定"
+      : status === "PARTIAL"
+        ? "確定（記録分）"
+        : "未連携";
+  return (
+    <div className="rounded-lg border border-emerald-200 bg-emerald-50/60 p-3 dark:border-emerald-900/60 dark:bg-emerald-950/20">
+      <div className="flex flex-wrap items-center justify-between gap-1.5">
+        <p className="text-[11px] text-muted-foreground">{label}</p>
+        <Badge variant="outline" className="border-emerald-300 text-[10px] text-emerald-700 dark:border-emerald-800 dark:text-emerald-200">
+          {statusLabel}
+        </Badge>
+      </div>
+      <p className="tabular mt-1 text-lg font-semibold text-emerald-700">
+        {yen(metric?.amountJpy)}
+      </p>
+      <p className="mt-1 text-[10px] leading-relaxed text-muted-foreground">
+        {metric?.lastDate
+          ? `本年の記録分・${metric.lastDate}基準`
+          : "付与・入金の実績記録がまだありません"}
+      </p>
+    </div>
   );
 }
 

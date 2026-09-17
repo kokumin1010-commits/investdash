@@ -67,8 +67,8 @@ function dateText(value: string | null) {
 }
 
 function statusText(status: CashIncomeStatus) {
-  if (status === "AVAILABLE") return "実績";
-  if (status === "PARTIAL") return "記録分";
+  if (status === "AVAILABLE") return "確定";
+  if (status === "PARTIAL") return "確定（記録分）";
   return "未連携";
 }
 
@@ -205,10 +205,10 @@ export function CashIncomeCard({ data, interestAssetsJpy, interestRatePct }: Pro
           </p>
           <CardTitle className="flex flex-wrap items-center gap-2 text-lg">
             <CircleDollarSign className="h-5 w-5 text-emerald-700" />
-            キャッシュ収入：実績と予想
+            キャッシュ収入：確定実績と将来予想
           </CardTitle>
           <CardDescription className="max-w-3xl leading-relaxed">
-            実際に付与・入金された金額と、現在残高／保有株数からの未来予想を分けています。
+            付与・入金が記録された確定キャッシュ収益と、現在残高／保有株数からの未確定な将来予想を分けています。株式の含み損益は含みません。
           </CardDescription>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -227,10 +227,10 @@ export function CashIncomeCard({ data, interestAssetsJpy, interestRatePct }: Pro
             <div>
               <h3 id="actual-income-heading" className="flex items-center gap-1.5 text-sm font-semibold">
                 <CheckCircle2 className="h-4 w-4 text-emerald-700" />
-                実際に増えた金額
+                記録済みの確定キャッシュ収益
               </h3>
               <p className="mt-1 text-[11px] text-muted-foreground">
-                記録済みの利息付与と証券口座の配当入金のみ。未記録日は補いません。
+                現金宝の付与済み利息と証券口座の入金済み配当のみ。未記録日は補いません。
               </p>
             </div>
             <Badge variant="secondary" className="tabular text-[10px]">
@@ -240,7 +240,7 @@ export function CashIncomeCard({ data, interestAssetsJpy, interestRatePct }: Pro
 
           <div className="grid grid-cols-2 gap-2 xl:grid-cols-4">
             <ActualBox
-              label="本年の実績収入（記録分）"
+              label="本年の確定収益（記録分）"
               emphasize
               metric={actualMetric(
                 actual.recordedGrossIncomeYtdJpy,
@@ -286,10 +286,10 @@ export function CashIncomeCard({ data, interestAssetsJpy, interestRatePct }: Pro
             <div>
               <h3 id="forecast-income-heading" className="flex items-center gap-1.5 text-sm font-semibold">
                 <CalendarDays className="h-4 w-4 text-sky-700" />
-                未来1年間の予想
+                将来1年間の予想（未確定）
               </h3>
               <p className="mt-1 text-[11px] text-muted-foreground">
-                目標比較用のランレートです。実際の入金や現在資産の増加ではありません。
+                目標比較用のランレートです。実際に付与・入金されるまでは確定収益ではありません。
               </p>
             </div>
             <Badge variant="outline" className="border-sky-200 text-[10px] text-sky-700 dark:border-sky-900 dark:text-sky-200">

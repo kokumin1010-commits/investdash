@@ -689,6 +689,7 @@ export default function Dashboard() {
 
           <LongTermGoalCard
             currentNetAssetsJpy={summary?.netAssetsBase}
+            unrealizedPnlJpy={summary?.totalPnl}
             annualDividendJpy={dividends?.annualIncomeBase}
             annualInterestIncomeJpy={summary?.interestIncomeBase}
             annualBorrowingInterestJpy={annualBorrowingInterestBase}

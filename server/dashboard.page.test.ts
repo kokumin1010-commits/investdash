@@ -443,15 +443,30 @@ describe("Dashboard actual page", () => {
       expect(screen.getByText("1,000 億円")).toBeTruthy();
       expect(screen.getByText("2030-12-31 まで")).toBeTruthy();
       expect(screen.getByText("高い挑戦目標")).toBeTruthy();
-      expect(screen.getByText("キャッシュ収入：実績と予想")).toBeTruthy();
-      expect(screen.getByText("本年の実績収入（記録分）")).toBeTruthy();
+      expect(screen.getByText("キャッシュ収入：確定実績と将来予想")).toBeTruthy();
+      expect(screen.getByText("記録済みの確定キャッシュ収益")).toBeTruthy();
+      expect(screen.getByText("本年の確定収益（記録分）")).toBeTruthy();
       expect(screen.getByText("本年の入金済み配当")).toBeTruthy();
       expect(screen.getAllByText("未連携").length).toBeGreaterThan(0);
+      expect(screen.getByText("利益の種類を分けて表示")).toBeTruthy();
+      expect(screen.getByText("株式：含み損益")).toBeTruthy();
+      expect(screen.getByText("現金宝：付与済み利息")).toBeTruthy();
+      expect(screen.getByText("株式：入金済み配当")).toBeTruthy();
+      expect(screen.getByText("未実現")).toBeTruthy();
+      expect(screen.getAllByText("確定（記録分）").length).toBeGreaterThan(0);
+      expect(screen.getByText("将来予想（未確定）")).toBeTruthy();
+      expect(screen.getByText("将来1年間の予想（未確定）")).toBeTruthy();
       expect(screen.getByText("未来の配当予想（税引前）")).toBeTruthy();
       expect(screen.getByText("未来の利息予想")).toBeTruthy();
       expect(screen.getByText("未来の純キャッシュ収入予想")).toBeTruthy();
       expect(screen.getByText("¥737,103,099")).toBeTruthy();
+      expect(screen.getByText("¥50,000")).toBeTruthy();
+      expect(screen.getByText("現在の純資産（評価額）")).toBeTruthy();
+      expect(screen.getByText("純資産の評価変動（未確定を含む）")).toBeTruthy();
       expect(screen.getByText(/前日／前回比 前回値未取得/)).toBeTruthy();
+      expect(
+        screen.getByText(/株価・為替・入出金・現金性資産・借入などを含み/)
+      ).toBeTruthy();
       expect(screen.getByText("2030年末の3つの達成情景")).toBeTruthy();
       expect(screen.getByText("年率仮定 4.0%")).toBeTruthy();
       expect(screen.getByText("年率仮定 8.0%")).toBeTruthy();

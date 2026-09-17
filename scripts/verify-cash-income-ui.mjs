@@ -128,12 +128,12 @@ async function verify(width, height, port) {
       return {
         present: Boolean(node),
         screenshotEntry: text.includes('スクショから自動計算'),
-        actualHeading: text.includes('実際に増えた金額'),
-        recordedYtd: text.includes('本年の実績収入（記録分）'),
+        actualHeading: text.includes('記録済みの確定キャッシュ収益'),
+        recordedYtd: text.includes('本年の確定収益（記録分）'),
         dailyInterest: text.includes('最新記録の日次利息'),
         dividendActual: text.includes('本年の入金済み配当'),
         unlinked: text.includes('未連携'),
-        forecastHeading: text.includes('未来1年間の予想'),
+        forecastHeading: text.includes('将来1年間の予想（未確定）'),
         annualDividendForecast: text.includes('年間配当予想（税引前）'),
         annualInterestForecast: text.includes('現金宝の年間利息予想'),
         annualNetForecast: text.includes('年間純キャッシュ収入予想'),
@@ -145,6 +145,11 @@ async function verify(width, height, port) {
         previousChange: pageText.includes('前日／前回比') && !pageText.includes('前日／前回比 前回値未取得'),
         sevenDayBasis: /7日比（[0-9]{4}-[0-9]{2}-[0-9]{2}基準）/.test(pageText),
         thirtyDayHonest: /30日比（[0-9]{4}-[0-9]{2}-[0-9]{2}基準）/.test(pageText) || pageText.includes('30日比 30日前未取得'),
+        netAssetsAreValuation: pageText.includes('現在の純資産（評価額）') && pageText.includes('純資産の評価変動（未確定を含む）'),
+        unrealizedStockPnl: pageText.includes('株式：含み損益') && pageText.includes('未実現'),
+        confirmedCashIncome: pageText.includes('現金宝：付与済み利息') && pageText.includes('株式：入金済み配当'),
+        forecastIsUnconfirmed: pageText.includes('将来予想（未確定）') && pageText.includes('将来1年間の予想（未確定）'),
+        noSourceInference: pageText.includes('純資産差から推測して埋めることもしません'),
         longTermIncomeHonest:
           (pageText.includes('未来の配当予想（税引前）') &&
             pageText.includes('未来の利息予想') &&
@@ -164,6 +169,14 @@ async function verify(width, height, port) {
     })()`);
     await sleep(300);
     const longTermScreenshot = await browser.screenshot("long-term-goal");
+
+    const classificationPresent = await browser.evalValue(`(() => {
+      const node = document.querySelector('[data-testid="return-classification"]');
+      node?.scrollIntoView({ block: 'start' });
+      return Boolean(node);
+    })()`);
+    await sleep(300);
+    const classificationScreenshot = await browser.screenshot("return-classification");
 
     await browser.evalValue(`document.querySelector('[data-testid="cash-income-actual-forecast"]')?.scrollIntoView({ block: 'start' })`);
     await sleep(300);
@@ -197,9 +210,10 @@ async function verify(width, height, port) {
         .filter(([key]) => !["scrollWidth", "clientWidth"].includes(key))
         .every(([, value]) => value === true) &&
       longTermPresent &&
+      classificationPresent &&
       card.scrollWidth <= card.clientWidth &&
       Object.values(dialog).every(Boolean);
-    return { width, passed, card, dialog, screenshots: { cashIncome: cardScreenshot, longTermGoal: longTermScreenshot } };
+    return { width, passed, card, dialog, screenshots: { cashIncome: cardScreenshot, longTermGoal: longTermScreenshot, returnClassification: classificationScreenshot } };
   } finally {
     browser.socket.close();
     browser.chrome.kill("SIGTERM");
