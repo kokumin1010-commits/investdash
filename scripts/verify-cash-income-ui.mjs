@@ -150,6 +150,16 @@ async function verify(width, height, port) {
         confirmedCashIncome: pageText.includes('現金宝：付与済み利息') && pageText.includes('株式：入金済み配当'),
         forecastIsUnconfirmed: pageText.includes('将来予想（未確定）') && pageText.includes('将来1年間の予想（未確定）'),
         noSourceInference: pageText.includes('純資産差から推測して埋めることもしません'),
+        cashTracking: text.includes('現金残高：スクショ確定＋暫定更新'),
+        screenshotConfirmed: text.includes('最新スクショ確定残高'),
+        settledAfterAnchor: text.includes('基準後の入金済み配当'),
+        provisionalBalance: text.includes('暫定現在残高'),
+        pendingDividend: text.includes('入金確認待ちの配当予想'),
+        noForecastInBalance: text.includes('予想配当は残高に入れません'),
+        honestLegacyState:
+          text.includes('旧全体値・口座未分類') || text.includes('暫定・'),
+        screenshotWait:
+          text.includes('次回スクショ待ち') || text.includes('口座別スクショ確認済みの合計'),
         longTermIncomeHonest:
           (pageText.includes('未来の配当予想（税引前）') &&
             pageText.includes('未来の利息予想') &&
@@ -160,6 +170,14 @@ async function verify(width, height, port) {
       };
     })()`);
     const cardScreenshot = await browser.screenshot("cash-income-card");
+
+    const cashTrackingPresent = await browser.evalValue(`(() => {
+      const node = document.querySelector('[data-testid="cash-balance-tracking"]');
+      node?.scrollIntoView({ block: 'start' });
+      return Boolean(node);
+    })()`);
+    await sleep(300);
+    const cashTrackingScreenshot = await browser.screenshot("cash-balance-tracking");
 
     const longTermPresent = await browser.evalValue(`(() => {
       const marker = [...document.querySelectorAll('p')].find(item => item.textContent?.trim() === 'LONG-TERM NORTH STAR');
@@ -211,9 +229,21 @@ async function verify(width, height, port) {
         .every(([, value]) => value === true) &&
       longTermPresent &&
       classificationPresent &&
+      cashTrackingPresent &&
       card.scrollWidth <= card.clientWidth &&
       Object.values(dialog).every(Boolean);
-    return { width, passed, card, dialog, screenshots: { cashIncome: cardScreenshot, longTermGoal: longTermScreenshot, returnClassification: classificationScreenshot } };
+    return {
+      width,
+      passed,
+      card,
+      dialog,
+      screenshots: {
+        cashIncome: cardScreenshot,
+        cashBalanceTracking: cashTrackingScreenshot,
+        longTermGoal: longTermScreenshot,
+        returnClassification: classificationScreenshot,
+      },
+    };
   } finally {
     browser.socket.close();
     browser.chrome.kill("SIGTERM");

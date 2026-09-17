@@ -5,6 +5,7 @@ import * as React from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ScreenshotCashIncomeReview } from "../client/src/components/investing/ScreenshotCashIncomeReview";
 import type {
+  ScreenshotAccountCashDraft,
   ScreenshotDividendDraft,
   ScreenshotInterestDraft,
 } from "../shared/screenshotCashIncome";
@@ -50,6 +51,25 @@ const dividend: ScreenshotDividendDraft = {
   issues: ["税前額は画面にないため未取得のまま保存します"],
 };
 
+const accountCash: ScreenshotAccountCashDraft = {
+  draftKey: "account-cash-1234567890123456",
+  mode: "APPLY",
+  broker: "ibkr",
+  currency: "USD",
+  cashBalance: 10_600,
+  asOfDate: "2026-09-30",
+  dateSource: "SCREEN",
+  confidence: 97,
+  evidence: "Cash USD 10,600",
+  previousBalance: 10_000,
+  previousAsOfDate: "2026-08-31",
+  settledDividendBetween: 400,
+  expectedBalance: 10_400,
+  unidentifiedDifference: 200,
+  reconciliationStatus: "READY",
+  issues: [],
+};
+
 describe("ScreenshotCashIncomeReview", () => {
   for (const width of [390, 1280]) {
     it(`${width}pxで実績差額とネット入金を明確に表示する`, () => {
@@ -59,8 +79,10 @@ describe("ScreenshotCashIncomeReview", () => {
       });
       render(
         <ScreenshotCashIncomeReview
+          accountCash={null}
           interestAssets={[interest]}
           dividendIncomes={[dividend]}
+          onAccountCashChange={vi.fn()}
           onInterestChange={vi.fn()}
           onDividendChange={vi.fn()}
         />
@@ -71,7 +93,32 @@ describe("ScreenshotCashIncomeReview", () => {
       expect(screen.getByText("2026-08-24")).toBeTruthy();
       expect(screen.getByText("ネット入金のみ取得")).toBeTruthy();
       expect(screen.getByText("USD 84")).toBeTruthy();
-      expect(screen.getAllByText(/確認して保存するまで/).length).toBeGreaterThan(0);
+      expect(screen.getAllByText(/確定基準として保存/).length).toBeGreaterThan(0);
+    });
+  }
+
+  for (const width of [390, 1280]) {
+    it(`${width}pxで口座現金の確定基準と未識別差額を分けて表示する`, () => {
+      Object.defineProperty(window, "innerWidth", {
+        configurable: true,
+        value: width,
+      });
+      render(
+        <ScreenshotCashIncomeReview
+          accountCash={accountCash}
+          interestAssets={[]}
+          dividendIncomes={[]}
+          onAccountCashChange={vi.fn()}
+          onInterestChange={vi.fn()}
+          onDividendChange={vi.fn()}
+        />
+      );
+
+      expect(screen.getByText("口座現金：スクショ確定基準")).toBeTruthy();
+      expect(screen.getByText("USD 10,000")).toBeTruthy();
+      expect(screen.getByText("USD 400")).toBeTruthy();
+      expect(screen.getByText("USD 10,400")).toBeTruthy();
+      expect(screen.getByText("USD 200")).toBeTruthy();
     });
   }
 
@@ -79,8 +126,10 @@ describe("ScreenshotCashIncomeReview", () => {
     const onInterestChange = vi.fn();
     render(
       <ScreenshotCashIncomeReview
+        accountCash={null}
         interestAssets={[{ ...interest, dateSource: "UPLOAD_DATE" }]}
         dividendIncomes={[]}
+        onAccountCashChange={vi.fn()}
         onInterestChange={onInterestChange}
         onDividendChange={vi.fn()}
       />
@@ -98,6 +147,7 @@ describe("ScreenshotCashIncomeReview", () => {
   it("累計が前回より小さいと画面でも算定不可を示す", () => {
     render(
       <ScreenshotCashIncomeReview
+        accountCash={null}
         interestAssets={[
           {
             ...interest,
@@ -107,6 +157,7 @@ describe("ScreenshotCashIncomeReview", () => {
           },
         ]}
         dividendIncomes={[]}
+        onAccountCashChange={vi.fn()}
         onInterestChange={vi.fn()}
         onDividendChange={vi.fn()}
       />
@@ -115,4 +166,3 @@ describe("ScreenshotCashIncomeReview", () => {
     expect(screen.getByText("算定不可：日付または累計値を確認")).toBeTruthy();
   });
 });
-

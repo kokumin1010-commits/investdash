@@ -6,6 +6,9 @@ const mocks = vi.hoisted(() => ({
   listInterestAssets: vi.fn(),
   listInterestAssetIncomeSnapshots: vi.fn(),
   getSettings: vi.fn(),
+  getBrokerBalance: vi.fn(),
+  upsertBrokerCashSnapshot: vi.fn(),
+  upsertBrokerBalance: vi.fn(),
   upsertInterestAsset: vi.fn(),
   upsertInterestAssetIncomeSnapshot: vi.fn(),
   insertCashIncomeRecord: vi.fn(),
@@ -23,6 +26,9 @@ vi.mock("./db", async importOriginal => {
     listInterestAssets: mocks.listInterestAssets,
     listInterestAssetIncomeSnapshots: mocks.listInterestAssetIncomeSnapshots,
     getSettings: mocks.getSettings,
+    getBrokerBalance: mocks.getBrokerBalance,
+    upsertBrokerCashSnapshot: mocks.upsertBrokerCashSnapshot,
+    upsertBrokerBalance: mocks.upsertBrokerBalance,
     upsertInterestAsset: mocks.upsertInterestAsset,
     upsertInterestAssetIncomeSnapshot: mocks.upsertInterestAssetIncomeSnapshot,
     insertCashIncomeRecord: mocks.insertCashIncomeRecord,
@@ -57,6 +63,7 @@ import { appRouter } from "./routers";
 const batchKey = "7a60b11cd84b6bd94a8aa1549b5127b9";
 const interestKey = "a860b11cd84b6bd94a8aa1549b5127b";
 const dividendKey = "b960b11cd84b6bd94a8aa1549b5127b";
+const accountCashKey = "c060b11cd84b6bd94a8aa1549b5127b";
 
 function caller(userId = 51) {
   const now = new Date("2026-09-13T00:00:00.000Z");
@@ -86,6 +93,7 @@ function parsedJob(status: "PARSED" | "APPLIED" = "PARSED") {
     parsed: {
       cashIncomeDraft: {
         batchKey,
+        accountCash: { draftKey: accountCashKey },
         interestAssets: [{ draftKey: interestKey }],
         dividendIncomes: [{ draftKey: dividendKey }],
       },
@@ -100,6 +108,7 @@ function baseInput() {
     rows: [],
     formatId: "futu_hk" as const,
     cashBalance: null,
+    accountCash: null,
     interestAssets: [],
     dividendIncomes: [],
   };
@@ -141,6 +150,20 @@ function dividendDraft(currency = "USD") {
   };
 }
 
+function accountCashDraft() {
+  return {
+    draftKey: accountCashKey,
+    mode: "APPLY" as const,
+    broker: "ibkr" as const,
+    currency: "USD",
+    cashBalance: 10_600,
+    asOfDate: "2026-09-13",
+    dateSource: "SCREEN" as const,
+    confidence: 97,
+    evidence: "Cash USD 10,600",
+  };
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.getImportJob.mockResolvedValue(parsedJob());
@@ -171,6 +194,17 @@ beforeEach(() => {
     sgdJpyRate: "115",
     hkdJpyRate: "19.2",
   });
+  mocks.getBrokerBalance.mockResolvedValue({
+    userId: 51,
+    broker: "ibkr",
+    currency: "USD",
+    cashBalance: "9000",
+    maintenanceMargin: "2000",
+    interestMtd: "12",
+    currencyBreakdown: { USD: 9000 },
+  });
+  mocks.upsertBrokerCashSnapshot.mockResolvedValue(undefined);
+  mocks.upsertBrokerBalance.mockResolvedValue(undefined);
   mocks.upsertInterestAsset.mockResolvedValue(7);
   mocks.upsertInterestAssetIncomeSnapshot.mockResolvedValue(undefined);
   mocks.insertCashIncomeRecord.mockResolvedValue(501);
@@ -181,6 +215,36 @@ beforeEach(() => {
 });
 
 describe("screenshot cash income apply route", () => {
+  it("确认后保存口座现金基准，并同步该券商当前现金但保留借入字段", async () => {
+    const result = await caller(51).import.applyRows({
+      ...baseInput(),
+      accountCash: accountCashDraft(),
+    });
+
+    expect(mocks.upsertBrokerCashSnapshot).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userId: 51,
+        broker: "ibkr",
+        currency: "USD",
+        asOfDate: "2026-09-13",
+        cashBalance: "10600",
+        source: "SCREENSHOT_CONFIRMED",
+        sourceReference: `import-job:77:cash:${accountCashKey}`,
+      })
+    );
+    expect(mocks.upsertBrokerBalance).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userId: 51,
+        broker: "ibkr",
+        currency: "USD",
+        cashBalance: "10600",
+        maintenanceMargin: "2000",
+        interestMtd: "12",
+      })
+    );
+    expect(result.cashIncomeResult.accountCashSnapshotsSaved).toBe(1);
+  });
+
   it("认证用户确认后保存现金宝快照，并只把相邻累计差额写成实际利息", async () => {
     const result = await caller(51).import.applyRows({
       ...baseInput(),
@@ -284,4 +348,3 @@ describe("screenshot cash income apply route", () => {
     expect(second).toBe(first);
   });
 });
-

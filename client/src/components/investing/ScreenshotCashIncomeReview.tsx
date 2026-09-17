@@ -10,19 +10,189 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import type {
+  ScreenshotAccountCashDraft,
   ScreenshotDividendDraft,
   ScreenshotDraftMode,
   ScreenshotInterestDraft,
 } from "@shared/screenshotCashIncome";
-import { CalendarDays, CircleDollarSign, Landmark, PiggyBank } from "lucide-react";
+import { BROKERS, BROKER_LABELS, type Broker } from "@shared/investing";
+import {
+  CalendarDays,
+  CircleDollarSign,
+  Landmark,
+  PiggyBank,
+  WalletCards,
+} from "lucide-react";
 import * as React from "react";
 
 type Props = {
+  accountCash: ScreenshotAccountCashDraft | null;
   interestAssets: ScreenshotInterestDraft[];
   dividendIncomes: ScreenshotDividendDraft[];
+  onAccountCashChange: (patch: Partial<ScreenshotAccountCashDraft>) => void;
   onInterestChange: (index: number, patch: Partial<ScreenshotInterestDraft>) => void;
   onDividendChange: (index: number, patch: Partial<ScreenshotDividendDraft>) => void;
 };
+
+function AccountCashCard({
+  item,
+  onChange,
+}: {
+  item: ScreenshotAccountCashDraft;
+  onChange: Props["onAccountCashChange"];
+}) {
+  const expectedBalance =
+    item.previousBalance !== null && item.settledDividendBetween !== null
+      ? item.previousBalance + item.settledDividendBetween
+      : null;
+  const unidentifiedDifference =
+    item.cashBalance !== null && expectedBalance !== null
+      ? item.cashBalance - expectedBalance
+      : null;
+
+  return (
+    <Card
+      data-testid="screenshot-account-cash"
+      className={
+        item.mode === "SKIP"
+          ? "opacity-60"
+          : "border-teal-200 dark:border-teal-900"
+      }
+    >
+      <CardHeader className="gap-3 pb-3 sm:flex-row sm:items-start sm:justify-between">
+        <div className="min-w-0 space-y-1">
+          <CardTitle className="flex min-w-0 items-center gap-2 text-base">
+            <WalletCards className="h-4 w-4 shrink-0 text-teal-700" />
+            <span>口座現金：スクショ確定基準</span>
+          </CardTitle>
+          <div className="flex flex-wrap items-center gap-1.5">
+            <Badge variant="secondary">{BROKER_LABELS[item.broker]}</Badge>
+            <Badge variant="outline" className={confidenceClass(item.confidence)}>
+              読取 {item.confidence}%
+            </Badge>
+            {item.dateSource === "UPLOAD_DATE" ? (
+              <Badge variant="outline" className="border-amber-300 text-amber-700">
+                日付要確認
+              </Badge>
+            ) : null}
+          </div>
+        </div>
+        <ModeSelect value={item.mode} onChange={mode => onChange({ mode })} />
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          <div className="space-y-1.5">
+            <Label htmlFor="account-cash-broker">証券口座</Label>
+            <Select
+              value={item.broker}
+              onValueChange={value => onChange({ broker: value as Broker })}
+            >
+              <SelectTrigger id="account-cash-broker">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {BROKERS.map(broker => (
+                  <SelectItem key={broker} value={broker}>
+                    {BROKER_LABELS[broker]}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="account-cash-currency">通貨</Label>
+            <Input
+              id="account-cash-currency"
+              value={item.currency ?? ""}
+              maxLength={8}
+              onChange={event =>
+                onChange({
+                  currency: event.target.value.toUpperCase() || null,
+                })
+              }
+            />
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="account-cash-date">スクショ基準日</Label>
+            <Input
+              id="account-cash-date"
+              type="date"
+              value={item.asOfDate}
+              onChange={event =>
+                onChange({
+                  asOfDate: event.target.value,
+                  dateSource: "SCREEN",
+                })
+              }
+            />
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="account-cash-balance">現金残高（原通貨）</Label>
+            <Input
+              id="account-cash-balance"
+              type="number"
+              inputMode="decimal"
+              value={numberValue(item.cashBalance)}
+              onChange={event =>
+                onChange({ cashBalance: parseNumber(event.target.value) })
+              }
+            />
+          </div>
+        </div>
+
+        {item.previousBalance === null ? (
+          <div className="rounded-xl border border-teal-200 bg-teal-50/60 p-3 text-sm text-teal-900 dark:border-teal-900 dark:bg-teal-950/20 dark:text-teal-200">
+            今回は初回基準として保存します。次回スクショから期間差額を自動照合します。
+          </div>
+        ) : (
+          <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+            <div className="rounded-xl border bg-background/80 p-3">
+              <p className="text-[11px] text-muted-foreground">前回確定残高</p>
+              <strong className="tabular mt-1 block text-base">
+                {formatAmount(item.currency, item.previousBalance)}
+              </strong>
+              <p className="mt-1 text-[10px] text-muted-foreground">
+                {item.previousAsOfDate}
+              </p>
+            </div>
+            <div className="rounded-xl border bg-background/80 p-3">
+              <p className="text-[11px] text-muted-foreground">期間中の入金済み配当</p>
+              <strong className="tabular mt-1 block text-base text-emerald-700">
+                {formatAmount(item.currency, item.settledDividendBetween)}
+              </strong>
+              <p className="mt-1 text-[10px] text-muted-foreground">確認済み記録のみ</p>
+            </div>
+            <div className="rounded-xl border bg-background/80 p-3">
+              <p className="text-[11px] text-muted-foreground">説明できる期待残高</p>
+              <strong className="tabular mt-1 block text-base">
+                {formatAmount(item.currency, expectedBalance)}
+              </strong>
+              <p className="mt-1 text-[10px] text-muted-foreground">前回＋確認済み配当</p>
+            </div>
+            <div className="rounded-xl border border-amber-200 bg-amber-50/60 p-3 dark:border-amber-900 dark:bg-amber-950/20">
+              <p className="text-[11px] text-muted-foreground">未識別差額</p>
+              <strong className="tabular mt-1 block text-base text-amber-800 dark:text-amber-200">
+                {formatAmount(item.currency, unidentifiedDifference)}
+              </strong>
+              <p className="mt-1 text-[10px] text-muted-foreground">売買・手数料・入出金等</p>
+            </div>
+          </div>
+        )}
+
+        {item.issues.length > 0 ? (
+          <div className="rounded-lg bg-amber-50 px-3 py-2 text-xs leading-relaxed text-amber-900 dark:bg-amber-950/20 dark:text-amber-200">
+            {item.issues.join(" / ")}
+          </div>
+        ) : null}
+        {item.evidence ? (
+          <p className="text-[11px] text-muted-foreground">
+            読取根拠: {item.evidence}
+          </p>
+        ) : null}
+      </CardContent>
+    </Card>
+  );
+}
 
 function numberValue(value: number | null) {
   return value === null ? "" : String(value);
@@ -271,20 +441,31 @@ function DividendCard({
 }
 
 export function ScreenshotCashIncomeReview({
+  accountCash,
   interestAssets,
   dividendIncomes,
+  onAccountCashChange,
   onInterestChange,
   onDividendChange,
 }: Props) {
-  if (interestAssets.length === 0 && dividendIncomes.length === 0) return null;
+  if (
+    accountCash === null &&
+    interestAssets.length === 0 &&
+    dividendIncomes.length === 0
+  ) {
+    return null;
+  }
   return (
     <section data-testid="screenshot-cash-income-review" className="space-y-3">
       <div className="space-y-1">
         <h2 className="text-lg font-semibold">キャッシュ収入の自動計算</h2>
         <p className="text-sm leading-relaxed text-muted-foreground">
-          スクショの実数だけを草稿にしました。確認して保存するまで実績には反映されません。
+          スクショの実数だけを草稿にしました。口座現金は確定基準として保存し、次回スクショで期間差額を照合します。
         </p>
       </div>
+      {accountCash ? (
+        <AccountCashCard item={accountCash} onChange={onAccountCashChange} />
+      ) : null}
       {interestAssets.map((item, index) => (
         <InterestCard key={item.draftKey} item={item} index={index} onChange={onInterestChange} />
       ))}

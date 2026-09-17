@@ -763,6 +763,48 @@ export const brokerBalances = mysqlTable(
 export type BrokerBalance = typeof brokerBalances.$inferSelect;
 
 /**
+ * スクリーンショットで確認した口座別の現金残高履歴。
+ *
+ * brokerBalances は現在値と信用取引情報を持つが、上書きされるため前回との差額を
+ * 検証できない。確認済みスクショの口座・通貨・基準日ごとの値を残し、次回取込時に
+ * 期間中の入金済み配当と照合する。予想配当や推測値は保存しない。
+ */
+export const brokerCashSnapshots = mysqlTable(
+  "brokerCashSnapshots",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    userId: int("userId").notNull(),
+    broker: mysqlEnum("broker", BROKER_ENUM).notNull(),
+    currency: varchar("currency", { length: 8 }).notNull(),
+    asOfDate: date("asOfDate", { mode: "string" }).notNull(),
+    cashBalance: decimal("cashBalance", { precision: 20, scale: 4 }).notNull(),
+    source: varchar("source", { length: 32 })
+      .default("SCREENSHOT_CONFIRMED")
+      .notNull(),
+    sourceReference: varchar("sourceReference", { length: 191 }),
+    evidenceDigest: varchar("evidenceDigest", { length: 64 }),
+    capturedAt: timestamp("capturedAt").defaultNow().notNull(),
+    createdAt: timestamp("createdAt").defaultNow().notNull(),
+    updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+  },
+  table => ({
+    userAccountDateIdx: uniqueIndex("broker_cash_user_account_date_idx").on(
+      table.userId,
+      table.broker,
+      table.currency,
+      table.asOfDate
+    ),
+    userDateIdx: index("broker_cash_user_date_idx").on(
+      table.userId,
+      table.asOfDate
+    ),
+  })
+);
+
+export type BrokerCashSnapshot = typeof brokerCashSnapshots.$inferSelect;
+export type InsertBrokerCashSnapshot = typeof brokerCashSnapshots.$inferInsert;
+
+/**
  * 利息で増える現金性資産（貨幣市場基金・現金宝など）。
  *
  * 富途香港の「基金」タブにある貨幣市場基金は、株式ではなく現金に近い。

@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import type {
+  ScreenshotAccountCashDraft,
   ScreenshotCashIncomeDraft,
   ScreenshotDividendDraft,
   ScreenshotEvidence,
@@ -10,6 +11,7 @@ import {
   type Broker,
 } from "../../shared/investing";
 import type {
+  ParsedAccount,
   ParsedDividendIncome,
   ParsedInterestAsset,
 } from "./ocr";
@@ -17,6 +19,23 @@ import {
   guessFormatFromBrokerName,
   type BrokerFormatId,
 } from "./brokerFormats";
+
+export type ExistingBrokerCashSnapshotLike = {
+  broker: Broker;
+  currency: string;
+  asOfDate: string;
+  cashBalance: string | number;
+  capturedAt: Date;
+};
+
+export type ExistingCashIncomeRecordLike = {
+  broker: Broker | null;
+  kind: "DIVIDEND" | "INTEREST";
+  status: "ACCRUED" | "SETTLED";
+  occurredOn: string;
+  currency: string;
+  netAmount: string | number;
+};
 
 export type ExistingInterestAssetLike = {
   id: number;
@@ -249,21 +268,133 @@ function buildDividendDraft(input: {
   };
 }
 
+function buildAccountCashDraft(input: {
+  account: ParsedAccount;
+  batchKey: string;
+  uploadDate: string;
+  selectedFormatId: BrokerFormatId;
+  cashSnapshots: ExistingBrokerCashSnapshotLike[];
+  cashIncomeRecords: ExistingCashIncomeRecordLike[];
+}): ScreenshotAccountCashDraft | null {
+  const cashBalance = finite(input.account.cash);
+  if (cashBalance === null) return null;
+
+  const broker = resolveBroker(input.account.broker, input.selectedFormatId);
+  const currency = input.account.currency?.toUpperCase() ?? null;
+  const asOfDate = input.account.cashAsOfDate ?? input.uploadDate;
+  const dateSource = input.account.cashAsOfDate ? "SCREEN" : "UPLOAD_DATE";
+  const previous = input.cashSnapshots
+    .filter(
+      row =>
+        row.broker === broker &&
+        currency !== null &&
+        row.currency.toUpperCase() === currency &&
+        row.asOfDate < asOfDate &&
+        finite(row.cashBalance) !== null
+    )
+    .sort(
+      (a, b) =>
+        b.asOfDate.localeCompare(a.asOfDate) ||
+        b.capturedAt.getTime() - a.capturedAt.getTime()
+    )[0];
+  const periodDividends = previous
+    ? input.cashIncomeRecords.filter(
+        row =>
+          row.kind === "DIVIDEND" &&
+          row.status === "SETTLED" &&
+          row.broker === broker &&
+          currency !== null &&
+          row.currency.toUpperCase() === currency &&
+          row.occurredOn > previous.asOfDate &&
+          row.occurredOn <= asOfDate &&
+          finite(row.netAmount) !== null
+      )
+    : [];
+  const settledDividendBetween = previous
+    ? round(
+        periodDividends.reduce(
+          (total, row) => total + (finite(row.netAmount) ?? 0),
+          0
+        )
+      )
+    : null;
+  const previousBalance = previous ? finite(previous.cashBalance) : null;
+  const expectedBalance =
+    previousBalance === null || settledDividendBetween === null
+      ? null
+      : round(previousBalance + settledDividendBetween);
+  const unidentifiedDifference =
+    expectedBalance === null ? null : round(cashBalance - expectedBalance);
+  const issues: string[] = [];
+  if (!currency) issues.push("通貨を読み取れませんでした");
+  if (!input.account.cashAsOfDate) {
+    issues.push("画面に基準日がないためアップロード日を仮採用します");
+  }
+  if (input.account.confidence < 60) {
+    issues.push("現金残高の読み取り確信度が低いため確認が必要です");
+  }
+  if (!previous) {
+    issues.push("前回の口座別現金がないため今回は比較基準として保存します");
+  }
+  const blocked = !currency || input.account.confidence < 60;
+  return {
+    draftKey: hash(
+      input.batchKey,
+      "account-cash",
+      broker,
+      currency ?? "?",
+      asOfDate
+    ),
+    mode: blocked ? "SKIP" : "APPLY",
+    broker,
+    currency,
+    cashBalance,
+    asOfDate,
+    dateSource,
+    confidence: input.account.confidence,
+    evidence: input.account.evidence,
+    previousBalance,
+    previousAsOfDate: previous?.asOfDate ?? null,
+    settledDividendBetween,
+    expectedBalance,
+    unidentifiedDifference,
+    reconciliationStatus: blocked
+      ? "BLOCKED"
+      : previous
+        ? "READY"
+        : "BASELINE_ONLY",
+    issues,
+  };
+}
+
 export function buildScreenshotCashIncomeDraft(input: {
   batchKey: string;
   uploadDate: string;
   model: string;
   selectedFormatId: BrokerFormatId;
+  account?: ParsedAccount;
   interestAssets: ParsedInterestAsset[];
   dividendIncomes: ParsedDividendIncome[];
   existingAssets: ExistingInterestAssetLike[];
   snapshots: InterestSnapshotLike[];
+  cashSnapshots?: ExistingBrokerCashSnapshotLike[];
+  cashIncomeRecords?: ExistingCashIncomeRecordLike[];
   evidence: ScreenshotEvidence[];
 }): ScreenshotCashIncomeDraft {
   return {
     batchKey: input.batchKey,
     uploadDate: input.uploadDate,
     model: input.model,
+    accountCash: input.account
+      ? buildAccountCashDraft({
+          account: input.account,
+          batchKey: input.batchKey,
+          uploadDate: input.uploadDate,
+          selectedFormatId: input.selectedFormatId,
+          cashSnapshots: input.cashSnapshots ?? [],
+          cashIncomeRecords: input.cashIncomeRecords ?? [],
+        })
+      : null,
     interestAssets: input.interestAssets.map((row, index) =>
       buildInterestDraft({
         row,

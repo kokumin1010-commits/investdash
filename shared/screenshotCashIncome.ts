@@ -47,6 +47,25 @@ export type ScreenshotDividendDraft = {
   issues: string[];
 };
 
+export type ScreenshotAccountCashDraft = {
+  draftKey: string;
+  mode: ScreenshotDraftMode;
+  broker: Broker;
+  currency: string | null;
+  cashBalance: number | null;
+  asOfDate: string;
+  dateSource: ScreenshotDateSource;
+  confidence: number;
+  evidence: string | null;
+  previousBalance: number | null;
+  previousAsOfDate: string | null;
+  settledDividendBetween: number | null;
+  expectedBalance: number | null;
+  unidentifiedDifference: number | null;
+  reconciliationStatus: "READY" | "BASELINE_ONLY" | "BLOCKED";
+  issues: string[];
+};
+
 export type ScreenshotEvidence = {
   fileName: string | null;
   fileKey: string | null;
@@ -58,8 +77,8 @@ export type ScreenshotCashIncomeDraft = {
   batchKey: string;
   uploadDate: string;
   model: string;
+  accountCash: ScreenshotAccountCashDraft | null;
   interestAssets: ScreenshotInterestDraft[];
   dividendIncomes: ScreenshotDividendDraft[];
   evidence: ScreenshotEvidence[];
 };
-

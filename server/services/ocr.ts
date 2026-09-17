@@ -64,6 +64,9 @@ export type ParsedAccount = {
   cash: number | null;
   currency: string | null;
   broker: string | null;
+  cashAsOfDate: string | null;
+  confidence: number;
+  evidence: string | null;
 };
 
 export type OcrResult = {
@@ -113,7 +116,9 @@ const SYSTEM_PROMPT = `あなたは証券口座のスクリーンショットを
 
 account:
 - 画面上部の純資産、預り金／現金、通貨、証券会社名を読み取る。
-- 買付力や最大購買力を現金や資産として扱わない。`;
+- 買付力や最大購買力を現金や資産として扱わない。
+- cashAsOfDate は現金残高の基準日が画面に明記された場合だけ設定する。年が無ければ null。
+- confidence は cash、currency、broker とラベルの対応確度。evidence は「預り金」「現金残高」のような画面上の根拠。`;
 
 const nullableNumber = { type: ["number", "null"] } as const;
 const nullableString = { type: ["string", "null"] } as const;
@@ -224,8 +229,19 @@ const OUTPUT_SCHEMA = {
             cash: nullableNumber,
             currency: nullableString,
             broker: nullableString,
+            cashAsOfDate: nullableString,
+            confidence: { type: "number" },
+            evidence: nullableString,
           },
-          required: ["netAssets", "cash", "currency", "broker"],
+          required: [
+            "netAssets",
+            "cash",
+            "currency",
+            "broker",
+            "cashAsOfDate",
+            "confidence",
+            "evidence",
+          ],
           additionalProperties: false,
         },
         warnings: { type: "array", items: { type: "string" } },
@@ -299,7 +315,7 @@ export async function extractPositions(
     dividendIncomes: (parsed.dividendIncomes ?? [])
       .filter(income => income.name)
       .map(normalizeDividendIncome),
-    account: parsed.account ?? emptyAccount(),
+    account: normalizeAccount(parsed.account),
     warnings: parsed.warnings ?? [],
     formatId: format.id,
     model: SCREENSHOT_EXTRACTION_MODEL,
@@ -384,11 +400,33 @@ function normalizeDividendIncome(income: ParsedDividendIncome): ParsedDividendIn
   };
 }
 
+function normalizeAccount(
+  account: Partial<ParsedAccount> | null | undefined
+): ParsedAccount {
+  return {
+    netAssets: roundTo(account?.netAssets, 4),
+    cash: roundTo(account?.cash, 4),
+    currency: currency(account?.currency),
+    broker: account?.broker?.trim() || null,
+    cashAsOfDate: date(account?.cashAsOfDate),
+    confidence: confidence(account?.confidence),
+    evidence: account?.evidence?.trim() || null,
+  };
+}
+
 /** テスト用エクスポート */
 export const normalizePositionForTest = normalizePosition;
 export const normalizeInterestAssetForTest = normalizeInterestAsset;
 export const normalizeDividendIncomeForTest = normalizeDividendIncome;
 
 function emptyAccount(): ParsedAccount {
-  return { netAssets: null, cash: null, currency: null, broker: null };
+  return {
+    netAssets: null,
+    cash: null,
+    currency: null,
+    broker: null,
+    cashAsOfDate: null,
+    confidence: 0,
+    evidence: null,
+  };
 }

@@ -281,6 +281,20 @@
       "when": 1789350816022,
       "tag": "0039_strong_magma",
       "breakpoints": true
+    },
+    {
+      "idx": 40,
+      "version": "5",
+      "when": 1789565466531,
+      "tag": "0040_soft_fallen_one",
+      "breakpoints": true
+    },
+    {
+      "idx": 41,
+      "version": "5",
+      "when": 1789614609367,
+      "tag": "0041_zippy_apocalypse",
+      "breakpoints": true
     }
   ]
 }

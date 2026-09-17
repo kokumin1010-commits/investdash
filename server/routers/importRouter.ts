@@ -79,6 +79,18 @@ const dividendDraftSchema = z.object({
   evidence: z.string().max(500).nullable(),
 });
 
+const accountCashDraftSchema = z.object({
+  draftKey: z.string().min(16).max(64),
+  mode: z.enum(["APPLY", "SKIP"]),
+  broker: z.enum(BROKERS),
+  currency: z.string().trim().min(3).max(8).nullable(),
+  cashBalance: z.number().nullable(),
+  asOfDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  dateSource: z.enum(["SCREEN", "UPLOAD_DATE"]),
+  confidence: z.number().min(0).max(100),
+  evidence: z.string().max(500).nullable(),
+});
+
 const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
 
 function jstDate(value = new Date()) {
@@ -126,6 +138,11 @@ function storedCashDraftKeys(parsed: unknown, batchKey: string) {
         if (typeof key === "string") keys.add(key);
       }
     }
+  }
+  const accountCash = draft.accountCash;
+  if (accountCash && typeof accountCash === "object") {
+    const key = (accountCash as Record<string, unknown>).draftKey;
+    if (typeof key === "string") keys.add(key);
   }
   return keys;
 }
@@ -267,10 +284,18 @@ export const importRouter = router({
           });
         }
 
-        const [existing, existingAssets, snapshots] = await Promise.all([
+        const [
+          existing,
+          existingAssets,
+          snapshots,
+          cashSnapshots,
+          cashIncomeRecords,
+        ] = await Promise.all([
           db.listHoldings(userId),
           db.listInterestAssets(userId),
           db.listInterestAssetIncomeSnapshots(userId),
+          db.listBrokerCashSnapshots(userId, 240),
+          db.listCashIncomeRecords(userId),
         ]);
         const existingMap = new Map(existing.map(h => [h.symbol, h]));
 
@@ -292,16 +317,20 @@ export const importRouter = router({
           uploadDate: jstDate(),
           model: result.model,
           selectedFormatId: input.formatId ?? result.formatId,
+          account: result.account,
           interestAssets: result.interestAssets,
           dividendIncomes: result.dividendIncomes,
           existingAssets,
           snapshots,
+          cashSnapshots,
+          cashIncomeRecords,
           evidence,
         });
         const warnings = [...result.warnings];
         if (
           jobId === null &&
-          (cashIncomeDraft.interestAssets.length > 0 ||
+          (cashIncomeDraft.accountCash !== null ||
+            cashIncomeDraft.interestAssets.length > 0 ||
             cashIncomeDraft.dividendIncomes.length > 0)
         ) {
           warnings.push(
@@ -379,6 +408,7 @@ export const importRouter = router({
           )
           .default([]),
         batchKey: z.string().min(16).max(64).optional(),
+        accountCash: accountCashDraftSchema.nullable().optional(),
         interestAssets: z.array(interestDraftSchema).max(50).default([]),
         dividendIncomes: z.array(dividendDraftSchema).max(200).default([]),
         cashBalance: z.number().min(0).nullable().optional(),
@@ -394,7 +424,9 @@ export const importRouter = router({
       const skipped: string[] = [];
 
       const hasCashDrafts =
-        input.interestAssets.length > 0 || input.dividendIncomes.length > 0;
+        input.accountCash !== null && input.accountCash !== undefined ||
+        input.interestAssets.length > 0 ||
+        input.dividendIncomes.length > 0;
       let allowedCashDraftKeys: Set<string> | null = null;
       if (hasCashDrafts) {
         if (!input.jobId || !input.batchKey) {
@@ -418,6 +450,7 @@ export const importRouter = router({
           input.batchKey
         );
         const requestedKeys = [
+          ...(input.accountCash ? [input.accountCash] : []),
           ...input.interestAssets,
           ...input.dividendIncomes,
         ].map(row => row.draftKey);
@@ -510,13 +543,18 @@ export const importRouter = router({
         }
       }
 
-      if (input.cashBalance !== null && input.cashBalance !== undefined) {
+      if (
+        (!input.accountCash || input.accountCash.mode === "SKIP") &&
+        input.cashBalance !== null &&
+        input.cashBalance !== undefined
+      ) {
         await db.updateSettings(userId, {
           cashBalance: String(input.cashBalance),
         });
       }
 
       const cashIncomeResult = {
+        accountCashSnapshotsSaved: 0,
         interestAssetsSaved: 0,
         interestIncomeRecordsSaved: 0,
         dividendRecordsSaved: 0,
@@ -710,6 +748,48 @@ export const importRouter = router({
           });
           cashIncomeResult.dividendRecordsSaved += 1;
         }
+
+        const accountCash = input.accountCash;
+        if (accountCash?.mode === "APPLY") {
+          if (!accountCash.currency || accountCash.cashBalance === null) {
+            cashIncomeResult.skipped.push(
+              "口座現金（通貨または残高が未取得）"
+            );
+          } else if (accountCash.confidence < 60) {
+            cashIncomeResult.skipped.push(
+              "口座現金（読み取り確信度が低いため未保存）"
+            );
+          } else {
+            const currency = accountCash.currency.toUpperCase();
+            const capturedAt = new Date();
+            await db.upsertBrokerCashSnapshot({
+              userId,
+              broker: accountCash.broker,
+              currency,
+              asOfDate: accountCash.asOfDate,
+              cashBalance: String(accountCash.cashBalance),
+              source: "SCREENSHOT_CONFIRMED",
+              sourceReference: `import-job:${input.jobId}:cash:${accountCash.draftKey}`,
+              evidenceDigest: null,
+              capturedAt,
+            });
+            const existingBalance = await db.getBrokerBalance(
+              userId,
+              accountCash.broker
+            );
+            await db.upsertBrokerBalance({
+              userId,
+              broker: accountCash.broker,
+              currency,
+              cashBalance: String(accountCash.cashBalance),
+              maintenanceMargin: existingBalance?.maintenanceMargin ?? "0",
+              interestMtd: existingBalance?.interestMtd ?? "0",
+              currencyBreakdown: existingBalance?.currencyBreakdown ?? null,
+              capturedAt,
+            });
+            cashIncomeResult.accountCashSnapshotsSaved += 1;
+          }
+        }
       }
 
       if (input.jobId) {
@@ -718,6 +798,7 @@ export const importRouter = router({
           appliedCount:
             created +
             updated +
+            cashIncomeResult.accountCashSnapshotsSaved +
             cashIncomeResult.interestAssetsSaved +
             cashIncomeResult.dividendRecordsSaved,
         });

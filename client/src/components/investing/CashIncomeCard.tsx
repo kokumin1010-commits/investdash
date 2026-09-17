@@ -26,6 +26,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { trpc } from "@/lib/trpc";
+import { CashBalanceTrackingSection } from "./CashBalanceTrackingSection";
 import type {
   ActualIncomeMetric,
   CashIncomeOverview,
@@ -222,6 +223,11 @@ export function CashIncomeCard({ data, interestAssetsJpy, interestRatePct }: Pro
         </div>
       </CardHeader>
       <CardContent className="space-y-5">
+        <CashBalanceTrackingSection
+          data={data.cashBalanceTracking}
+          annualDividendJpy={forecast.annualDividendJpy}
+        />
+
         <section className="space-y-3" aria-labelledby="actual-income-heading">
           <div className="flex flex-wrap items-start justify-between gap-2">
             <div>

@@ -1,3 +1,5 @@
+import type { CashBalanceTracking } from "./cashBalanceTracking";
+
 export type CashIncomeStatus = "AVAILABLE" | "PARTIAL" | "UNAVAILABLE";
 
 export type ActualIncomeMetric = {
@@ -20,6 +22,7 @@ export type ForecastRunRateMetric = {
 };
 
 export type CashIncomeOverview = {
+  cashBalanceTracking?: CashBalanceTracking;
   actual: {
     asOfDate: string;
     latestDailyInterest: ActualIncomeMetric;

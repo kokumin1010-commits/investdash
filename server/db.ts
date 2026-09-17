@@ -12,6 +12,7 @@ import {
   users,
   watchlist,
   brokerBalances,
+  brokerCashSnapshots,
   interestAssets,
   interestAssetIncomeSnapshots,
   cashIncomeRecords,
@@ -30,6 +31,7 @@ import {
   type InsertUser,
   type InsertWatchlistItem,
   type InsertBrokerBalance,
+  type InsertBrokerCashSnapshot,
   type InsertInterestAsset,
   type InsertInterestAssetIncomeSnapshot,
   type InsertCashIncomeRecord,
@@ -379,6 +381,33 @@ export async function deleteBrokerBalance(userId: number, broker: string): Promi
   if (!existing) return false;
   await db.delete(brokerBalances).where(eq(brokerBalances.id, existing.id));
   return true;
+}
+
+/* ---------------- スクショ確定の口座別現金残高履歴 ---------------- */
+
+export async function listBrokerCashSnapshots(userId: number, limit = 240) {
+  const db = await requireDb();
+  return db
+    .select()
+    .from(brokerCashSnapshots)
+    .where(eq(brokerCashSnapshots.userId, userId))
+    .orderBy(desc(brokerCashSnapshots.asOfDate), desc(brokerCashSnapshots.id))
+    .limit(Math.min(Math.max(limit, 1), 1000));
+}
+
+export async function upsertBrokerCashSnapshot(
+  values: Omit<InsertBrokerCashSnapshot, "id" | "createdAt" | "updatedAt">
+) {
+  const db = await requireDb();
+  await db.insert(brokerCashSnapshots).values(values).onDuplicateKeyUpdate({
+    set: {
+      cashBalance: values.cashBalance,
+      source: values.source,
+      sourceReference: values.sourceReference ?? null,
+      evidenceDigest: values.evidenceDigest ?? null,
+      capturedAt: values.capturedAt,
+    },
+  });
 }
 
 /* ----------------------------- interestAssets ----------------------------- */

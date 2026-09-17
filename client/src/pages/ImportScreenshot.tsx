@@ -27,6 +27,7 @@ import { trpc } from "@/lib/trpc";
 import { looksLikeImage, prepareImage } from "@/lib/imageFile";
 import { marketLabel, type Market } from "@shared/investing";
 import type {
+  ScreenshotAccountCashDraft,
   ScreenshotCashIncomeDraft,
   ScreenshotDividendDraft,
   ScreenshotInterestDraft,
@@ -123,8 +124,13 @@ export default function ImportScreenshot() {
       setJobId(res.jobId ?? null);
       setWarnings(res.warnings);
       setCashIncomeDraft(res.cashIncomeDraft as ScreenshotCashIncomeDraft);
-      if (res.account.cash !== null) setCash(String(res.account.cash));
+      if (res.cashIncomeDraft.accountCash === null && res.account.cash !== null) {
+        setCash(String(res.account.cash));
+      } else {
+        setCash("");
+      }
       const cashDraftCount =
+        (res.cashIncomeDraft.accountCash ? 1 : 0) +
         res.cashIncomeDraft.interestAssets.length +
         res.cashIncomeDraft.dividendIncomes.length;
       toast.success(
@@ -152,6 +158,9 @@ export default function ImportScreenshot() {
       const parts: string[] = [];
       if (res.created > 0) parts.push(`新規 ${res.created} 件`);
       if (res.updated > 0) parts.push(`更新 ${res.updated} 件`);
+      if ((res.cashIncomeResult.accountCashSnapshotsSaved ?? 0) > 0) {
+        parts.push("口座現金基準 1 件");
+      }
       if (res.cashIncomeResult.interestAssetsSaved > 0) {
         parts.push(`現金宝 ${res.cashIncomeResult.interestAssetsSaved} 件`);
       }
@@ -179,7 +188,8 @@ export default function ImportScreenshot() {
       setWarnings([]);
       if (res.created + res.updated > 0) setLocation("/holdings");
       else if (
-        res.cashIncomeResult.interestAssetsSaved +
+        (res.cashIncomeResult.accountCashSnapshotsSaved ?? 0) +
+          res.cashIncomeResult.interestAssetsSaved +
           res.cashIncomeResult.dividendRecordsSaved >
         0
       ) {
@@ -262,13 +272,28 @@ export default function ImportScreenshot() {
     );
   };
 
+  const updateAccountCashDraft = (
+    patch: Partial<ScreenshotAccountCashDraft>
+  ) => {
+    setCashIncomeDraft(previous =>
+      previous?.accountCash
+        ? {
+            ...previous,
+            accountCash: { ...previous.accountCash, ...patch },
+          }
+        : previous
+    );
+  };
+
   const activeRows = (rows ?? []).filter(r => r.mode !== "SKIP");
   const activeInterestDrafts =
     cashIncomeDraft?.interestAssets.filter(row => row.mode === "APPLY") ?? [];
   const activeDividendDrafts =
     cashIncomeDraft?.dividendIncomes.filter(row => row.mode === "APPLY") ?? [];
   const activeCashDraftCount =
-    activeInterestDrafts.length + activeDividendDrafts.length;
+    (cashIncomeDraft?.accountCash?.mode === "APPLY" ? 1 : 0) +
+    activeInterestDrafts.length +
+    activeDividendDrafts.length;
 
   return (
     <div className="mx-auto max-w-[1200px] space-y-5 pb-10">
@@ -485,8 +510,10 @@ export default function ImportScreenshot() {
 
           {cashIncomeDraft ? (
             <ScreenshotCashIncomeReview
+              accountCash={cashIncomeDraft.accountCash}
               interestAssets={cashIncomeDraft.interestAssets}
               dividendIncomes={cashIncomeDraft.dividendIncomes}
+              onAccountCashChange={updateAccountCashDraft}
               onInterestChange={updateInterestDraft}
               onDividendChange={updateDividendDraft}
             />
@@ -741,11 +768,12 @@ export default function ImportScreenshot() {
             </div>
           </Card>
 
+          {cashIncomeDraft?.accountCash === null ? (
           <Card>
             <CardHeader className="pb-3">
               <CardTitle className="text-base">現金残高（任意）</CardTitle>
               <CardDescription className="text-xs">
-                預り金を入力すると、ダッシュボードの総資産に反映されます。
+                口座・通貨を読み取れなかった場合だけ使う旧全体現金です。口座別の照合には使いません。
               </CardDescription>
             </CardHeader>
             <CardContent>
@@ -763,6 +791,7 @@ export default function ImportScreenshot() {
               </div>
             </CardContent>
           </Card>
+          ) : null}
 
           <div className="flex flex-wrap items-center justify-between gap-3">
             <p className="w-full text-sm text-muted-foreground sm:w-auto">
@@ -807,8 +836,24 @@ export default function ImportScreenshot() {
                       confidence: r.confidence,
                       mode: r.mode,
                     })),
-                    cashBalance: cash === "" ? null : Number(cash),
+                    cashBalance:
+                      cashIncomeDraft?.accountCash || cash === ""
+                        ? null
+                        : Number(cash),
                     formatId,
+                    accountCash: cashIncomeDraft?.accountCash
+                      ? {
+                          draftKey: cashIncomeDraft.accountCash.draftKey,
+                          mode: cashIncomeDraft.accountCash.mode,
+                          broker: cashIncomeDraft.accountCash.broker,
+                          currency: cashIncomeDraft.accountCash.currency,
+                          cashBalance: cashIncomeDraft.accountCash.cashBalance,
+                          asOfDate: cashIncomeDraft.accountCash.asOfDate,
+                          dateSource: cashIncomeDraft.accountCash.dateSource,
+                          confidence: cashIncomeDraft.accountCash.confidence,
+                          evidence: cashIncomeDraft.accountCash.evidence,
+                        }
+                      : null,
                     interestAssets: (cashIncomeDraft?.interestAssets ?? []).map(
                       row => ({
                         draftKey: row.draftKey,

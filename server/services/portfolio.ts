@@ -46,6 +46,7 @@ import {
   mergeCashFlowAndPortfolioSnapshots,
   type CashIncomeOverview,
 } from "./cashIncome";
+import { buildCashBalanceTracking } from "./cashBalanceTracking";
 import { jstDayKey } from "../../shared/jstDate";
 import { groupPositionsBySymbol, type GroupedPosition } from "./groupPositions";
 import {
@@ -481,6 +482,7 @@ export async function buildPortfolio(userId: number): Promise<{
     interestIncomeSnapshots,
     cashIncomeRecords,
     earliestMonthlyDates,
+    brokerCashSnapshots,
   ] = await Promise.all([
     db.listHoldings(userId),
     db.getSettings(userId),
@@ -498,6 +500,7 @@ export async function buildPortfolio(userId: number): Promise<{
     // 实际到账股息只来自现金流水
     db.listCashIncomeRecords(userId, yearStart),
     db.earliestMonthlyHoldingDates(userId),
+    db.listBrokerCashSnapshots(userId, 240),
   ]);
 
   const rates: FxRates = {
@@ -1122,11 +1125,26 @@ export async function buildPortfolio(userId: number): Promise<{
     cashFlowSnapshots,
     snapshots
   );
-  const cashIncome = attachCashIncomeComparisons(
+  const cashIncomeWithComparisons = attachCashIncomeComparisons(
     baseCashIncome,
     summary.netAssetsBase,
     comparisonSnapshots
   );
+  const cashIncome: CashIncomeOverview = {
+    ...cashIncomeWithComparisons,
+    cashBalanceTracking: buildCashBalanceTracking({
+      snapshots: brokerCashSnapshots,
+      cashIncomeRecords,
+      legacyCashJpy: cashBalance,
+      knownBrokers: Array.from(new Set(rows.map(row => row.broker))),
+      fxRates: {
+        USD: rates.usdJpy,
+        SGD: rates.sgdJpy,
+        HKD: rates.hkdJpy,
+      },
+      asOfDate: cashIncomeWithComparisons.forecast.asOfDate,
+    }),
+  };
   await db
     .upsertDailyCashFlowSnapshot({
       userId,
