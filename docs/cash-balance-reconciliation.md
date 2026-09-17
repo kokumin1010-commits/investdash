@@ -27,3 +27,9 @@
 ## ローカル画面検証
 
 2026-09-17に390pxと1280pxでDashboardを読取専用検証した。現行データには口座別現金スクショがないため、旧全体現金JPY 1,255,302を「旧全体値・口座未分類」として表示し、基準後の入金済み配当、暫定現在残高、入金確認待ちの配当予想は未取得のまま分離した。次回スクショ待ちの券商一覧を表示し、旧全体値を特定口座へ推測配分していない。両画面で横方向のはみ出し、カードの重なり、金額ラベルの欠落はなかった。
+
+## 大型レスポンスの圧縮
+
+Railway版c0efa97の初回正式検証では、`portfolio.overview`が長いAI判断理由を含む大型JSONを未圧縮で返し、SalesDashとRailway直結の双方で外部検証環境への転送が120〜450秒以内に完了しなかった。レスポンスはHTTP 200で先頭から継続取得でき、DB待ちやAPI例外ではなく転送量がボトルネックだった。
+
+Expressへ標準HTTP圧縮を追加した。ローカル実測では同じ`portfolio.overview`が非圧縮405,691 bytesに対しgzip 51,059 bytesとなり、`Content-Encoding: gzip`と`Vary: trpc-accept, Accept-Encoding`を確認した。解凍後JSONの`cashBalanceTracking.status`は`LEGACY_TOTAL_ONLY`で正常だった。

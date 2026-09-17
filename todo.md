@@ -449,3 +449,4 @@
 - [x] 复用顶部“スクショから自動計算”与现有追加截图入口，显示最終確定日／暫定余额／次回スクショ待ち，不要求连接券商API或新增后台调度
 - [ ] 补充服务、路由、截图取入、页面及390px／1280px回归测试，运行完整Vitest、TypeScript与production build
 - [ ] 同步Railway与GitHub，完成SalesDash正式只读验收、验证文档与最终checkpoint
+- [ ] 为大型portfolio.overview启用HTTP压缩，缩短SalesDash Dashboard传输时间并完成压缩响应回归验证

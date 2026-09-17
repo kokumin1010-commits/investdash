@@ -1,5 +1,6 @@
 import "dotenv/config";
 import express from "express";
+import compression from "compression";
 import { createServer } from "http";
 import net from "net";
 import { createExpressMiddleware } from "@trpc/server/adapters/express";
@@ -42,6 +43,9 @@ async function findAvailablePort(startPort: number = 3000): Promise<number> {
 async function startServer() {
   const app = express();
   const server = createServer(app);
+  // portfolio.overview は銘柄分析を含む大きな JSON になるため、
+  // 外部プロキシ経由でも初期表示を待たせないよう圧縮する。
+  app.use(compression({ threshold: 1024 }));
   app.get("/healthz", async (_req, res) => {
     res.json({
       ok: true,

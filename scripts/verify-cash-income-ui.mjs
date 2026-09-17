@@ -71,7 +71,11 @@ async function openBrowser(width, height, port) {
     if (result.exceptionDetails) throw new Error(result.exceptionDetails.text);
     return result.result.value;
   };
-  const waitUntil = async (label, expression, attempts = 240) => {
+  const waitUntil = async (
+    label,
+    expression,
+    attempts = Number(process.env.UI_WAIT_ATTEMPTS ?? 240)
+  ) => {
     for (let index = 0; index < attempts; index += 1) {
       try {
         if (await evalValue(expression)) return;
