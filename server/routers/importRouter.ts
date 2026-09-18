@@ -320,6 +320,7 @@ export const importRouter = router({
             parsedAvgCost: p.avgCost,
             marketValue: p.marketValue,
             pnl: p.pnl,
+            pnlPct: p.pnlPct,
             existingQuantity,
             existingAvgCost,
           });

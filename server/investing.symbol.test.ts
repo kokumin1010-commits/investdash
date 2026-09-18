@@ -91,13 +91,14 @@ describe("resolveScreenshotAverageCost", () => {
         parsedAvgCost: 46.06,
         marketValue: 23_058,
         pnl: 9_071.68,
+        pnlPct: 65.1,
         existingQuantity: 300,
         existingAvgCost: 46.6211,
       })
     ).toBe(46.6211);
   });
 
-  it("新規SGX銘柄は評価額と損益から取得単価を算出する", () => {
+  it("新規SGX銘柄は損益と損益率から取得単価を算出する", () => {
     expect(
       resolveScreenshotAverageCost({
         formatId: "sc_sg",
@@ -106,13 +107,14 @@ describe("resolveScreenshotAverageCost", () => {
         parsedAvgCost: 16.65,
         marketValue: 37_950,
         pnl: -351.44,
+        pnlPct: -0.92,
         existingQuantity: null,
         existingAvgCost: null,
       })
-    ).toBe(16.6528);
+    ).toBe(16.6087);
   });
 
-  it("丸められたM表記しかない新規日本株では取得単価を作らない", () => {
+  it("新規日本株も丸められたM表記を使わず損益率から取得単価を算出する", () => {
     expect(
       resolveScreenshotAverageCost({
         formatId: "sc_sg",
@@ -121,10 +123,11 @@ describe("resolveScreenshotAverageCost", () => {
         parsedAvgCost: 7_344.76,
         marketValue: 2_650_000,
         pnl: 395_126.61,
+        pnlPct: 17.6,
         existingQuantity: null,
         existingAvgCost: null,
       })
-    ).toBeNull();
+    ).toBe(7_483.4585);
   });
 });
 

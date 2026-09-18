@@ -17,6 +17,7 @@ export type ParsedPosition = {
   currentPrice: number | null;
   marketValue: number | null;
   pnl: number | null;
+  pnlPct: number | null;
   confidence: number;
 };
 
@@ -94,6 +95,7 @@ const SYSTEM_PROMPT = `あなたは証券口座のスクリーンショットを
 
 保有ポジション positions:
 - 銘柄名、コード、数量、取得単価、現在値、評価額、評価損益を読み取る。
+- 評価損益率が表示されている場合は、%記号を除いた符号付き数値を pnlPct に入れる。
 - 取得単価が右端で見切れている場合、評価額・数量・評価損益がすべて明瞭なときだけ
   取得単価 =（評価額 − 評価損益）÷ 数量 で逆算し、warnings に記録する。
 - 行が画面下端で途切れている場合は含めない。
@@ -143,6 +145,7 @@ const OUTPUT_SCHEMA = {
               currentPrice: nullableNumber,
               marketValue: nullableNumber,
               pnl: nullableNumber,
+              pnlPct: nullableNumber,
               confidence: { type: "number" },
             },
             required: [
@@ -153,6 +156,7 @@ const OUTPUT_SCHEMA = {
               "currentPrice",
               "marketValue",
               "pnl",
+              "pnlPct",
               "confidence",
             ],
             additionalProperties: false,
@@ -369,6 +373,7 @@ function normalizePosition(
     currentPrice: roundTo(position.currentPrice, priceDigits),
     marketValue: roundTo(position.marketValue, 2),
     pnl: roundTo(position.pnl, 2),
+    pnlPct: roundTo(position.pnlPct, 4),
     confidence: confidence(position.confidence),
   };
 }

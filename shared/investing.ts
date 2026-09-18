@@ -316,8 +316,8 @@ export function normalizeBrokerImportSymbol(
 /**
  * Standard Chartered の折り畳みカードは平均取得単価を表示しない。
  * 同じ口座・同じ数量の既存行は、丸められた損益率から再計算せず既存原価を保持する。
- * 新規または数量変更のSGX行だけ、画面にセント単位で表示された評価額と損益から
- * 平均取得単価を決定的に算出する。日本株の M（百万）丸め値では逆算しない。
+ * 新規または数量変更行だけ、画面の含み損益と含み損益率から平均取得単価を算出する。
+ * Mkt Valueには売却手数料等の影響が混ざる可能性があり、日本株ではM単位に丸められるため使わない。
  */
 export function resolveScreenshotAverageCost(input: {
   formatId?: string | null;
@@ -326,6 +326,7 @@ export function resolveScreenshotAverageCost(input: {
   parsedAvgCost: number | null;
   marketValue: number | null;
   pnl: number | null;
+  pnlPct: number | null;
   existingQuantity: number | null;
   existingAvgCost: number | null;
 }): number | null {
@@ -343,21 +344,22 @@ export function resolveScreenshotAverageCost(input: {
   }
 
   if (
-    input.market === "SG" &&
     input.quantity !== null &&
     input.quantity > 0 &&
-    input.marketValue !== null &&
-    Number.isFinite(input.marketValue) &&
     input.pnl !== null &&
-    Number.isFinite(input.pnl)
+    Number.isFinite(input.pnl) &&
+    input.pnlPct !== null &&
+    Number.isFinite(input.pnlPct) &&
+    Math.abs(input.pnlPct) > 0.000001 &&
+    Math.sign(input.pnl) === Math.sign(input.pnlPct)
   ) {
-    const derived = (input.marketValue - input.pnl) / input.quantity;
+    const derived = input.pnl / (input.pnlPct / 100) / input.quantity;
     if (Number.isFinite(derived) && derived > 0) {
       return Math.round(derived * 10_000) / 10_000;
     }
   }
 
-  return input.market === "JP" ? null : input.parsedAvgCost;
+  return input.parsedAvgCost;
 }
 
 export function marketLabel(market: Market): string {

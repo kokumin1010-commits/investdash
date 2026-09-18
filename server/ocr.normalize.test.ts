@@ -11,6 +11,7 @@ describe("OCR 抽出結果の正規化", () => {
       currentPrice: 2557.5,
       marketValue: 4859250,
       pnl: -1580450,
+      pnlPct: -24.56,
       confidence: 80,
     });
     expect(res.avgCost).toBe(3389.32);
@@ -25,6 +26,7 @@ describe("OCR 抽出結果の正規化", () => {
       currentPrice: 1100,
       marketValue: 110000,
       pnl: 10000,
+      pnlPct: 10,
       confidence: 90,
     });
     expect(res.quantity).toBe(100);
@@ -39,6 +41,7 @@ describe("OCR 抽出結果の正規化", () => {
       currentPrice: null,
       marketValue: null,
       pnl: null,
+      pnlPct: null,
       confidence: 40,
     });
     expect(res.quantity).toBeNull();
@@ -55,6 +58,7 @@ describe("OCR 抽出結果の正規化", () => {
       currentPrice: 761.4,
       marketValue: 152280,
       pnl: -39940.006,
+      pnlPct: -20.78,
       confidence: 85,
     });
     expect(res.pnl).toBe(-39940.01);
@@ -69,6 +73,7 @@ describe("OCR 抽出結果の正規化", () => {
       currentPrice: 4575,
       marketValue: 1830000,
       pnl: -62800,
+      pnlPct: -3.32,
       confidence: 95,
     });
     expect(res).toMatchObject({
@@ -90,11 +95,13 @@ describe("OCR 抽出結果の正規化", () => {
         currentPrice: 0.955,
         marketValue: 30560,
         pnl: 2591.97,
+        pnlPct: 9.29,
         confidence: 95,
       },
       "sc_sg"
     );
     expect(res.avgCost).toBe(0.8731);
     expect(res.currentPrice).toBe(0.955);
+    expect(res.pnlPct).toBe(9.29);
   });
 });
