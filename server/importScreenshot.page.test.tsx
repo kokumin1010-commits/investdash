@@ -7,8 +7,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   parseInput: vi.fn(),
   applyInput: vi.fn(),
+  applyEvidenceInput: vi.fn(),
   invalidate: vi.fn(),
   setLocation: vi.fn(),
+  evidenceOnly: false,
 }));
 
 const cashIncomeDraft = {
@@ -83,16 +85,25 @@ vi.mock("@/lib/trpc", () => ({
           isPending: false,
           mutate: (input: unknown) => {
             mocks.parseInput(input);
+            const draft = mocks.evidenceOnly
+              ? {
+                  ...cashIncomeDraft,
+                  accountCash: null,
+                  interestAssets: [],
+                  dividendIncomes: [],
+                }
+              : cashIncomeDraft;
             options.onSuccess({
               jobId: 77,
               rows: [],
               account: { netAssets: null, cash: null, currency: null, broker: "富途證券 香港" },
-              warnings: [],
-              cashIncomeDraft,
-              evidence: cashIncomeDraft.evidence,
-              model: cashIncomeDraft.model,
+              warnings: mocks.evidenceOnly ? ["原画像だけを証拠として保存できます"] : [],
+              cashIncomeDraft: draft,
+              evidence: draft.evidence,
+              model: draft.model,
               formatId: "futu_hk",
               detectedFormatId: "futu_hk",
+              evidenceOnly: mocks.evidenceOnly,
             });
           },
         }),
@@ -116,6 +127,15 @@ vi.mock("@/lib/trpc", () => ({
               actionQueueCheck: null,
               snapshot: null,
             });
+          },
+        }),
+      },
+      applyEvidenceOnly: {
+        useMutation: (options: { onSuccess: () => Promise<void> }) => ({
+          isPending: false,
+          mutate: (input: unknown) => {
+            mocks.applyEvidenceInput(input);
+            void options.onSuccess();
           },
         }),
       },
@@ -154,6 +174,7 @@ afterEach(cleanup);
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mocks.evidenceOnly = false;
   window.localStorage.setItem("investdesk.import.format", "futu_hk");
 });
 
@@ -206,5 +227,33 @@ describe("ImportScreenshot cash income flow", () => {
       })
     );
     await waitFor(() => expect(mocks.setLocation).toHaveBeenCalledWith("/"));
+  });
+
+  it("財務データがない画像は基準日を確認して原画像だけ保存する", async () => {
+    mocks.evidenceOnly = true;
+    render(<ImportScreenshot />);
+    const input = document.querySelector('input[type="file"]') as HTMLInputElement;
+    const file = new File(["image"], "ibkr-margin.webp", { type: "image/webp" });
+    fireEvent.change(input, { target: { files: [file] } });
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "読み取りを開始" })).toBeTruthy();
+    });
+    fireEvent.click(screen.getByRole("button", { name: "読み取りを開始" }));
+
+    expect(await screen.findByText("原画像だけを証拠として保存")).toBeTruthy();
+    expect(
+      screen.getByText("財務データは変更せず、原画像 1 枚だけを保存します")
+    ).toBeTruthy();
+    expect(screen.queryByLabelText("預り金（JPY）")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "証拠だけ保存" }));
+
+    await waitFor(() => expect(mocks.applyEvidenceInput).toHaveBeenCalledTimes(1));
+    expect(mocks.applyEvidenceInput).toHaveBeenCalledWith({
+      jobId: 77,
+      formatId: "futu_hk",
+      asOfDate: "2026-09-13",
+    });
+    expect(mocks.applyInput).not.toHaveBeenCalled();
   });
 });

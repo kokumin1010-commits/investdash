@@ -26,7 +26,7 @@ import {
 } from "../services/brokerFormats";
 import { toFriendlyAiError } from "../services/aiErrors";
 import { fetchCompanyProfile, fetchQuote } from "../services/marketData";
-import { summarizeImportJob } from "../services/importHistory";
+import { getImportJobEvidence, summarizeImportJob } from "../services/importHistory";
 import {
   brokerFromFormatId,
   BROKERS,
@@ -268,6 +268,8 @@ export const importRouter = router({
           input.images.map(i => i.dataUrl),
           input.formatId
         );
+        const selectedFormatId = input.formatId ?? result.formatId;
+        const selectedBroker = brokerFromFormatId(selectedFormatId);
 
         if (
           result.positions.length === 0 &&
@@ -276,16 +278,44 @@ export const importRouter = router({
           result.account.netAssets === null &&
           result.account.cash === null
         ) {
+          const cashIncomeDraft = {
+            batchKey,
+            uploadDate: jstDate(),
+            model: result.model,
+            accountCash: null,
+            interestAssets: [],
+            dividendIncomes: [],
+            evidence,
+          };
+          const warnings = [
+            ...result.warnings,
+            "保有・口座現金・現金宝・入金済み配当は読み取れませんでした。財務データを変更せず、原画像だけを証拠として保存できます。",
+          ];
           await patchJob({
-            status: "FAILED",
-            errorMessage: "対象データを読み取れませんでした",
-            parsed: { result, evidence, batchKey },
+            status: "PARSED",
+            errorMessage: null,
+            parsed: {
+              rows: [],
+              warnings,
+              cashIncomeDraft,
+              evidence,
+              model: result.model,
+              evidenceOnly: true,
+            },
+            accountSummary: result.account,
           });
-          throw new TRPCError({
-            code: "UNPROCESSABLE_CONTENT",
-            message:
-              "スクリーンショットから保有銘柄・現金宝・実際の配当入金を読み取れませんでした。文字と日付、通貨、金額が見える状態で撮影し直してください。",
-          });
+          return {
+            jobId: jobId ?? undefined,
+            rows: [],
+            account: result.account,
+            warnings,
+            cashIncomeDraft,
+            evidence,
+            model: result.model,
+            formatId: selectedFormatId,
+            detectedFormatId: guessFormatFromBrokerName(result.account.broker),
+            evidenceOnly: true,
+          };
         }
 
         const [
@@ -301,8 +331,6 @@ export const importRouter = router({
           db.listBrokerCashSnapshots(userId, 240),
           db.listCashIncomeRecords(userId),
         ]);
-        const selectedFormatId = input.formatId ?? result.formatId;
-        const selectedBroker = brokerFromFormatId(selectedFormatId);
         const existingMap = new Map(
           existing.map(h => [`${h.broker}:${h.symbol}`, h] as const)
         );
@@ -400,6 +428,7 @@ export const importRouter = router({
           formatId: result.formatId,
           /** 画面から推定した証券アプリ（選択が未指定だった場合の参考情報） */
           detectedFormatId: guessFormatFromBrokerName(result.account.broker),
+          evidenceOnly: false,
         };
       } catch (error) {
         if (error instanceof TRPCError) throw error;
@@ -889,6 +918,50 @@ export const importRouter = router({
         actionQueueCheck,
         snapshot,
       } as const;
+    }),
+
+  /** 財務データを変更せず、確認済み原画像だけを履歴へ保存する。 */
+  applyEvidenceOnly: protectedProcedure
+    .input(
+      z.object({
+        jobId: z.number().int().positive(),
+        formatId: z.enum(BROKER_FORMAT_IDS),
+        asOfDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+      })
+    )
+    .mutation(async ({ ctx, input }) => {
+      const importJob = await db.getImportJob(ctx.user.id, input.jobId);
+      if (!importJob || importJob.status !== "PARSED") {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "確認できるスクリーンショット草稿が見つかりません",
+        });
+      }
+      if (getImportJobEvidence(importJob).length === 0) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "保存できる原画像がありません",
+        });
+      }
+      const parsed =
+        importJob.parsed &&
+        typeof importJob.parsed === "object" &&
+        !Array.isArray(importJob.parsed)
+          ? (importJob.parsed as Record<string, unknown>)
+          : {};
+      await db.updateImportJob(ctx.user.id, input.jobId, {
+        status: "APPLIED",
+        appliedCount: 0,
+        errorMessage: null,
+        parsed: {
+          ...parsed,
+          evidenceOnly: {
+            broker: brokerFromFormatId(input.formatId),
+            asOfDate: input.asOfDate,
+          },
+        },
+      });
+      return { saved: true, jobId: input.jobId } as const;
     }),
 
   history: protectedProcedure.query(async ({ ctx }) => {

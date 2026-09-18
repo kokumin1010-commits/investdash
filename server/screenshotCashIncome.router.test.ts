@@ -215,6 +215,50 @@ beforeEach(() => {
 });
 
 describe("screenshot cash income apply route", () => {
+  it("財務データを変更せず確認済み原画像だけを履歴へ保存する", async () => {
+    mocks.getImportJob.mockResolvedValue({
+      ...parsedJob(),
+      fileKey: null,
+      imageUrl: null,
+      parsed: {
+        rows: [],
+        evidence: [
+          {
+            fileName: "IMG_8834.PNG",
+            fileKey: "51-imports/ibkr-margin.png",
+            imageUrl: "/investdash/files/51-imports/ibkr-margin.png",
+            digest: "margin-digest",
+          },
+        ],
+        evidenceOnly: true,
+      },
+    });
+
+    const result = await caller(51).import.applyEvidenceOnly({
+      jobId: 77,
+      formatId: "ibkr",
+      asOfDate: "2026-09-19",
+    });
+
+    expect(result).toEqual({ saved: true, jobId: 77 });
+    expect(mocks.updateImportJob).toHaveBeenCalledWith(
+      51,
+      77,
+      expect.objectContaining({
+        status: "APPLIED",
+        appliedCount: 0,
+        parsed: expect.objectContaining({
+          evidenceOnly: {
+            broker: "ibkr",
+            asOfDate: "2026-09-19",
+          },
+        }),
+      })
+    );
+    expect(mocks.upsertBrokerCashSnapshot).not.toHaveBeenCalled();
+    expect(mocks.insertCashIncomeRecord).not.toHaveBeenCalled();
+  });
+
   it("确认后保存口座现金基准，并同步该券商当前现金但保留借入字段", async () => {
     const result = await caller(51).import.applyRows({
       ...baseInput(),

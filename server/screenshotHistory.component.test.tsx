@@ -21,6 +21,7 @@ const history = [
     accountCashCount: 1,
     interestCount: 0,
     dividendCount: 0,
+    evidenceOnly: false,
     images: [
       { index: 0, fileName: "IMG_8822.PNG", digest: "a" },
       { index: 1, fileName: "IMG_8823.PNG", digest: "b" },
@@ -37,7 +38,21 @@ const history = [
     accountCashCount: 1,
     interestCount: 0,
     dividendCount: 0,
+    evidenceOnly: false,
     images: [{ index: 0, fileName: "IMG_8828.PNG", digest: "d" }],
+  },
+  {
+    jobId: 23,
+    broker: "ibkr" as const,
+    asOfDate: "2026-09-19",
+    createdAt: new Date("2026-09-18T17:10:00.000Z"),
+    appliedCount: 0,
+    holdingCount: 0,
+    accountCashCount: 0,
+    interestCount: 0,
+    dividendCount: 0,
+    evidenceOnly: true,
+    images: [{ index: 0, fileName: "IMG_8834.PNG", digest: "e" }],
   },
 ];
 
@@ -94,8 +109,9 @@ describe("ScreenshotHistoryCard", () => {
       screen.getByText("保有 27・現金 1・3枚・取込 9/19 00:10")
     ).toBeTruthy();
     expect(screen.getByText("現金 1・1枚・取込 9/19 01:10")).toBeTruthy();
+    expect(screen.getByText("証拠のみ・1枚・取込 9/19 02:10")).toBeTruthy();
 
-    await waitFor(() => expect(fetch).toHaveBeenCalledTimes(4));
+    await waitFor(() => expect(fetch).toHaveBeenCalledTimes(5));
     expect(fetch).toHaveBeenCalledWith(
       expect.stringContaining("/api/import-evidence/22/0"),
       expect.objectContaining({

@@ -25,6 +25,7 @@ export type ImportHistoryItem = {
   accountCashCount: number;
   interestCount: number;
   dividendCount: number;
+  evidenceOnly: boolean;
   images: ImportHistoryImage[];
 };
 
@@ -90,6 +91,9 @@ function inferBroker(
   parsed: UnknownRecord | null,
   accountSummary: unknown
 ): Broker {
+  const evidenceOnly = asRecord(parsed?.evidenceOnly);
+  if (isBroker(evidenceOnly?.broker)) return evidenceOnly.broker;
+
   const cashIncomeDraft = asRecord(parsed?.cashIncomeDraft);
   const accountCash = asRecord(cashIncomeDraft?.accountCash);
   if (isBroker(accountCash?.broker)) return accountCash.broker;
@@ -109,6 +113,9 @@ function inferBroker(
 }
 
 function inferAsOfDate(parsed: UnknownRecord | null, createdAt: Date): string {
+  const evidenceOnlyDate = asString(asRecord(parsed?.evidenceOnly)?.asOfDate);
+  if (evidenceOnlyDate) return evidenceOnlyDate;
+
   const cashIncomeDraft = asRecord(parsed?.cashIncomeDraft);
   const accountCash = asRecord(cashIncomeDraft?.accountCash);
   const accountCashDate = asString(accountCash?.asOfDate);
@@ -157,6 +164,7 @@ export function summarizeImportJob(
       : 0,
     interestCount: countApplied(cashIncomeDraft?.interestAssets),
     dividendCount: countApplied(cashIncomeDraft?.dividendIncomes),
+    evidenceOnly: Boolean(asRecord(parsed?.evidenceOnly)),
     images: evidence.map((item, index) => ({
       index,
       fileName: item.fileName,

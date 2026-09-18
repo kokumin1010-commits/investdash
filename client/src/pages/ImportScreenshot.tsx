@@ -93,6 +93,8 @@ export default function ImportScreenshot() {
   const [cashIncomeDraft, setCashIncomeDraft] =
     useState<ScreenshotCashIncomeDraft | null>(null);
   const [warnings, setWarnings] = useState<string[]>([]);
+  const [evidenceOnly, setEvidenceOnly] = useState(false);
+  const [evidenceAsOfDate, setEvidenceAsOfDate] = useState("");
   const [cash, setCash] = useState<string>("");
   const [dragging, setDragging] = useState(false);
   const [preparing, setPreparing] = useState(false);
@@ -125,6 +127,8 @@ export default function ImportScreenshot() {
       setJobId(res.jobId ?? null);
       setWarnings(res.warnings);
       setCashIncomeDraft(res.cashIncomeDraft as ScreenshotCashIncomeDraft);
+      setEvidenceOnly(res.evidenceOnly);
+      setEvidenceAsOfDate(res.cashIncomeDraft.uploadDate);
       if (res.cashIncomeDraft.accountCash === null && res.account.cash !== null) {
         setCash(String(res.account.cash));
       } else {
@@ -135,7 +139,9 @@ export default function ImportScreenshot() {
         res.cashIncomeDraft.interestAssets.length +
         res.cashIncomeDraft.dividendIncomes.length;
       toast.success(
-        `${res.rows.length} 銘柄・${cashDraftCount} 件のキャッシュ収入候補を読み取りました。内容をご確認ください。`
+        res.evidenceOnly
+          ? "財務データは読み取らず、原画像だけを証拠として保存できます。"
+          : `${res.rows.length} 銘柄・${cashDraftCount} 件のキャッシュ収入候補を読み取りました。内容をご確認ください。`
       );
       // 選択と実際の画面が食い違っていた場合は知らせる
       if (
@@ -187,6 +193,8 @@ export default function ImportScreenshot() {
       setFiles([]);
       setJobId(null);
       setWarnings([]);
+      setEvidenceOnly(false);
+      setEvidenceAsOfDate("");
       if (res.created + res.updated > 0) setLocation("/holdings");
       else if (
         (res.cashIncomeResult.accountCashSnapshotsSaved ?? 0) +
@@ -196,6 +204,21 @@ export default function ImportScreenshot() {
       ) {
         setLocation("/");
       }
+    },
+    onError: e => toast.error(e.message),
+  });
+
+  const applyEvidence = trpc.import.applyEvidenceOnly.useMutation({
+    onSuccess: async () => {
+      await utils.invalidate();
+      toast.success("財務データを変更せず、原画像だけを証拠として保存しました");
+      setRows(null);
+      setCashIncomeDraft(null);
+      setFiles([]);
+      setJobId(null);
+      setWarnings([]);
+      setEvidenceOnly(false);
+      setEvidenceAsOfDate("");
     },
     onError: e => toast.error(e.message),
   });
@@ -520,8 +543,30 @@ export default function ImportScreenshot() {
             />
           ) : null}
 
+          {evidenceOnly ? (
+            <Card>
+              <CardHeader className="pb-3">
+                <CardTitle className="text-base">原画像だけを証拠として保存</CardTitle>
+                <CardDescription className="text-xs">
+                  保証金・買付力・余剰流動性などの参考画面を履歴へ残します。持株、口座現金、利息、配当は一切変更しません。
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="max-w-xs space-y-2">
+                  <Label htmlFor="evidence-as-of">証拠の基準日</Label>
+                  <Input
+                    id="evidence-as-of"
+                    type="date"
+                    value={evidenceAsOfDate}
+                    onChange={event => setEvidenceAsOfDate(event.target.value)}
+                  />
+                </div>
+              </CardContent>
+            </Card>
+          ) : null}
+
           {/* スマホ: 1 銘柄 1 カード。横スクロールせずすべての項目が見える */}
-          <div className="space-y-3 lg:hidden">
+          <div className={evidenceOnly ? "hidden" : "space-y-3 lg:hidden"}>
             {rows.map((r, i) => (
               <Card
                 key={`m-${r.symbol}-${i}`}
@@ -644,7 +689,7 @@ export default function ImportScreenshot() {
           </div>
 
           {/* デスクトップ: 一覧性の高い表 */}
-          <Card className="hidden overflow-hidden lg:block">
+          <Card className={evidenceOnly ? "hidden" : "hidden overflow-hidden lg:block"}>
             <div className="overflow-x-auto">
               <Table>
                 <TableHeader>
@@ -769,7 +814,7 @@ export default function ImportScreenshot() {
             </div>
           </Card>
 
-          {cashIncomeDraft?.accountCash === null ? (
+          {!evidenceOnly && cashIncomeDraft?.accountCash === null ? (
           <Card>
             <CardHeader className="pb-3">
               <CardTitle className="text-base">現金残高（任意）</CardTitle>
@@ -796,10 +841,13 @@ export default function ImportScreenshot() {
 
           <div className="flex flex-wrap items-center justify-between gap-3">
             <p className="w-full text-sm text-muted-foreground sm:w-auto">
-              保有 {activeRows.length} 件・キャッシュ収入 {activeCashDraftCount} 件を保存します
-              {(rows.length ?? 0) - activeRows.length > 0
-                ? `（${rows.length - activeRows.length} 件はスキップ）`
-                : ""}
+              {evidenceOnly
+                ? `財務データは変更せず、原画像 ${files.length} 枚だけを保存します`
+                : `保有 ${activeRows.length} 件・キャッシュ収入 ${activeCashDraftCount} 件を保存します${
+                    (rows.length ?? 0) - activeRows.length > 0
+                      ? `（${rows.length - activeRows.length} 件はスキップ）`
+                      : ""
+                  }`}
             </p>
             <div className="flex w-full gap-2 sm:w-auto">
               <Button
@@ -810,6 +858,8 @@ export default function ImportScreenshot() {
                   setCashIncomeDraft(null);
                   setWarnings([]);
                   setJobId(null);
+                  setEvidenceOnly(false);
+                  setEvidenceAsOfDate("");
                 }}
               >
                 やり直す
@@ -817,10 +867,21 @@ export default function ImportScreenshot() {
               <Button
                 className="flex-1 sm:flex-none"
                 disabled={
-                  apply.isPending ||
-                  (activeRows.length === 0 && activeCashDraftCount === 0)
+                  evidenceOnly
+                    ? applyEvidence.isPending || !jobId || !evidenceAsOfDate
+                    : apply.isPending ||
+                      (activeRows.length === 0 && activeCashDraftCount === 0)
                 }
-                onClick={() =>
+                onClick={() => {
+                  if (evidenceOnly) {
+                    if (!jobId) return;
+                    applyEvidence.mutate({
+                      jobId,
+                      formatId,
+                      asOfDate: evidenceAsOfDate,
+                    });
+                    return;
+                  }
                   apply.mutate({
                     jobId: jobId ?? undefined,
                     batchKey: cashIncomeDraft?.batchKey,
@@ -889,16 +950,16 @@ export default function ImportScreenshot() {
                         evidence: row.evidence,
                       })
                     ),
-                  })
-                }
+                  });
+                }}
               >
-                {apply.isPending ? (
+                {apply.isPending || applyEvidence.isPending ? (
                   <>
                     <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
                     保存中...
                   </>
                 ) : (
-                  "保存する"
+                  evidenceOnly ? "証拠だけ保存" : "保存する"
                 )}
               </Button>
             </div>

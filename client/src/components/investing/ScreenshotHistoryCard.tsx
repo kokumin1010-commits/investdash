@@ -156,8 +156,10 @@ function recordSummary(item: {
   accountCashCount: number;
   interestCount: number;
   dividendCount: number;
+  evidenceOnly: boolean;
 }) {
   const parts: string[] = [];
+  if (item.evidenceOnly) parts.push("証拠のみ");
   if (item.holdingCount > 0) parts.push(`保有 ${item.holdingCount}`);
   if (item.accountCashCount > 0) parts.push(`現金 ${item.accountCashCount}`);
   if (item.interestCount > 0) parts.push(`利息 ${item.interestCount}`);

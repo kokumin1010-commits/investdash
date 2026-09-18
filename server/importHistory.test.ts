@@ -91,4 +91,36 @@ describe("screenshot import history", () => {
     expect(getImportEvidenceAt(makeJob(), 1)).toBeNull();
     expect(getImportEvidenceAt(makeJob({ status: "PARSED" }), 0)).toBeNull();
   });
+
+  it("labels evidence-only jobs with the confirmed broker and date", () => {
+    const job = makeJob({
+      appliedCount: 0,
+      parsed: {
+        rows: [],
+        evidence: [
+          {
+            fileName: "ibkr-margin.png",
+            fileKey: "9-imports/ibkr-margin.png",
+            imageUrl: "/investdash/files/9-imports/ibkr-margin.png",
+            digest: "margin-digest",
+          },
+        ],
+        evidenceOnly: { broker: "ibkr", asOfDate: "2026-09-19" },
+      },
+      accountSummary: { broker: "Interactive Brokers" },
+    });
+
+    expect(summarizeImportJob(job)).toEqual(
+      expect.objectContaining({
+        broker: "ibkr",
+        asOfDate: "2026-09-19",
+        holdingCount: 0,
+        accountCashCount: 0,
+        evidenceOnly: true,
+        images: [
+          { index: 0, fileName: "ibkr-margin.png", digest: "margin-digest" },
+        ],
+      })
+    );
+  });
 });
