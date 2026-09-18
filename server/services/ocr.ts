@@ -322,11 +322,19 @@ export async function extractPositions(
 
   const text = res.choices?.[0]?.message?.content;
   const parsed = parseLlmJson<Partial<OcrResult>>(text, "読み取り結果");
+  const normalizedPositions = (parsed.positions ?? [])
+    .filter(position => position.name && position.tickerCode)
+    .map(position => normalizePosition(position, format.id));
+  const positions = sanitizePositionsForFormat(normalizedPositions, format.id);
+  const warnings = [...(parsed.warnings ?? [])];
+  if (positions.length < normalizedPositions.length) {
+    warnings.push(
+      `保有数量と取得単価が揃わない市況表示 ${normalizedPositions.length - positions.length} 件を保有候補から除外しました`
+    );
+  }
 
   return {
-    positions: (parsed.positions ?? [])
-      .filter(position => position.name && position.tickerCode)
-      .map(position => normalizePosition(position, format.id)),
+    positions,
     interestAssets: (parsed.interestAssets ?? [])
       .filter(asset => asset.name)
       .map(normalizeInterestAsset),
@@ -334,10 +342,24 @@ export async function extractPositions(
       .filter(income => income.name)
       .map(normalizeDividendIncome),
     account: normalizeAccount(parsed.account),
-    warnings: parsed.warnings ?? [],
+    warnings,
     formatId: format.id,
     model: SCREENSHOT_EXTRACTION_MODEL,
   };
+}
+
+function sanitizePositionsForFormat(
+  positions: ParsedPosition[],
+  formatId?: BrokerFormatId
+): ParsedPosition[] {
+  if (formatId !== "rakuten_ispeed") return positions;
+  return positions.filter(
+    position =>
+      position.quantity !== null &&
+      position.quantity > 0 &&
+      position.avgCost !== null &&
+      position.avgCost > 0
+  );
 }
 
 function finite(value: number | null | undefined): number | null {
@@ -442,6 +464,7 @@ function normalizeAccount(
 
 /** テスト用エクスポート */
 export const normalizePositionForTest = normalizePosition;
+export const sanitizePositionsForFormatForTest = sanitizePositionsForFormat;
 export const normalizeInterestAssetForTest = normalizeInterestAsset;
 export const normalizeDividendIncomeForTest = normalizeDividendIncome;
 

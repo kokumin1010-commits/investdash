@@ -122,6 +122,22 @@ describe("resolveScreenshotQuantity", () => {
 });
 
 describe("resolveScreenshotAverageCost", () => {
+  it("楽天の同一口座・同一数量は複数建玉の確認済み加重平均を保持する", () => {
+    expect(
+      resolveScreenshotAverageCost({
+        formatId: "rakuten_ispeed",
+        market: "JP",
+        quantity: 8100,
+        parsedAvgCost: 2613.89,
+        marketValue: null,
+        pnl: null,
+        pnlPct: null,
+        existingQuantity: 8100,
+        existingAvgCost: 2581.16,
+      })
+    ).toBe(2581.16);
+  });
+
   it("同一口座・同一数量なら丸め値から再計算せず既存取得単価を保持する", () => {
     expect(
       resolveScreenshotAverageCost({

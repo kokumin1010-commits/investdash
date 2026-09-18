@@ -90,8 +90,12 @@ describe("楽天証券 iSPEED のレイアウト定義", () => {
     expect(prompt).toContain("4816");
   });
 
-  it("純資産・預り金が無い画面なので cash を null にすると定めている", () => {
-    expect(prompt).toContain("cash は必ず null");
+  it("My Pageの預り金だけを口座現金として読み取り、行情を保有にしない", () => {
+    expect(prompt).toContain("預り金");
+    expect(prompt).toContain('account.cash に入れ');
+    expect(prompt).toContain("評価額合計");
+    expect(prompt).toContain("保有ポジションではない");
+    expect(prompt).toContain("保有数量と平均取得価額が表示されていない銘柄");
   });
 
   it("moomoo と逆の配色（赤=プラス）を明示している", () => {

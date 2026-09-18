@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { normalizePositionForTest } from "./services/ocr";
+import {
+  normalizePositionForTest,
+  sanitizePositionsForFormatForTest,
+} from "./services/ocr";
 
 describe("OCR 抽出結果の正規化", () => {
   it("逆算で生じた長い小数の取得単価を小数第 2 位に丸める", () => {
@@ -103,5 +106,40 @@ describe("OCR 抽出結果の正規化", () => {
     expect(res.avgCost).toBe(0.8731);
     expect(res.currentPrice).toBe(0.955);
     expect(res.pnlPct).toBe(9.29);
+  });
+
+  it("楽天iSPEEDのMy Page行情は数量・取得単価がなければ保有候補から除外する", () => {
+    const held = normalizePositionForTest(
+      {
+        name: "ヤクルト",
+        tickerCode: "2267",
+        quantity: 1800,
+        avgCost: 2394.5,
+        currentPrice: 2815.5,
+        marketValue: null,
+        pnl: null,
+        pnlPct: null,
+        confidence: 95,
+      },
+      "rakuten_ispeed"
+    );
+    const quoteOnly = normalizePositionForTest(
+      {
+        name: "テスラ",
+        tickerCode: "TSLA",
+        quantity: 400,
+        avgCost: null,
+        currentPrice: 362.505,
+        marketValue: null,
+        pnl: null,
+        pnlPct: null,
+        confidence: 80,
+      },
+      "rakuten_ispeed"
+    );
+
+    expect(
+      sanitizePositionsForFormatForTest([held, quoteOnly], "rakuten_ispeed")
+    ).toEqual([held]);
   });
 });

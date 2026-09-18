@@ -371,9 +371,8 @@ export function resolveScreenshotAverageCost(input: {
   existingQuantity: number | null;
   existingAvgCost: number | null;
 }): number | null {
-  if (input.formatId !== "sc_sg") return input.parsedAvgCost;
-
   if (
+    (input.formatId === "sc_sg" || input.formatId === "rakuten_ispeed") &&
     input.quantity !== null &&
     input.existingQuantity !== null &&
     input.quantity === input.existingQuantity &&
@@ -383,6 +382,8 @@ export function resolveScreenshotAverageCost(input: {
   ) {
     return input.existingAvgCost;
   }
+
+  if (input.formatId !== "sc_sg") return input.parsedAvgCost;
 
   if (
     input.quantity !== null &&
