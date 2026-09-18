@@ -532,7 +532,7 @@ export default function ImportScreenshot() {
             </Alert>
           ) : null}
 
-          {cashIncomeDraft ? (
+          {!evidenceOnly && cashIncomeDraft ? (
             <ScreenshotCashIncomeReview
               accountCash={cashIncomeDraft.accountCash}
               interestAssets={cashIncomeDraft.interestAssets}
@@ -850,6 +850,15 @@ export default function ImportScreenshot() {
                   }`}
             </p>
             <div className="flex w-full gap-2 sm:w-auto">
+              {!evidenceOnly && jobId ? (
+                <Button
+                  variant="outline"
+                  className="flex-1 sm:flex-none"
+                  onClick={() => setEvidenceOnly(true)}
+                >
+                  証拠だけ保存へ
+                </Button>
+              ) : null}
               <Button
                 variant="outline"
                 className="flex-1 sm:flex-none"

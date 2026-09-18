@@ -256,4 +256,27 @@ describe("ImportScreenshot cash income flow", () => {
     });
     expect(mocks.applyInput).not.toHaveBeenCalled();
   });
+
+  it("OCRが財務候補を出してもユーザー判断で証拠だけ保存へ切り替えられる", async () => {
+    render(<ImportScreenshot />);
+    const input = document.querySelector('input[type="file"]') as HTMLInputElement;
+    fireEvent.change(input, {
+      target: {
+        files: [new File(["image"], "ibkr-margin.webp", { type: "image/webp" })],
+      },
+    });
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "読み取りを開始" })).toBeTruthy();
+    });
+    fireEvent.click(screen.getByRole("button", { name: "読み取りを開始" }));
+    expect(await screen.findByText("キャッシュ収入の自動計算")).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "証拠だけ保存へ" }));
+    expect(await screen.findByText("原画像だけを証拠として保存")).toBeTruthy();
+    expect(screen.queryByText("キャッシュ収入の自動計算")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "証拠だけ保存" }));
+
+    await waitFor(() => expect(mocks.applyEvidenceInput).toHaveBeenCalledTimes(1));
+    expect(mocks.applyInput).not.toHaveBeenCalled();
+  });
 });
