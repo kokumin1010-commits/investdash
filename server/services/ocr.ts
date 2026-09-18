@@ -12,6 +12,12 @@ import { getBrokerFormat, type BrokerFormatId } from "./brokerFormats";
 export type ParsedPosition = {
   name: string;
   tickerCode: string;
+  /** 画面上の取引所コード。表示がなければ null */
+  exchange?: string | null;
+  /** K 表記を含む画面上の数量文字列。表示がなければ null */
+  quantityDisplay?: string | null;
+  /** K / M など丸め表示なら true */
+  quantityIsRounded?: boolean;
   quantity: number | null;
   avgCost: number | null;
   currentPrice: number | null;
@@ -95,6 +101,8 @@ const SYSTEM_PROMPT = `あなたは証券口座のスクリーンショットを
 
 保有ポジション positions:
 - 銘柄名、コード、数量、取得単価、現在値、評価額、評価損益を読み取る。
+- exchange には銘柄コード横の取引所表示（NYSE / NASDAQ.NMS / TSEJ / SGX 等）をそのまま入れる。表示がなければ null。
+- quantityDisplay には画面上の数量文字列（例: 400 / 1.10K / 88.4K）をそのまま入れ、K / M 等の丸め表示なら quantityIsRounded を true にする。
 - 評価損益率が表示されている場合は、%記号を除いた符号付き数値を pnlPct に入れる。
 - 取得単価が右端で見切れている場合、評価額・数量・評価損益がすべて明瞭なときだけ
   取得単価 =（評価額 − 評価損益）÷ 数量 で逆算し、warnings に記録する。
@@ -140,6 +148,9 @@ const OUTPUT_SCHEMA = {
             properties: {
               name: { type: "string" },
               tickerCode: { type: "string" },
+              exchange: nullableString,
+              quantityDisplay: nullableString,
+              quantityIsRounded: { type: "boolean" },
               quantity: nullableNumber,
               avgCost: nullableNumber,
               currentPrice: nullableNumber,
@@ -151,6 +162,9 @@ const OUTPUT_SCHEMA = {
             required: [
               "name",
               "tickerCode",
+              "exchange",
+              "quantityDisplay",
+              "quantityIsRounded",
               "quantity",
               "avgCost",
               "currentPrice",
@@ -368,6 +382,9 @@ function normalizePosition(
   const priceDigits = formatId === "sc_sg" ? 4 : 2;
   return {
     ...position,
+    exchange: position.exchange?.trim().toUpperCase() || null,
+    quantityDisplay: position.quantityDisplay?.trim() || null,
+    quantityIsRounded: Boolean(position.quantityIsRounded),
     quantity: roundTo(position.quantity, 0),
     avgCost: roundTo(position.avgCost, priceDigits),
     currentPrice: roundTo(position.currentPrice, priceDigits),

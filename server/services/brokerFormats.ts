@@ -392,6 +392,7 @@ const IBKR: BrokerFormat = {
 - **NYSE / NASDAQ.NMS / ARCA / BATS** → 米国株。currency は "USD"、market は "US"
 - **TSEJ**（東京証券取引所）→ 日本株。currency は "JPY"、market は "JP"
 - **SEHK** → 香港株。currency は "HKD"、market は "HK"
+- **SGX** → シンガポール株。currency は "SGD"、market は "SG"。tickerCode は画面の裸コード、exchange は必ず "SGX" として返す
 
 実例として、ORCL の平均価格 126.64 は USD（SGD なら約 163 になる）、
 7203 の平均価格 2891.9 は JPY である。**これを取り違えると評価額が 100 倍以上ずれる。**
@@ -422,6 +423,7 @@ const IBKR: BrokerFormat = {
 
 - **1.10K は 1100、6.90K は 6900、2.00K は 2000、3.50K は 3500 と解釈する**
 - K が付かない数値（960、600、360 など）はそのままの株数
+- quantityDisplay には画面の文字列をそのまま入れ、K 表記なら quantityIsRounded を true にする
 - **注意**: K 表記は 3 桁に丸められているため、1.10K は実際には 1,095〜1,104 の可能性がある。
   読み取った値をそのまま出力し、notes に「数量が K 表記で丸められている可能性がある」と記す
 
@@ -432,8 +434,12 @@ const IBKR: BrokerFormat = {
 cash に「現金」の値（マイナスなら借入なので負の数のまま）を入れ、
 notes に純資産評価額・有価証券総ポジション価値・維持証拠金・月初来利息を記録する。
 
+「合計(SGD)」の現金は、JPY / SGD / USD を SGD に換算した口座全体の現金である。
+account.currency は "SGD"、account.cash はこの正確な合計値とし、各通貨の実残高ではないことを evidence に明記する。
+
 **通貨別残高**（JPY / SGD / USD が国旗付きで並ぶ部分）が写っている場合は、
 マイナスの通貨が借入通貨である。notes に記録する。
+これらは通常の現金残高であり、現金宝・貨幣基金ではない。JPY 現金 / SGD 現金 / USD 現金を interestAssets に絶対に入れない。
 
 ## 銘柄詳細画面が写っている場合
 

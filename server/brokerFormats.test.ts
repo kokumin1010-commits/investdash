@@ -185,6 +185,26 @@ describe("BROKER_FORMAT_OPTIONS", () => {
   });
 });
 
+describe("IBKR（Interactive Brokers）", () => {
+  const prompt = getBrokerFormat("ibkr").layoutPrompt ?? "";
+
+  it("SGX取引所をシンガポール株として抽出する", () => {
+    expect(prompt).toContain("SGX");
+    expect(prompt).toContain('market は "SG"');
+    expect(prompt).toContain('exchange は必ず "SGX"');
+  });
+
+  it("基準通貨換算の総現金と通貨別現金を現金宝から分離する", () => {
+    expect(prompt).toContain("SGD に換算した口座全体の現金");
+    expect(prompt).toContain("interestAssets に絶対に入れない");
+  });
+
+  it("K表記の原文と丸めフラグを保持する", () => {
+    expect(prompt).toContain("quantityDisplay");
+    expect(prompt).toContain("quantityIsRounded");
+  });
+});
+
 describe("富途證券 香港（保證金綜合帳戶）", () => {
   const format = getBrokerFormat("futu_hk");
 

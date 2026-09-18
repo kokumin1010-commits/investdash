@@ -7,6 +7,7 @@ import {
   normalizeBrokerImportSymbol,
   normalizeSymbol,
   resolveScreenshotAverageCost,
+  resolveScreenshotQuantity,
   sectorJa,
   sentimentLabel,
 } from "../shared/investing";
@@ -78,6 +79,45 @@ describe("normalizeBrokerImportSymbol", () => {
 
   it("他形式の裸英数字コードは従来どおり米国株として扱う", () => {
     expect(normalizeBrokerImportSymbol("D05", "generic").market).toBe("US");
+  });
+
+  it("IBKRは画面の取引所コードからSGXと米国株を分ける", () => {
+    expect(normalizeBrokerImportSymbol("D05", "ibkr", "SGX")).toEqual({
+      symbol: "D05.SI",
+      tickerCode: "D05",
+      market: "SG",
+    });
+    expect(normalizeBrokerImportSymbol("ORCL", "ibkr", "NYSE")).toEqual({
+      symbol: "ORCL",
+      tickerCode: "ORCL",
+      market: "US",
+    });
+  });
+});
+
+describe("resolveScreenshotQuantity", () => {
+  it("IBKRのK丸め表示に既存の正確な数量が収まるなら既存値を保持する", () => {
+    expect(
+      resolveScreenshotQuantity({
+        formatId: "ibkr",
+        parsedQuantity: 1_100,
+        quantityDisplay: "1.10K",
+        quantityIsRounded: true,
+        existingQuantity: 1_103,
+      })
+    ).toBe(1_103);
+  });
+
+  it("表示範囲外の既存値はスクショ数量へ更新する", () => {
+    expect(
+      resolveScreenshotQuantity({
+        formatId: "ibkr",
+        parsedQuantity: 1_100,
+        quantityDisplay: "1.10K",
+        quantityIsRounded: true,
+        existingQuantity: 1_250,
+      })
+    ).toBe(1_100);
   });
 });
 

@@ -95,6 +95,21 @@ function findExistingAsset(
   return assets.find(asset => identity(asset.broker, asset.name, asset.currency.toUpperCase()) === key) ?? null;
 }
 
+function isPlainBrokerCashRow(
+  row: ParsedInterestAsset,
+  selectedFormatId: BrokerFormatId
+) {
+  if (selectedFormatId !== "ibkr") return false;
+  const noInterestEvidence =
+    finite(row.annualRatePct) === null &&
+    finite(row.dailyIncome) === null &&
+    finite(row.cumulativeIncome) === null;
+  const plainCashName = /(?:^|\s)(?:[A-Z]{3}\s*)?(?:現金|CASH)(?:\s|$)/i.test(
+    row.name.trim()
+  );
+  return noInterestEvidence && plainCashName;
+}
+
 export function findPreviousCumulativeIncome(
   snapshots: InterestSnapshotLike[],
   asset: ExistingInterestAssetLike | null,
@@ -336,6 +351,11 @@ function buildAccountCashDraft(input: {
   if (!previous) {
     issues.push("前回の口座別現金がないため今回は比較基準として保存します");
   }
+  if (input.selectedFormatId === "ibkr") {
+    issues.push(
+      "IBKRの現金は基準通貨換算の全通貨合計です。通貨別実残高ではなく、次回差額には為替変動も含まれます"
+    );
+  }
   const blocked = !currency || input.account.confidence < 60;
   return {
     draftKey: hash(
@@ -395,17 +415,19 @@ export function buildScreenshotCashIncomeDraft(input: {
           cashIncomeRecords: input.cashIncomeRecords ?? [],
         })
       : null,
-    interestAssets: input.interestAssets.map((row, index) =>
-      buildInterestDraft({
-        row,
-        index,
-        batchKey: input.batchKey,
-        uploadDate: input.uploadDate,
-        selectedFormatId: input.selectedFormatId,
-        existingAssets: input.existingAssets,
-        snapshots: input.snapshots,
-      })
-    ),
+    interestAssets: input.interestAssets
+      .filter(row => !isPlainBrokerCashRow(row, input.selectedFormatId))
+      .map((row, index) =>
+        buildInterestDraft({
+          row,
+          index,
+          batchKey: input.batchKey,
+          uploadDate: input.uploadDate,
+          selectedFormatId: input.selectedFormatId,
+          existingAssets: input.existingAssets,
+          snapshots: input.snapshots,
+        })
+      ),
     dividendIncomes: input.dividendIncomes.map((row, index) =>
       buildDividendDraft({
         row,

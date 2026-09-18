@@ -90,4 +90,47 @@ describe("スクショ口座現金草稿", () => {
       reconciliationStatus: "BASELINE_ONLY",
     });
   });
+
+  it("IBKRの通貨別現金を現金宝にせず、基準通貨換算総現金として説明する", () => {
+    const result = buildScreenshotCashIncomeDraft({
+      batchKey: "batch-ibkr-cash",
+      uploadDate: "2026-09-19",
+      model: "gemini-3.1-pro-preview",
+      selectedFormatId: "ibkr",
+      account: {
+        netAssets: 2_270_316.92,
+        cash: -1_845_956.61,
+        currency: "SGD",
+        broker: "IBKR",
+        cashAsOfDate: null,
+        confidence: 95,
+        evidence: "合計(SGD) 現金 -1,845,956.61",
+      },
+      interestAssets: [
+        {
+          broker: "IBKR",
+          name: "SGD 現金",
+          currency: "SGD",
+          amount: 9_760,
+          annualRatePct: null,
+          dailyIncome: null,
+          cumulativeIncome: null,
+          asOfDate: null,
+          confidence: 95,
+          evidence: "SGD 現金 9.76K",
+        },
+      ],
+      dividendIncomes: [],
+      existingAssets: [],
+      snapshots: [],
+      cashSnapshots: [],
+      cashIncomeRecords: [],
+      evidence: [],
+    });
+
+    expect(result.interestAssets).toEqual([]);
+    expect(result.accountCash?.cashBalance).toBe(-1_845_956.61);
+    expect(result.accountCash?.issues.join(" ")).toContain("基準通貨換算");
+    expect(result.accountCash?.issues.join(" ")).toContain("為替変動");
+  });
 });

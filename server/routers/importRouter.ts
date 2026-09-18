@@ -35,6 +35,7 @@ import {
   MARKETS,
   MARKET_CURRENCY,
   resolveScreenshotAverageCost,
+  resolveScreenshotQuantity,
   type Market,
 } from "../../shared/investing";
 
@@ -309,15 +310,23 @@ export const importRouter = router({
         const rows = result.positions.map(p => {
           const { symbol, tickerCode, market } = normalizeBrokerImportSymbol(
             p.tickerCode,
-            selectedFormatId
+            selectedFormatId,
+            p.exchange
           );
           const prev = existingMap.get(`${selectedBroker}:${symbol}`);
           const existingQuantity = prev ? Number(prev.quantity) : null;
           const existingAvgCost = prev ? Number(prev.avgCost) : null;
+          const quantity = resolveScreenshotQuantity({
+            formatId: selectedFormatId,
+            parsedQuantity: p.quantity,
+            quantityDisplay: p.quantityDisplay,
+            quantityIsRounded: p.quantityIsRounded,
+            existingQuantity,
+          });
           const avgCost = resolveScreenshotAverageCost({
             formatId: selectedFormatId,
             market,
-            quantity: p.quantity,
+            quantity,
             parsedAvgCost: p.avgCost,
             marketValue: p.marketValue,
             pnl: p.pnl,
@@ -327,6 +336,7 @@ export const importRouter = router({
           });
           return {
             ...p,
+            quantity,
             avgCost,
             symbol,
             tickerCode,

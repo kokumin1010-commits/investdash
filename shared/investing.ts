@@ -274,9 +274,18 @@ export function normalizeSymbol(raw: string): { symbol: string; tickerCode: stri
  */
 export function normalizeBrokerImportSymbol(
   raw: string,
-  formatId?: string | null
+  formatId?: string | null,
+  exchangeHint?: string | null
 ): { symbol: string; tickerCode: string; market: Market } {
   const input = raw.trim().toUpperCase();
+  if (formatId === "ibkr" && exchangeHint) {
+    const resolved = resolveByExchange(input, exchangeHint);
+    return {
+      symbol: resolved.symbol,
+      tickerCode: resolved.tickerCode,
+      market: resolved.market,
+    };
+  }
   if (formatId !== "sc_sg") return normalizeSymbol(input);
 
   const scSuffix = input.match(/^(.+)\.(JP|SG|US)$/);
@@ -311,6 +320,38 @@ export function normalizeBrokerImportSymbol(
     };
   }
   return normalizeSymbol(input);
+}
+
+/**
+ * IBKR の K 表記は表示用に丸められている。既存値がその表示範囲内なら、
+ * スクショ取込で推定値へ劣化させず確認済みの正確な数量を保持する。
+ */
+export function resolveScreenshotQuantity(input: {
+  formatId?: string | null;
+  parsedQuantity: number | null;
+  quantityDisplay?: string | null;
+  quantityIsRounded?: boolean;
+  existingQuantity: number | null;
+}): number | null {
+  if (
+    input.formatId !== "ibkr" ||
+    !input.quantityIsRounded ||
+    input.existingQuantity === null ||
+    input.parsedQuantity === null
+  ) {
+    return input.parsedQuantity;
+  }
+
+  const display = input.quantityDisplay?.trim().toUpperCase() ?? "";
+  const match = display.match(/^(-?[0-9]+(?:\.[0-9]+)?)([KM])$/);
+  if (!match) return input.parsedQuantity;
+  const decimals = (match[1].split(".")[1] ?? "").length;
+  const multiplier = match[2] === "M" ? 1_000_000 : 1_000;
+  const halfStep = 0.5 * 10 ** -decimals * multiplier;
+  if (Math.abs(input.existingQuantity - input.parsedQuantity) <= halfStep + 1e-9) {
+    return input.existingQuantity;
+  }
+  return input.parsedQuantity;
 }
 
 /**
