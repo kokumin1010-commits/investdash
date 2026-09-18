@@ -27,6 +27,7 @@ import {
 import { toFriendlyAiError } from "../services/aiErrors";
 import { fetchCompanyProfile, fetchQuote } from "../services/marketData";
 import { getImportJobEvidence, summarizeImportJob } from "../services/importHistory";
+import { consolidateBrokerPositionRows } from "../services/importPositions";
 import {
   brokerFromFormatId,
   BROKERS,
@@ -335,7 +336,7 @@ export const importRouter = router({
           existing.map(h => [`${h.broker}:${h.symbol}`, h] as const)
         );
 
-        const rows = result.positions.map(p => {
+        const normalizedRows = result.positions.map(p => {
           const { symbol, tickerCode, market } = normalizeBrokerImportSymbol(
             p.tickerCode,
             selectedFormatId,
@@ -374,6 +375,11 @@ export const importRouter = router({
             existingAvgCost,
           };
         });
+        const consolidatedRows = consolidateBrokerPositionRows(
+          normalizedRows,
+          selectedFormatId
+        );
+        const rows = consolidatedRows.rows;
         const cashIncomeDraft = buildScreenshotCashIncomeDraft({
           batchKey,
           uploadDate: jstDate(),
@@ -388,7 +394,7 @@ export const importRouter = router({
           cashIncomeRecords,
           evidence,
         });
-        const warnings = [...result.warnings];
+        const warnings = [...result.warnings, ...consolidatedRows.warnings];
         if (
           jobId === null &&
           (cashIncomeDraft.accountCash !== null ||
