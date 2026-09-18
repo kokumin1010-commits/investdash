@@ -450,3 +450,10 @@
 - [x] 补充服务、路由、截图取入、页面及390px／1280px回归测试；重建及Railway工作树158个测试文件／1227项、TypeScript与production build通过，SalesDash双视口正式验收无横向溢出
 - [x] 同步Railway与GitHub；账户现金功能c0efa97、响应压缩8759de3已上线，SalesDash正式API及390px／1280px只读验收通过，验证文档与最终checkpoint在本次交付保存
 - [x] 为大型portfolio.overview启用HTTP压缩；正式返回Brotli，解压后1,892,577 bytes的实数据由超时降至4,963 ms并通过完整Dashboard验收
+- [x] Moomoo日本版3枚を原画像照合し、27銘柄更新と口座現金JPY 1,414,434（2026-09-18）を確認後に保存
+- [x] Standard Chartered Singapore保有3枚を照合し、既存10件更新＋V03.SI 2,300株新規追加を保存；現金証拠がない保有画面から現金は推測しない
+- [x] Standard Chartered中国語「投资与存款」画面の「存款」SGD 40,455.01（2026-09-17）を専用OCRで抽出し、独立した確定現金基準として保存
+- [x] SGXコード`.SI`正規化、既存取得単価維持、損益率ベースの新規原価計算、中国語現金画面ルールを追加し問題ログへ記録
+- [x] 保存確定済み原画像を口座・基準日別に表示するスクリーンショット履歴、口座／年月フィルター、サムネイル、原寸モーダル、遅延読込を追加
+- [x] 履歴APIからstorage key／原画像URLを除外し、認証・user別job・storage prefixを照合する専用画像エンドポイントを追加；匿名外部アクセス401を確認
+- [x] Railway正式版f6b61d6でMoomoo 3枚、Standard Chartered保有3枚＋現金1枚の計7枚を確認；161テストファイル／1244テスト、TypeScript、production build、390px／1280px・overflow 0の正式验收を通過
