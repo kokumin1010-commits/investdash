@@ -16,6 +16,7 @@ import {
 import { createContext } from "./context";
 import { serveStatic, setupVite } from "./vite";
 import { registerRailwayFileStorage } from "../railwayFileStorage";
+import { registerImportEvidenceRoute } from "../importEvidenceRoute";
 import { startRailwayScheduler } from "../railwayScheduler";
 import { getSystemHealthSnapshot, registerRuntimeExitCapture, startSystemHealthMonitor } from "../services/systemHealth";
 
@@ -59,6 +60,7 @@ async function startServer() {
   app.use(express.urlencoded({ limit: "50mb", extended: true }));
   registerRailwayFileStorage(app);
   registerStorageProxy(app);
+  registerImportEvidenceRoute(app);
   registerOAuthRoutes(app);
   // tRPC API
   app.use(

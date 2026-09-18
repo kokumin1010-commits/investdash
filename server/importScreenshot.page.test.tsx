@@ -136,6 +136,10 @@ vi.mock("@/components/investing/MonthlyHistoryCard", () => ({
   MonthlyHistoryCard: () => null,
 }));
 
+vi.mock("@/components/investing/ScreenshotHistoryCard", () => ({
+  ScreenshotHistoryCard: () => null,
+}));
+
 vi.mock("@/components/investing/DisclaimerNote", () => ({
   DisclaimerNote: () => null,
 }));
@@ -204,4 +208,3 @@ describe("ImportScreenshot cash income flow", () => {
     await waitFor(() => expect(mocks.setLocation).toHaveBeenCalledWith("/"));
   });
 });
-

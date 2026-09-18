@@ -26,6 +26,7 @@ import {
 } from "../services/brokerFormats";
 import { toFriendlyAiError } from "../services/aiErrors";
 import { fetchCompanyProfile, fetchQuote } from "../services/marketData";
+import { summarizeImportJob } from "../services/importHistory";
 import {
   brokerFromFormatId,
   BROKERS,
@@ -880,9 +881,22 @@ export const importRouter = router({
       } as const;
     }),
 
-  history: protectedProcedure.query(async ({ ctx }) =>
-    db.listImportJobs(ctx.user.id, 12)
-  ),
+  history: protectedProcedure.query(async ({ ctx }) => {
+    const [jobs, cashSnapshots] = await Promise.all([
+      db.listImportJobs(ctx.user.id, 60),
+      db.listBrokerCashSnapshots(ctx.user.id, 240),
+    ]);
+    const cashByJobId = new Map<number, (typeof cashSnapshots)[number]>();
+    for (const snapshot of cashSnapshots) {
+      const match = snapshot.sourceReference?.match(/^import-job:(\d+):cash:/);
+      if (match) cashByJobId.set(Number(match[1]), snapshot);
+    }
+    return jobs
+      .map(job =>
+        summarizeImportJob(job, { cashSnapshot: cashByJobId.get(job.id) })
+      )
+      .filter((item): item is NonNullable<typeof item> => item !== null);
+  }),
 
   /** 記録された月の一覧（新しい順） */
   monthlyList: protectedProcedure.query(async ({ ctx }) =>

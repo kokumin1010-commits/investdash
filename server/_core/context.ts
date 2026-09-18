@@ -25,26 +25,36 @@ async function resolvePasscodeUser(
   return (await getUserById(ownerUserId)) ?? null;
 }
 
-export async function createContext(
-  opts: CreateExpressContextOptions
-): Promise<TrpcContext> {
+/**
+ * tRPC 以外の保護ルートでも同じ認証規則を使う。
+ * パスコードBearerを優先し、既存のManus OAuthセッションへフォールバックする。
+ */
+export async function resolveRequestUser(
+  req: CreateExpressContextOptions["req"]
+): Promise<User | null> {
   let user: User | null = null;
 
   try {
-    user = await resolvePasscodeUser(opts.req);
+    user = await resolvePasscodeUser(req);
   } catch (error) {
     console.warn("[Auth] passcode resolution failed:", error);
-    user = null;
   }
 
   if (!user) {
     try {
-      user = await sdk.authenticateRequest(opts.req);
+      user = await sdk.authenticateRequest(req);
     } catch {
-      // Authentication is optional for public procedures.
       user = null;
     }
   }
+
+  return user;
+}
+
+export async function createContext(
+  opts: CreateExpressContextOptions
+): Promise<TrpcContext> {
+  const user = await resolveRequestUser(opts.req);
 
   return {
     req: opts.req,

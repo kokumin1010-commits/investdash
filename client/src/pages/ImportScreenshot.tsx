@@ -2,6 +2,7 @@ import { DisclaimerNote } from "@/components/investing/DisclaimerNote";
 import { MoneyText } from "@/components/investing/Figures";
 import { MonthlyHistoryCard } from "@/components/investing/MonthlyHistoryCard";
 import { ScreenshotCashIncomeReview } from "@/components/investing/ScreenshotCashIncomeReview";
+import { ScreenshotHistoryCard } from "@/components/investing/ScreenshotHistoryCard";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -904,6 +905,8 @@ export default function ImportScreenshot() {
           </div>
         </>
       )}
+
+      <ScreenshotHistoryCard />
 
       <MonthlyHistoryCard />
 
