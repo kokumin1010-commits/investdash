@@ -288,10 +288,15 @@ describe("渣打銀行 シンガポール（SC Mobile Trading）", () => {
     expect(guessFormatFromBrokerName("渣打銀行")).toBe("sc_sg");
   });
 
-  it("平均単価は損益率から逆算するよう指示している", () => {
-    // 現在値から求めると誤差が 5 倍になるため、必ず損益率を使わせる
-    expect(format.layoutPrompt).toContain("含み損益 ÷ (含み損益率 ÷ 100)");
-    expect(format.layoutPrompt).toContain("必ず損益率から求める");
+  it("SGX平均単価はセント単位の評価額と損益から逆算するよう指示している", () => {
+    expect(format.layoutPrompt).toContain("取得原価 = Mkt Value − Unrealized P/L");
+    expect(format.layoutPrompt).toContain("損益率から逆算してはならない");
+    expect(format.layoutPrompt).toContain("日本株は avgCost を null");
+  });
+
+  it("口座合計を現金や純資産と誤認しないよう指示している", () => {
+    expect(format.layoutPrompt).toContain("My Holdings Total Value は株式保有の時価合計");
+    expect(format.layoutPrompt).toContain("account.cash と account.netAssets は必ず null");
   });
 
   it("LTV を借入と誤認しないよう指示している", () => {

@@ -4,7 +4,9 @@ import {
   formatPercent,
   impactLabel,
   marketLabel,
+  normalizeBrokerImportSymbol,
   normalizeSymbol,
+  resolveScreenshotAverageCost,
   sectorJa,
   sentimentLabel,
 } from "../shared/investing";
@@ -48,6 +50,81 @@ describe("normalizeSymbol", () => {
 
   it("空文字は空のシンボルを返す", () => {
     expect(normalizeSymbol("   ").symbol).toBe("");
+  });
+});
+
+describe("normalizeBrokerImportSymbol", () => {
+  it("Standard Chartered の裸SGXコードに .SI を付与する", () => {
+    expect(normalizeBrokerImportSymbol("D05", "sc_sg")).toEqual({
+      symbol: "D05.SI",
+      tickerCode: "D05",
+      market: "SG",
+    });
+    expect(normalizeBrokerImportSymbol("C38U.SG", "sc_sg")).toEqual({
+      symbol: "C38U.SI",
+      tickerCode: "C38U",
+      market: "SG",
+    });
+  });
+
+  it("Standard Chartered の日本株コードを .T に変換する", () => {
+    expect(normalizeBrokerImportSymbol("7270.JP", "sc_sg")).toEqual({
+      symbol: "7270.T",
+      tickerCode: "7270",
+      market: "JP",
+    });
+    expect(normalizeBrokerImportSymbol("9449", "sc_sg").symbol).toBe("9449.T");
+  });
+
+  it("他形式の裸英数字コードは従来どおり米国株として扱う", () => {
+    expect(normalizeBrokerImportSymbol("D05", "generic").market).toBe("US");
+  });
+});
+
+describe("resolveScreenshotAverageCost", () => {
+  it("同一口座・同一数量なら丸め値から再計算せず既存取得単価を保持する", () => {
+    expect(
+      resolveScreenshotAverageCost({
+        formatId: "sc_sg",
+        market: "SG",
+        quantity: 300,
+        parsedAvgCost: 46.06,
+        marketValue: 23_058,
+        pnl: 9_071.68,
+        existingQuantity: 300,
+        existingAvgCost: 46.6211,
+      })
+    ).toBe(46.6211);
+  });
+
+  it("新規SGX銘柄は評価額と損益から取得単価を算出する", () => {
+    expect(
+      resolveScreenshotAverageCost({
+        formatId: "sc_sg",
+        market: "SG",
+        quantity: 2_300,
+        parsedAvgCost: 16.65,
+        marketValue: 37_950,
+        pnl: -351.44,
+        existingQuantity: null,
+        existingAvgCost: null,
+      })
+    ).toBe(16.6528);
+  });
+
+  it("丸められたM表記しかない新規日本株では取得単価を作らない", () => {
+    expect(
+      resolveScreenshotAverageCost({
+        formatId: "sc_sg",
+        market: "JP",
+        quantity: 300,
+        parsedAvgCost: 7_344.76,
+        marketValue: 2_650_000,
+        pnl: 395_126.61,
+        existingQuantity: null,
+        existingAvgCost: null,
+      })
+    ).toBeNull();
   });
 });
 

@@ -308,7 +308,7 @@ export async function extractPositions(
   return {
     positions: (parsed.positions ?? [])
       .filter(position => position.name && position.tickerCode)
-      .map(normalizePosition),
+      .map(position => normalizePosition(position, format.id)),
     interestAssets: (parsed.interestAssets ?? [])
       .filter(asset => asset.name)
       .map(normalizeInterestAsset),
@@ -357,12 +357,16 @@ function date(value: string | null | undefined) {
     : normalized;
 }
 
-function normalizePosition(position: ParsedPosition): ParsedPosition {
+function normalizePosition(
+  position: ParsedPosition,
+  formatId?: BrokerFormatId
+): ParsedPosition {
+  const priceDigits = formatId === "sc_sg" ? 4 : 2;
   return {
     ...position,
     quantity: roundTo(position.quantity, 0),
-    avgCost: roundTo(position.avgCost, 2),
-    currentPrice: roundTo(position.currentPrice, 2),
+    avgCost: roundTo(position.avgCost, priceDigits),
+    currentPrice: roundTo(position.currentPrice, priceDigits),
     marketValue: roundTo(position.marketValue, 2),
     pnl: roundTo(position.pnl, 2),
     confidence: confidence(position.confidence),

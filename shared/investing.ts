@@ -264,6 +264,102 @@ export function normalizeSymbol(raw: string): { symbol: string; tickerCode: stri
   return { symbol: input, tickerCode: input, market: "US" };
 }
 
+/**
+ * スクリーンショット取込では、証券会社固有のコード表記を優先して正規化する。
+ *
+ * Standard Chartered Singapore は `D05.SG` のような表示を使う一方、OCR が
+ * 指示どおりサフィックスを除いて `D05` だけを返す場合もある。通常の
+ * normalizeSymbol では裸の英数字コードを米国株と判定するため、この口座だけは
+ * 4桁数字を日本株、それ以外の裸コードをSGXとして扱う。
+ */
+export function normalizeBrokerImportSymbol(
+  raw: string,
+  formatId?: string | null
+): { symbol: string; tickerCode: string; market: Market } {
+  const input = raw.trim().toUpperCase();
+  if (formatId !== "sc_sg") return normalizeSymbol(input);
+
+  const scSuffix = input.match(/^(.+)\.(JP|SG|US)$/);
+  if (scSuffix) {
+    const [, code, suffix] = scSuffix;
+    if (suffix === "JP") {
+      const resolved = resolveByExchange(code, "TSE");
+      return {
+        symbol: resolved.symbol,
+        tickerCode: resolved.tickerCode,
+        market: resolved.market,
+      };
+    }
+    if (suffix === "SG") {
+      const resolved = resolveByExchange(code, "SGX");
+      return {
+        symbol: resolved.symbol,
+        tickerCode: resolved.tickerCode,
+        market: resolved.market,
+      };
+    }
+    return normalizeSymbol(code);
+  }
+
+  if (/^[0-9]{4}$/.test(input)) return normalizeSymbol(input);
+  if (/^[A-Z0-9]+$/.test(input)) {
+    const resolved = resolveByExchange(input, "SGX");
+    return {
+      symbol: resolved.symbol,
+      tickerCode: resolved.tickerCode,
+      market: resolved.market,
+    };
+  }
+  return normalizeSymbol(input);
+}
+
+/**
+ * Standard Chartered の折り畳みカードは平均取得単価を表示しない。
+ * 同じ口座・同じ数量の既存行は、丸められた損益率から再計算せず既存原価を保持する。
+ * 新規または数量変更のSGX行だけ、画面にセント単位で表示された評価額と損益から
+ * 平均取得単価を決定的に算出する。日本株の M（百万）丸め値では逆算しない。
+ */
+export function resolveScreenshotAverageCost(input: {
+  formatId?: string | null;
+  market: Market;
+  quantity: number | null;
+  parsedAvgCost: number | null;
+  marketValue: number | null;
+  pnl: number | null;
+  existingQuantity: number | null;
+  existingAvgCost: number | null;
+}): number | null {
+  if (input.formatId !== "sc_sg") return input.parsedAvgCost;
+
+  if (
+    input.quantity !== null &&
+    input.existingQuantity !== null &&
+    input.quantity === input.existingQuantity &&
+    input.existingAvgCost !== null &&
+    Number.isFinite(input.existingAvgCost) &&
+    input.existingAvgCost > 0
+  ) {
+    return input.existingAvgCost;
+  }
+
+  if (
+    input.market === "SG" &&
+    input.quantity !== null &&
+    input.quantity > 0 &&
+    input.marketValue !== null &&
+    Number.isFinite(input.marketValue) &&
+    input.pnl !== null &&
+    Number.isFinite(input.pnl)
+  ) {
+    const derived = (input.marketValue - input.pnl) / input.quantity;
+    if (Number.isFinite(derived) && derived > 0) {
+      return Math.round(derived * 10_000) / 10_000;
+    }
+  }
+
+  return input.market === "JP" ? null : input.parsedAvgCost;
+}
+
 export function marketLabel(market: Market): string {
   if (market === "JP") return "日本株";
   if (market === "US") return "米国株";

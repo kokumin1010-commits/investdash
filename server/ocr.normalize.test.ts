@@ -79,4 +79,22 @@ describe("OCR 抽出結果の正規化", () => {
       pnl: -62800,
     });
   });
+
+  it("Standard Chartered はSGXの小数第4位を保持する", () => {
+    const res = normalizePositionForTest(
+      {
+        name: "NETLINK NBN TRUST UNT",
+        tickerCode: "CJLU",
+        quantity: 32000,
+        avgCost: 0.8730634375,
+        currentPrice: 0.955,
+        marketValue: 30560,
+        pnl: 2591.97,
+        confidence: 95,
+      },
+      "sc_sg"
+    );
+    expect(res.avgCost).toBe(0.8731);
+    expect(res.currentPrice).toBe(0.955);
+  });
 });

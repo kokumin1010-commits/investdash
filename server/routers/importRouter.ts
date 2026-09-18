@@ -29,9 +29,11 @@ import { fetchCompanyProfile, fetchQuote } from "../services/marketData";
 import {
   brokerFromFormatId,
   BROKERS,
+  normalizeBrokerImportSymbol,
   normalizeSymbol,
   MARKETS,
   MARKET_CURRENCY,
+  resolveScreenshotAverageCost,
   type Market,
 } from "../../shared/investing";
 
@@ -297,26 +299,46 @@ export const importRouter = router({
           db.listBrokerCashSnapshots(userId, 240),
           db.listCashIncomeRecords(userId),
         ]);
-        const existingMap = new Map(existing.map(h => [h.symbol, h]));
+        const selectedFormatId = input.formatId ?? result.formatId;
+        const selectedBroker = brokerFromFormatId(selectedFormatId);
+        const existingMap = new Map(
+          existing.map(h => [`${h.broker}:${h.symbol}`, h] as const)
+        );
 
         const rows = result.positions.map(p => {
-          const { symbol, tickerCode, market } = normalizeSymbol(p.tickerCode);
-          const prev = existingMap.get(symbol);
+          const { symbol, tickerCode, market } = normalizeBrokerImportSymbol(
+            p.tickerCode,
+            selectedFormatId
+          );
+          const prev = existingMap.get(`${selectedBroker}:${symbol}`);
+          const existingQuantity = prev ? Number(prev.quantity) : null;
+          const existingAvgCost = prev ? Number(prev.avgCost) : null;
+          const avgCost = resolveScreenshotAverageCost({
+            formatId: selectedFormatId,
+            market,
+            quantity: p.quantity,
+            parsedAvgCost: p.avgCost,
+            marketValue: p.marketValue,
+            pnl: p.pnl,
+            existingQuantity,
+            existingAvgCost,
+          });
           return {
             ...p,
+            avgCost,
             symbol,
             tickerCode,
             market,
             mode: prev ? ("UPDATE" as const) : ("NEW" as const),
-            existingQuantity: prev ? Number(prev.quantity) : null,
-            existingAvgCost: prev ? Number(prev.avgCost) : null,
+            existingQuantity,
+            existingAvgCost,
           };
         });
         const cashIncomeDraft = buildScreenshotCashIncomeDraft({
           batchKey,
           uploadDate: jstDate(),
           model: result.model,
-          selectedFormatId: input.formatId ?? result.formatId,
+          selectedFormatId,
           account: result.account,
           interestAssets: result.interestAssets,
           dividendIncomes: result.dividendIncomes,

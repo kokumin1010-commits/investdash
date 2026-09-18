@@ -25,7 +25,7 @@ import {
 } from "@/components/ui/table";
 import { trpc } from "@/lib/trpc";
 import { looksLikeImage, prepareImage } from "@/lib/imageFile";
-import { marketLabel, type Market } from "@shared/investing";
+import { MARKET_CURRENCY, marketLabel, type Market } from "@shared/investing";
 import type {
   ScreenshotAccountCashDraft,
   ScreenshotCashIncomeDraft,
@@ -632,7 +632,7 @@ export default function ImportScreenshot() {
                       <Label className="text-xs text-muted-foreground">読取時の現在値</Label>
                       <MoneyText
                         value={r.currentPrice}
-                        currency={r.market === "JP" ? "JPY" : "USD"}
+                        currency={MARKET_CURRENCY[r.market]}
                         className="block pb-2.5 text-sm text-muted-foreground"
                       />
                     </div>
@@ -733,7 +733,7 @@ export default function ImportScreenshot() {
                       <TableCell className="text-right">
                         <MoneyText
                           value={r.currentPrice}
-                          currency={r.market === "JP" ? "JPY" : "USD"}
+                          currency={MARKET_CURRENCY[r.market]}
                           className="text-sm text-muted-foreground"
                         />
                       </TableCell>
