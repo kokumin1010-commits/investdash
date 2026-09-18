@@ -485,6 +485,8 @@ const SC_SG: BrokerFormat = {
     "Roundup",
     "Delayed SG Stock update",
     "Delayed JP Stock update",
+    "投资与存款",
+    "存款",
   ],
   layoutPrompt: `このスクリーンショットは渣打銀行（Standard Chartered Bank Singapore）の
 「SC Mobile Trading」アプリの Portfolio 画面である。
@@ -569,7 +571,23 @@ TSE セクションの小計は「SGD 54,761.41」である。
 「Total Unrealized P/L」（含み損益・SGD）が表示される。
 これらは口座サマリーなので holdings ではなく notes に記録する。
 **My Holdings Total Value は株式保有の時価合計であり、純資産や現金残高ではない。**
-この Portfolio 画面には現金残高がないため、account.cash と account.netAssets は必ず null にする。
+この **SC Mobile Trading の Portfolio 画面**には現金残高がないため、
+この画面だけの場合は account.cash と account.netAssets を必ず null にする。
+
+## 中国語ホームの「投资与存款」画面が写っている場合
+
+この画面は SC Mobile Trading の Portfolio 画面とは別の、Standard Chartered
+銀行アプリの資産概要である。次のラベルを厳密に区別する。
+
+- 「投资与存款」右の金額は投資と預金の合計。account.netAssets に入れる
+- 「投资」右の金額は投資評価額。現金ではないため notes にのみ記録する
+- 緑の凡例または見出し「存款」右の金額が現金および現金同等物。**この金額だけを account.cash に入れる**
+- 「存款」以外の投資額や合計額から現金を逆算しない。画面に表示された存款額をそのまま使う
+- account.currency は各金額に付いた SGD を使い、account.broker は Standard Chartered Singapore とする
+- 説明文「截至(YYYY年MM月DD日)」に日付が明記されている場合、その日を YYYY-MM-DD に直して account.cashAsOfDate に入れる
+- この概要画面には個別銘柄がないため positions は空配列にする
+- evidence には「存款 SGD 40,455.01 / 截至2026年09月17日」のように、実際に見えた現金ラベル・金額・基準日を記録する
+- 配当の入金明細がない場合、dividendIncomes は空配列にする
 
 「ALL / ASIA / US / EUROPE」はフィルタタブである。ALL が選択されている場合は
 全市場が表示されているので、notes に「ALL タブ表示」と記録する。

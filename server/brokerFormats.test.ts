@@ -296,7 +296,16 @@ describe("渣打銀行 シンガポール（SC Mobile Trading）", () => {
 
   it("口座合計を現金や純資産と誤認しないよう指示している", () => {
     expect(format.layoutPrompt).toContain("My Holdings Total Value は株式保有の時価合計");
-    expect(format.layoutPrompt).toContain("account.cash と account.netAssets は必ず null");
+    expect(format.layoutPrompt).toContain("この画面だけの場合は account.cash と account.netAssets を必ず null");
+  });
+
+  it("中国語ホームの存款を口座現金として読み、投資額と区別する", () => {
+    expect(format.signatures).toContain("投资与存款");
+    expect(format.signatures).toContain("存款");
+    expect(format.layoutPrompt).toContain("中国語ホームの「投资与存款」画面");
+    expect(format.layoutPrompt).toContain("この金額だけを account.cash に入れる");
+    expect(format.layoutPrompt).toContain("account.cashAsOfDate");
+    expect(format.layoutPrompt).toContain("positions は空配列");
   });
 
   it("LTV を借入と誤認しないよう指示している", () => {
