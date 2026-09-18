@@ -457,3 +457,12 @@
 - [x] 保存確定済み原画像を口座・基準日別に表示するスクリーンショット履歴、口座／年月フィルター、サムネイル、原寸モーダル、遅延読込を追加
 - [x] 履歴APIからstorage key／原画像URLを除外し、認証・user別job・storage prefixを照合する専用画像エンドポイントを追加；匿名外部アクセス401を確認
 - [x] Railway正式版f6b61d6でMoomoo 3枚、Standard Chartered保有3枚＋現金1枚の計7枚を確認；161テストファイル／1244テスト、TypeScript、production build、390px／1280px・overflow 0の正式验收を通過
+
+- [x] IBKR持倉4枚と残高サマリー1枚を同一バッチで照合し、51銘柄とSGD換算総現金を保存する
+- [x] IBKRのSGX裸コードを取引所表示から`.SI`へ正規化し、既存口座へ安全に照合する
+- [x] IBKRのK丸め株数が既存精確数量の表示範囲内なら既存値を保持し、精度劣化を防ぐ
+- [x] IBKRのJPY/SGD/USD通常現金を現金宝・利息資産へ誤登録しない
+- [x] IBKRの基準通貨換算総現金と通貨別実残高を区別し、次回差額に為替変動が含まれ得ることを表示する
+- [x] IBKR正式履歴で保有51・現金1・5枚を確認し、IMG_8833原寸表示を検証する
+- [x] DashboardでIBKR `SGD -1,845,956.61`、Moomoo JPY、Standard Chartered SGDを独立表示する
+- [x] 161テストファイル・1,251テスト、TypeScript、production build、390px/1280px正式UIを通過する
