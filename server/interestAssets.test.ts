@@ -111,6 +111,28 @@ describe("buildInterestAssetViews", () => {
     );
     expect(v.cumulativeIncomeBase).toBeCloseTo(697.62 * 159.31, 0);
   });
+
+  it("表示年率が無くても確認済み日次利息から年間見込みを算出する", () => {
+    const [v] = buildInterestAssetViews(
+      [
+        asset({
+          amount: "145779.80",
+          annualRatePct: null,
+          dailyIncome: "13.16",
+        }),
+      ],
+      fx
+    );
+
+    expect(v.annualRatePct).toBeNull();
+    expect(v.impliedRatePct).toBeCloseTo(3.29497, 4);
+    expect(v.projectedAnnualIncome).not.toBeNull();
+    expect(v.projectedAnnualIncome!).toBeGreaterThan(13.16 * 365);
+    expect(v.projectedAnnualIncomeBase).toBeCloseTo(
+      v.projectedAnnualIncome! * fx.usdJpy,
+      2
+    );
+  });
 });
 
 describe("summarizeInterestAssets", () => {
@@ -167,5 +189,15 @@ describe("summarizeInterestAssets", () => {
     expect(s.totalBase).toBe(0);
     expect(s.weightedRatePct).toBeNull();
     expect(s.count).toBe(0);
+  });
+
+  it("全商品に表示年率が無くても日次利息があれば加重利回りを0にしない", () => {
+    const noDisplayedRates = rows.map(row => ({ ...row, annualRatePct: null }));
+    const s = summarizeInterestAssets(buildInterestAssetViews(noDisplayedRates, fx));
+
+    expect(s.projectedAnnualIncomeBase).toBeGreaterThan(0);
+    expect(s.weightedRatePct).not.toBeNull();
+    expect(s.weightedRatePct!).toBeGreaterThan(2);
+    expect(s.weightedRatePct!).toBeLessThan(5);
   });
 });

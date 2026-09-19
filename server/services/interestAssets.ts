@@ -109,7 +109,15 @@ export function buildInterestAssetViews(
     const annualRatePct = num(r.annualRatePct);
     const dailyIncome = num(r.dailyIncome);
     const cumulativeIncome = num(r.cumulativeIncome);
-    const projected = projectAnnualIncome(amount, annualRatePct, r.compounding);
+    /*
+     * スクショに表示年率が無くても、同じ画面に現在残高と昨日収益が
+     * 明記されていれば、日次利息から年換算率を決定的に逆算できる。
+     * UI は従来からこの implied rate を表示していたため、将来予想だけを
+     * 0 / 未取得に落とさず、同じ根拠で年間見込みも計算する。
+     */
+    const impliedRatePct = impliedAnnualRate(amount, dailyIncome);
+    const forecastRatePct = annualRatePct ?? impliedRatePct;
+    const projected = projectAnnualIncome(amount, forecastRatePct, r.compounding);
     return {
       id: r.id,
       broker: r.broker,
@@ -123,7 +131,7 @@ export function buildInterestAssetViews(
       cumulativeIncomeBase: convertToJpy(cumulativeIncome, r.currency, fx),
       projectedAnnualIncome: projected,
       projectedAnnualIncomeBase: convertToJpy(projected, r.currency, fx),
-      impliedRatePct: impliedAnnualRate(amount, dailyIncome),
+      impliedRatePct,
       compounding: r.compounding,
       capturedAt: r.capturedAt,
       notes: r.notes,
