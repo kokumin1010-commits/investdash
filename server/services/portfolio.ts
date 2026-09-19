@@ -304,6 +304,15 @@ export type PortfolioSummary = {
    */
   periodChange: PeriodChange | null;
   /**
+   * 同じ実スナップショットから算出した1日・7日・30日の株式評価損益変化。
+   * 銘柄構成が変わった期間は推測せず gainDelta / gainPct を null にする。
+   */
+  marketChanges: {
+    day: PeriodChange | null;
+    sevenDay: PeriodChange | null;
+    thirtyDay: PeriodChange | null;
+  };
+  /**
    * 信用取引の借入合計（円換算、正の数）。
    * 現物のみなら 0。IBKR のように借入して株を買っている口座があると正の値になる。
    */
@@ -897,6 +906,18 @@ export async function buildPortfolio(userId: number): Promise<{
     }
   }
 
+  const snapshotInputs = snapshots.map(s => ({
+    totalValue: n(s.totalValue) ?? 0,
+    totalCost: n(s.totalCost) ?? 0,
+    positionCount: s.positionCount,
+    capturedAt: s.capturedAt,
+  }));
+  const marketChanges = {
+    day: computePeriodChange(snapshotInputs, 1),
+    sevenDay: computePeriodChange(snapshotInputs, 7),
+    thirtyDay: computePeriodChange(snapshotInputs, 30),
+  };
+
   const summary: PortfolioSummary = {
     totalValueBase,
     totalCostBase,
@@ -924,14 +945,8 @@ export async function buildPortfolio(userId: number): Promise<{
      * 長期保有では前日比より「前回記録からの変化」が判断に役立つ。
      * 買い増しによる増加と株価変動による増加を分けて持つ。
      */
-    periodChange: computePeriodChange(
-      snapshots.map(s => ({
-        totalValue: n(s.totalValue) ?? 0,
-        totalCost: n(s.totalCost) ?? 0,
-        positionCount: s.positionCount,
-        capturedAt: s.capturedAt,
-      }))
-    ),
+    periodChange: marketChanges.sevenDay,
+    marketChanges,
     totalBorrowedBase,
     /*
      * 純資産に利息資産を加える。富途香港の現金宝のように

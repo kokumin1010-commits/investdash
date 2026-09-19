@@ -450,6 +450,114 @@ describe("Dashboard actual page", () => {
     ).toBeTruthy();
   });
 
+  it("puts the asset temperature, value, P/L and trend before income and goal sections", () => {
+    const data = overviewData(0) as any;
+    data.summary.dayChangeBase = -3_600_000;
+    data.summary.dayChangePct = -1.2;
+    data.summary.marketChanges = {
+      day: null,
+      sevenDay: {
+        fromAt: new Date("2026-09-12T00:00:00Z"),
+        toAt: new Date("2026-09-19T00:00:00Z"),
+        days: 7,
+        totalDelta: -20_000_000,
+        costDelta: 4_000_000,
+        gainDelta: -24_000_000,
+        gainPct: -8,
+        countDelta: 0,
+        compositionChanged: false,
+        targetDays: 7,
+        fellShort: false,
+        usedSameCompositionFallback: false,
+      },
+      thirtyDay: null,
+    };
+    data.cashIncome.forecast.netAssets = {
+      currentJpy: 300_000,
+      previousJpy: 303_000,
+      dayChangeJpy: -3_000,
+      dayChangePct: -1,
+      previousAsOfDate: "2026-09-18",
+      sevenDayChangeJpy: -21_000,
+      sevenDayChangePct: -6.5,
+      sevenDayAsOfDate: "2026-09-12",
+      thirtyDayChangeJpy: null,
+      thirtyDayChangePct: null,
+      thirtyDayAsOfDate: null,
+    };
+    data.cashIncome.cashBalanceTracking = {
+      status: "SCREENSHOT_PROVISIONAL",
+      asOfDate: "2026-09-19",
+      confirmedAccountCount: 2,
+      confirmedAccountTotalJpy: -212_000_000,
+      confirmedPositiveCashJpy: 8_000_000,
+      confirmedNegativeCashJpy: -220_000_000,
+      settledDividendAfterAnchorJpy: 0,
+      provisionalAccountTotalJpy: -212_000_000,
+      provisionalPositiveCashJpy: 8_000_000,
+      provisionalNegativeCashJpy: -220_000_000,
+      legacyTotalJpy: null,
+      missingBrokers: [],
+      accounts: [],
+      note: "test",
+    };
+    mocks.overview.mockReturnValue({ data, isLoading: false, error: null });
+    mocks.assetTrend.mockReturnValue({
+      data: {
+        points: [
+          {
+            date: "9/18",
+            at: new Date("2026-09-18T00:00:00Z"),
+            value: 300_000,
+            cost: 250_000,
+            netAssets: 280_000,
+            positionCount: 1,
+            positionChanged: false,
+            positionDelta: 0,
+            priceChange: null,
+          },
+          {
+            date: "9/19",
+            at: new Date("2026-09-19T00:00:00Z"),
+            value: 296_400,
+            cost: 250_000,
+            netAssets: 276_400,
+            positionCount: 1,
+            positionChanged: false,
+            positionDelta: 0,
+            priceChange: -3_600,
+          },
+        ],
+        snapshotCount: 2,
+        firstAt: new Date("2026-09-18T00:00:00Z"),
+        lastAt: new Date("2026-09-19T00:00:00Z"),
+        changedPointCount: 0,
+        priceOnlyChange: -3_600,
+        fellBack: false,
+      },
+      isLoading: false,
+    });
+
+    render(React.createElement(Dashboard));
+
+    const panel = screen.getByTestId("market-temperature-panel");
+    const income = screen.getByText("キャッシュ収入：確定実績と将来予想");
+    expect(screen.getByText("資産温度計")).toBeTruthy();
+    expect(screen.getByText("調整局面")).toBeTruthy();
+    expect(screen.getByTestId("top-stock-value-card")).toBeTruthy();
+    expect(screen.getByTestId("top-unrealized-pnl-card")).toBeTruthy();
+    expect(screen.getByTestId("top-asset-trend-card")).toBeTruthy();
+    expect(screen.getByTestId("temperature-前日")).toBeTruthy();
+    expect(screen.getByTestId("temperature-7日")).toBeTruthy();
+    expect(screen.getByTestId("temperature-30日")).toBeTruthy();
+    expect(screen.getByText(/実測 2\/3期間/)).toBeTruthy();
+    expect(screen.getByText(/確認済みプラス現金/)).toBeTruthy();
+    expect(
+      panel.compareDocumentPosition(income) & Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy();
+    expect(mocks.assetTrend).toHaveBeenCalledWith({ scale: "day" });
+  });
+
   for (const width of [390, 1280]) {
     it(`renders the 2030 long-term goal at ${width}px without turning it into a trade target`, () => {
       Object.defineProperty(window, "innerWidth", {

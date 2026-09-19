@@ -46,7 +46,6 @@ import {
 import { useDisplayCurrency } from "@/contexts/DisplayCurrencyContext";
 import {
   AlertTriangle,
-  ArrowUpRight,
   Brain,
   CalendarClock,
   ChevronRight,
@@ -57,20 +56,15 @@ import {
   PiggyBank,
   RefreshCw,
   ScanLine,
-  TrendingUp,
-  Wallet,
 } from "lucide-react";
 import { useMemo, useState } from "react";
 import {
-  Area,
-  AreaChart,
   Bar,
   BarChart,
   Cell,
   Line,
   Pie,
   PieChart,
-  ReferenceLine,
   ResponsiveContainer,
   Tooltip as ReTooltip,
   XAxis,
@@ -83,6 +77,7 @@ import { AttentionEmptyState } from "@/components/investing/AttentionEmptyState"
 import { LongTermGoalCard } from "@/components/investing/LongTermGoalCard";
 import { CashIncomeCard } from "@/components/investing/CashIncomeCard";
 import { GlobalStockSearch } from "@/components/investing/GlobalStockSearch";
+import { MarketTemperaturePanel } from "@/components/investing/MarketTemperaturePanel";
 
 export default function Dashboard() {
   const utils = trpc.useUtils();
@@ -233,23 +228,8 @@ export default function Dashboard() {
       return main;
     return `${main}（${formatMoney(baseJpy, "JPY")}）`;
   };
-  /**
-   * 前回記録からの変化。長期保有では前日比より判断に役立つ。
-   * スナップショットが 2 件未満なら null。
-   */
-  const periodChange = summary?.periodChange ?? null;
   /** 配当の全体集計。長期保有では実質的な収入になるので目立つ位置に出す */
   const dividends = data?.dividends ?? null;
-  /**
-   * 資産推移の粒度。長期保有では月次のほうが傾向が読みやすいので既定を月次にする。
-   */
-  const [trendScale, setTrendScale] = useState<"day" | "month">("month");
-  /*
-   * 集計はサーバーで確定させる。粒度の自動切替（月次で 1 点しか作れないときは日次）や
-   * 「銘柄追加による増加か値動きか」の判定を画面側で持つと、他の画面と食い違うため。
-   */
-  const assetTrend = trpc.portfolio.assetTrend.useQuery({ scale: trendScale });
-
   // どれか 1 つが動いている間は他の一括処理を止める（AI 利用枠と DB 競合を避ける）
   const anyBusy =
     busy !== null ||
@@ -285,10 +265,6 @@ export default function Dashboard() {
       pending: groups.length - classified,
     };
   }, [data]);
-
-  const trend = assetTrend.data?.points ?? [];
-  /** 借入がある期間があれば純資産の線を出す */
-  const hasNetAssetsLine = trend.some(p => p.netAssets !== null);
 
   const signalCounts = useMemo(() => {
     const counts = new Map<SignalAction, number>();
@@ -569,25 +545,6 @@ export default function Dashboard() {
 
   const isEmpty = (data?.groups.length ?? 0) === 0;
 
-  /*
-   * 信用取引の借入があるか。借入がある場合は「株式時価 = 自分の資産」ではないため、
-   * サマリーの見せ方を変える（純資産を主役にする）。現物のみの口座しかない場合は
-   * 従来の表示のままにして、無用な項目を増やさない。
-   */
-  const hasBorrowing = (summary?.totalBorrowedBase ?? 0) > 0;
-  /**
-   * 全体レバレッジは無借入口座の資産で薄まる。借入が集中する口座の
-   * 清算リスクを主表示するため、借入額が最大の口座を選ぶ。
-   */
-  const leveragedBrokers = (data?.brokers ?? [])
-    .filter(broker => (broker.leverage?.borrowedBase ?? 0) > 0)
-    .sort(
-      (a, b) =>
-        (b.leverage?.borrowedBase ?? 0) - (a.leverage?.borrowedBase ?? 0)
-    );
-  const primaryLeveragedBroker = leveragedBrokers[0] ?? null;
-  const borrowingAccountLabel = primaryLeveragedBroker?.label ?? "借入口座";
-
   return (
     <div className="mx-auto max-w-[1400px] space-y-6 pb-10">
       <header className="space-y-3">
@@ -673,6 +630,24 @@ export default function Dashboard() {
         <EmptyState />
       ) : (
         <>
+          {summary ? (
+            <MarketTemperaturePanel
+              summary={summary}
+              brokers={data?.brokers ?? []}
+              netAssetsTrend={data?.cashIncome.forecast.netAssets ?? null}
+              confirmedPositiveCashJpy={
+                data?.cashIncome.cashBalanceTracking?.confirmedPositiveCashJpy ??
+                null
+              }
+              provisionalNegativeCashJpy={
+                data?.cashIncome.cashBalanceTracking
+                  ?.provisionalNegativeCashJpy ?? null
+              }
+              money={money}
+              moneyWithJpy={moneyWithJpy}
+            />
+          ) : null}
+
           {data?.cashIncome ? (
             <CashIncomeCard
               data={data.cashIncome}
@@ -693,298 +668,6 @@ export default function Dashboard() {
             annualBorrowingInterestJpy={annualBorrowingInterestBase}
             cashIncome={data?.cashIncome}
           />
-
-          {/* サマリーカード */}
-          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-            <StatCard
-              /*
-               * 借入がある場合、株式時価は「自分のお金」ではない。
-               * ラベルを「株式時価」に変えて、その下に借入と純資産を必ず並べる。
-               * 借入がない場合は従来どおり「総評価額」として扱う。
-               */
-              label={hasBorrowing ? "株式時価（借入を含む）" : "総評価額"}
-              value={money(summary?.totalValueBase)}
-              sub={
-                hasBorrowing ? (
-                  <span className="block space-y-1">
-                    {/*
-                     * 利息で増える現金性資産（富途香港の現金宝など）。
-                     * 株式時価には入っていないので、純資産の内訳として明示する。
-                     * これを出さないと「株式時価 − 借入」と純資産が合わず不審に見える。
-                     */}
-                    {(summary?.interestAssetsBase ?? 0) > 0 && (
-                      <span className="flex items-center justify-between gap-2">
-                        <span className="text-muted-foreground">
-                          現金性資産（利息で増える）
-                        </span>
-                        <span className="tabular font-medium text-foreground">
-                          +{money(summary?.interestAssetsBase)}
-                        </span>
-                      </span>
-                    )}
-                    <span className="flex items-center justify-between gap-2">
-                      <span className="text-muted-foreground">
-                        借入
-                        {primaryLeveragedBroker && leveragedBrokers.length === 1
-                          ? `（${borrowingAccountLabel}のみ）`
-                          : "（信用取引）"}
-                      </span>
-                      <span className="tabular font-medium text-loss">
-                        {/* 借りているのは日本円なので、他通貨表示でも円を併記する */}
-                        −{moneyWithJpy(summary?.totalBorrowedBase)}
-                      </span>
-                    </span>
-                    <span className="flex items-center justify-between gap-2 border-t pt-1">
-                      <span className="font-medium text-foreground">
-                        純資産（実質の資産）
-                      </span>
-                      <span className="tabular font-semibold text-foreground">
-                        {money(summary?.netAssetsBase)}
-                      </span>
-                    </span>
-                    {primaryLeveragedBroker?.leverage ? (
-                      <>
-                        <span className="flex items-center justify-between gap-2 rounded-md bg-amber-50 px-2 py-1.5 dark:bg-amber-950/25">
-                          <span className="font-semibold text-foreground">
-                            {borrowingAccountLabel} レバレッジ
-                          </span>
-                          <span className="flex items-center gap-1.5">
-                            <span className="tabular text-base font-bold text-amber-700 dark:text-amber-300">
-                              {primaryLeveragedBroker.leverage.leverage?.toFixed(
-                                2
-                              ) ?? "—"}{" "}
-                              倍
-                            </span>
-                            <Badge
-                              variant="outline"
-                              className={`h-5 px-1.5 text-[10px] ${MARGIN_RISK_STYLES[primaryLeveragedBroker.leverage.riskLevel]}`}
-                            >
-                              {
-                                MARGIN_RISK_LABELS[
-                                  primaryLeveragedBroker.leverage.riskLevel
-                                ]
-                              }
-                            </Badge>
-                          </span>
-                        </span>
-                        <span className="flex items-center justify-between gap-2">
-                          <span className="text-muted-foreground">
-                            追証までの下落余地
-                          </span>
-                          <span className="tabular font-medium">
-                            {primaryLeveragedBroker.leverage
-                              .dropToMarginCallPct !== null
-                              ? `−${primaryLeveragedBroker.leverage.dropToMarginCallPct.toFixed(1)}%`
-                              : "—"}
-                          </span>
-                        </span>
-                        <span className="flex items-center justify-between gap-2">
-                          <span className="text-muted-foreground">
-                            年間の借入利息
-                          </span>
-                          <span className="tabular font-medium text-loss">
-                            −
-                            {moneyWithJpy(
-                              primaryLeveragedBroker.leverage.interest
-                                ?.annualInterestBase
-                            )}
-                          </span>
-                        </span>
-                      </>
-                    ) : null}
-                    <span className="flex items-center justify-between gap-2 text-[11px]">
-                      <span className="text-muted-foreground">
-                        全体レバレッジ（参考）
-                      </span>
-                      <span className="tabular text-muted-foreground">
-                        {summary?.overallLeverage !== null &&
-                        summary?.overallLeverage !== undefined
-                          ? `${summary.overallLeverage.toFixed(2)} 倍`
-                          : "—"}
-                      </span>
-                    </span>
-                  </span>
-                ) : summary?.cashBalance ? (
-                  `現金 ${money(summary.cashBalance)} を含めた総資産 ${money(summary.totalAssets)}`
-                ) : (
-                  `${summary?.positionCount ?? 0} 銘柄${
-                    // 同一銘柄を複数口座で持つ場合は口座レコード数も添える
-                    (data?.positions.length ?? 0) >
-                    (summary?.positionCount ?? 0)
-                      ? `（${data?.positions.length} 口座分）`
-                      : ""
-                  }`
-                )
-              }
-              icon={<Wallet className="h-4 w-4" />}
-            />
-            <StatCard
-              label="評価損益"
-              valueNode={
-                <PnlText
-                  value={summary?.totalPnl ?? null}
-                  currency={summary?.baseCurrency}
-                  /* 集計値は円なので baseValue にも同じ値を渡して表示通貨に追随させる */
-                  baseValue={summary?.totalPnl ?? null}
-                  hideLocalHint
-                  className="whitespace-nowrap text-2xl font-semibold"
-                />
-              }
-              sub={
-                <span className="block space-y-1.5">
-                  <span className="flex items-center gap-1.5">
-                    <PctText
-                      value={summary?.totalPnlPct ?? null}
-                      costValue={summary?.totalCostBase ?? null}
-                    />
-                    <span className="text-muted-foreground">
-                      / 取得原価 {money(summary?.totalCostBase)}
-                    </span>
-                  </span>
-                  {/**
-                   * 口座が 2 つ以上ある場合は「どの口座でいくら儲かっているか」を
-                   * ここに明示する。口座別カードは略記なので、こちらは正確な金額を出す。
-                   */}
-                  {(data?.brokers ?? []).length > 1 ? (
-                    <span className="block space-y-1 border-t pt-1.5">
-                      {(data?.brokers ?? []).map(b => (
-                        <span
-                          key={b.key}
-                          className="flex items-center justify-between gap-2"
-                        >
-                          <BrokerBadge broker={b.key} short />
-                          <span className="flex items-baseline gap-1.5 whitespace-nowrap">
-                            <PnlText
-                              value={b.pnl}
-                              currency={summary?.baseCurrency}
-                              baseValue={b.pnl}
-                              hideLocalHint
-                              compact
-                              className="text-xs font-medium"
-                            />
-                            <PctText
-                              value={b.pnlPct}
-                              costValue={b.value - b.pnl}
-                              className="text-[10px]"
-                            />
-                          </span>
-                        </span>
-                      ))}
-                    </span>
-                  ) : null}
-                </span>
-              }
-              icon={<TrendingUp className="h-4 w-4" />}
-            />
-            {/*
-              長期保有が前提のため、前日比ではなく「前回記録からの変化」を出す。
-              日々の値動きは判断材料にならず、むしろ長期の判断を乱すため。
-              銘柄の追加があった期間は株価変動分を分離できないので明示する。
-            */}
-            <StatCard
-              label="この 1 週間の変化"
-              valueNode={
-                periodChange && periodChange.gainDelta !== null ? (
-                  <PnlText
-                    value={periodChange.gainDelta}
-                    currency={summary?.baseCurrency}
-                    baseValue={periodChange.gainDelta}
-                    hideLocalHint
-                    className="text-2xl font-semibold"
-                  />
-                ) : periodChange ? (
-                  /*
-                   * 銘柄を登録した期間の評価額の増加は「資産が増えた」ではなく
-                   * 登録作業の結果。金額を主役に出すと成績と誤読されるため、
-                   * 判定できない旨を主表示にし、増減額は補助に落とす。
-                   */
-                  <span className="text-lg font-semibold text-muted-foreground">
-                    判定できません
-                  </span>
-                ) : (
-                  <span className="text-2xl font-semibold text-muted-foreground">
-                    —
-                  </span>
-                )
-              }
-              sub={
-                periodChange ? (
-                  <span className="block space-y-1">
-                    <span className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
-                      {periodChange.gainDelta !== null ? (
-                        <>
-                          <PctText value={periodChange.gainPct} />
-                          <span className="text-muted-foreground">
-                            株価変動による増減
-                          </span>
-                        </>
-                      ) : (
-                        <span className="text-muted-foreground">
-                          株価がいくら動いたかは、この期間では出せません
-                        </span>
-                      )}
-                    </span>
-                    <span className="block text-[11px] text-muted-foreground">
-                      {new Date(periodChange.fromAt).toLocaleDateString(
-                        "ja-JP",
-                        {
-                          month: "numeric",
-                          day: "numeric",
-                        }
-                      )}{" "}
-                      →{" "}
-                      {new Date(periodChange.toAt).toLocaleDateString("ja-JP", {
-                        month: "numeric",
-                        day: "numeric",
-                      })}
-                      {periodChange.days > 0
-                        ? `（${periodChange.days}日間）`
-                        : "（同日中）"}
-                    </span>
-                    {/*
-                      記録がまだ 1 週間分たまっていない場合は、その旨を書く。
-                      「1 週間の変化」と表示しながら 2 日分しか見ていない状態を
-                      黙って出すと、数字を過小・過大に受け取ることになる。
-                    */}
-                    {periodChange.fellShort ? (
-                      <span className="block text-[11px] text-muted-foreground">
-                        {periodChange.usedSameCompositionFallback
-                          ? `${periodChange.targetDays} 日前は銘柄の登録作業中だったため、銘柄数が揃った ${periodChange.days} 日前と比べています`
-                          : `記録がまだ ${periodChange.targetDays} 日分たまっていないため、最も古い記録と比べています`}
-                      </span>
-                    ) : null}
-                    {/*
-                      銘柄を追加した期間は、追加した銘柄が元々持っていた含み損益が
-                      混ざるため「株価がいくら動いたか」を分離できない。
-                      誤解を防ぐため、その旨をはっきり書く。
-                    */}
-                    {periodChange.compositionChanged ? (
-                      <span className="block space-y-0.5">
-                        <span className="block text-[11px] text-amber-600 dark:text-amber-400">
-                          この期間に {periodChange.countDelta > 0 ? "+" : ""}
-                          {periodChange.countDelta} 銘柄を登録したため、
-                          値動きと登録分を分けられません
-                        </span>
-                        <span className="block text-[11px] text-muted-foreground">
-                          評価額の差は {periodChange.totalDelta >= 0 ? "+" : ""}
-                          {money(periodChange.totalDelta)}
-                          ですが、その大半は登録した銘柄の分です
-                        </span>
-                        <span className="block text-[11px] text-muted-foreground">
-                          銘柄を追加せずに株価更新すると、次回から値動きだけを出せます
-                        </span>
-                      </span>
-                    ) : null}
-                  </span>
-                ) : (
-                  <span className="text-[11px] text-muted-foreground">
-                    記録が 2 回以上たまると変化を表示します
-                  </span>
-                )
-              }
-              icon={<ArrowUpRight className="h-4 w-4" />}
-            />
-          </div>
 
           {/* 配当と AI シグナル */}
           <div className="grid gap-4 sm:grid-cols-2">
@@ -1912,267 +1595,7 @@ export default function Dashboard() {
             </Alert>
           ) : null}
 
-          <div className="grid gap-4 lg:grid-cols-3">
-            {/* 資産推移 */}
-            <Card className="lg:col-span-2">
-              <CardHeader>
-                <div className="flex flex-wrap items-start justify-between gap-2">
-                  <div>
-                    <CardTitle className="text-base">資産推移</CardTitle>
-                    <CardDescription className="text-xs">
-                      {assetTrend.data && assetTrend.data.snapshotCount > 0 ? (
-                        <>
-                          記録 {assetTrend.data.snapshotCount} 件
-                          {assetTrend.data.firstAt &&
-                            assetTrend.data.lastAt && (
-                              <>
-                                （
-                                {new Date(
-                                  assetTrend.data.firstAt
-                                ).toLocaleDateString("ja-JP", {
-                                  month: "numeric",
-                                  day: "numeric",
-                                })}
-                                〜
-                                {new Date(
-                                  assetTrend.data.lastAt
-                                ).toLocaleDateString("ja-JP", {
-                                  month: "numeric",
-                                  day: "numeric",
-                                })}
-                                ）
-                              </>
-                            )}
-                          {assetTrend.data.fellBack &&
-                            " ・ 同じ月の記録のみなので日次で表示中"}
-                          {" ・ 日本時間の1日につき最新1点"}
-                        </>
-                      ) : (
-                        "株価更新のたびにスナップショットを記録します"
-                      )}
-                    </CardDescription>
-                  </div>
-                  {/* 長期の傾向を見たいときは月次、直近の動きを見たいときは日次 */}
-                  <div className="flex overflow-hidden rounded-md border">
-                    {[
-                      { key: "month" as const, label: "月次" },
-                      { key: "day" as const, label: "日次" },
-                    ].map(opt => (
-                      <button
-                        key={opt.key}
-                        type="button"
-                        onClick={() => setTrendScale(opt.key)}
-                        className={`px-2.5 py-1 text-xs transition-colors ${
-                          trendScale === opt.key
-                            ? "bg-accent font-medium text-accent-foreground"
-                            : "text-muted-foreground hover:bg-accent/50"
-                        }`}
-                      >
-                        {opt.label}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              </CardHeader>
-              <CardContent>
-                {trend.length < 2 ? (
-                  <div className="flex h-[260px] flex-col items-center justify-center gap-2 text-center">
-                    <p className="text-sm text-muted-foreground">
-                      推移グラフは異なる日の記録が 2 件以上たまると表示されます
-                    </p>
-                    <p className="text-xs text-muted-foreground">
-                      {assetTrend.data && assetTrend.data.snapshotCount > 0
-                        ? `記録は ${assetTrend.data.snapshotCount} 件ありますが、すべて同じ日のため点が 1 つになります。次の取引日の自動株価更新で新しい点が増えます。`
-                        : "株価更新を実行すると記録され、以後は取引日の自動更新で増えます。"}
-                    </p>
-                  </div>
-                ) : (
-                  <ResponsiveContainer width="100%" height={260}>
-                    <AreaChart
-                      data={trend}
-                      margin={{ left: 4, right: 8, top: 8, bottom: 0 }}
-                    >
-                      <defs>
-                        <linearGradient
-                          id="valueFill"
-                          x1="0"
-                          y1="0"
-                          x2="0"
-                          y2="1"
-                        >
-                          <stop
-                            offset="0%"
-                            stopColor="var(--chart-1)"
-                            stopOpacity={0.28}
-                          />
-                          <stop
-                            offset="100%"
-                            stopColor="var(--chart-1)"
-                            stopOpacity={0.02}
-                          />
-                        </linearGradient>
-                      </defs>
-                      <XAxis
-                        dataKey="date"
-                        tick={{ fontSize: 11 }}
-                        stroke="var(--muted-foreground)"
-                        tickLine={false}
-                        axisLine={false}
-                      />
-                      <YAxis
-                        tick={{ fontSize: 11 }}
-                        stroke="var(--muted-foreground)"
-                        tickLine={false}
-                        axisLine={false}
-                        width={64}
-                        tickFormatter={v =>
-                          new Intl.NumberFormat("ja-JP", {
-                            notation: "compact",
-                            maximumFractionDigits: 1,
-                          }).format(v as number)
-                        }
-                      />
-                      <ReTooltip
-                        contentStyle={{
-                          background: "var(--popover)",
-                          border: "1px solid var(--border)",
-                          borderRadius: 8,
-                          fontSize: 12,
-                          color: "var(--popover-foreground)",
-                        }}
-                        formatter={(v: number, name): [string, string] => {
-                          if (name === "netAssets") {
-                            return [money(v), "純資産（借入を引いた額）"];
-                          }
-                          return [
-                            money(v),
-                            name === "value" ? "株式時価" : "取得原価",
-                          ];
-                        }}
-                        labelFormatter={(label, payload) => {
-                          const p = payload?.[0]?.payload as
-                            | (typeof trend)[number]
-                            | undefined;
-                          if (!p) return label;
-                          // 銘柄数が変わった期間は「増えた理由」が登録作業なので明示する
-                          if (p.positionChanged) {
-                            const sign = p.positionDelta > 0 ? "+" : "";
-                            return `${label}（銘柄 ${p.positionCount} ／ ${sign}${p.positionDelta} 銘柄の登録あり）`;
-                          }
-                          if (p.priceChange !== null) {
-                            const sign = p.priceChange >= 0 ? "+" : "";
-                            return `${label}（値動き ${sign}${money(p.priceChange)}）`;
-                          }
-                          return `${label}（銘柄 ${p.positionCount}）`;
-                        }}
-                      />
-                      <Area
-                        type="monotone"
-                        dataKey="cost"
-                        stroke="var(--muted-foreground)"
-                        strokeDasharray="4 4"
-                        strokeWidth={1.5}
-                        fill="none"
-                      />
-                      {/* 借入がある場合は実質の資産が分かるよう純資産の線も出す */}
-                      {hasNetAssetsLine && (
-                        <Area
-                          type="monotone"
-                          dataKey="netAssets"
-                          stroke="var(--chart-2)"
-                          strokeWidth={2}
-                          fill="none"
-                          connectNulls
-                        />
-                      )}
-                      <Area
-                        type="monotone"
-                        dataKey="value"
-                        stroke="var(--chart-1)"
-                        strokeWidth={2}
-                        fill="url(#valueFill)"
-                      />
-                      {/*
-                        銘柄を登録した時点に印を付ける。
-                        この区間の増加は資産の成長ではなく登録作業によるものなので、
-                        線の上がり方を見誤らないようにする。
-                      */}
-                      {trend.map((p, i) =>
-                        p.positionChanged ? (
-                          <ReferenceLine
-                            key={`mark-${i}`}
-                            x={p.date}
-                            stroke="var(--muted-foreground)"
-                            strokeDasharray="2 3"
-                            strokeOpacity={0.5}
-                          />
-                        ) : null
-                      )}
-                    </AreaChart>
-                  </ResponsiveContainer>
-                )}
-                {/* グラフの読み方。登録作業と値動きを混同しないよう明示する */}
-                {trend.length >= 2 && (
-                  <div className="mt-3 space-y-1.5 border-t pt-3 text-xs">
-                    <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-muted-foreground">
-                      <span className="inline-flex items-center gap-1.5">
-                        <span
-                          className="inline-block h-0.5 w-4"
-                          style={{ background: "var(--chart-1)" }}
-                        />
-                        株式時価
-                      </span>
-                      {hasNetAssetsLine && (
-                        <span className="inline-flex items-center gap-1.5">
-                          <span
-                            className="inline-block h-0.5 w-4"
-                            style={{ background: "var(--chart-2)" }}
-                          />
-                          純資産（借入を引いた額）
-                        </span>
-                      )}
-                      <span className="inline-flex items-center gap-1.5">
-                        <span className="inline-block h-0.5 w-4 border-t border-dashed border-muted-foreground" />
-                        取得原価
-                      </span>
-                      {(assetTrend.data?.changedPointCount ?? 0) > 0 && (
-                        <span className="inline-flex items-center gap-1.5">
-                          <span className="inline-block h-3 w-0 border-l border-dashed border-muted-foreground" />
-                          銘柄の登録があった時点
-                        </span>
-                      )}
-                    </div>
-                    {(assetTrend.data?.changedPointCount ?? 0) > 0 && (
-                      <p className="text-muted-foreground">
-                        点線の位置では銘柄を登録しています。その区間の増加は資産が増えたのではなく
-                        登録作業によるものです。
-                        {assetTrend.data?.priceOnlyChange !== null &&
-                          assetTrend.data?.priceOnlyChange !== undefined && (
-                            <>
-                              {" "}
-                              銘柄数が変わらなかった期間だけを合計した値動きは
-                              <span
-                                className={
-                                  assetTrend.data.priceOnlyChange >= 0
-                                    ? "font-medium text-emerald-600 dark:text-emerald-400"
-                                    : "font-medium text-red-600 dark:text-red-400"
-                                }
-                              >
-                                {assetTrend.data.priceOnlyChange >= 0
-                                  ? " +"
-                                  : " "}
-                                {money(assetTrend.data.priceOnlyChange)}
-                              </span>
-                              です。
-                            </>
-                          )}
-                      </p>
-                    )}
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-
+          <div className="grid gap-4 lg:grid-cols-2">
             {/* 業種別分布 */}
             <Card>
               <CardHeader>

@@ -120,6 +120,10 @@ async function verify(width, height, port) {
       `Boolean(document.querySelector('[data-testid="cash-income-actual-forecast"]'))`
     );
     await browser.waitUntil(
+      "market temperature panel",
+      `Boolean(document.querySelector('[data-testid="market-temperature-panel"]'))`
+    );
+    await browser.waitUntil(
       "long-term income state",
       `(document.body.innerText.includes('未来の配当予想（税引前）') && document.body.innerText.includes('2030年末の3つの複利・再投資情景')) || document.body.innerText.includes('目標純資産と目標日がまだ設定されていません')`
     );
@@ -127,6 +131,48 @@ async function verify(width, height, port) {
       "stock data health",
       `document.body.innerText.includes('株価データは最新です') || document.body.innerText.includes('銘柄の株価が古くなっています')`
     );
+    const marketTemperature = await browser.evalValue(`(() => {
+      const node = document.querySelector('[data-testid="market-temperature-panel"]');
+      const income = document.querySelector('[data-testid="cash-income-actual-forecast"]');
+      const text = node?.innerText ?? '';
+      return {
+        present: Boolean(node),
+        first: Boolean(node && income && (node.compareDocumentPosition(income) & Node.DOCUMENT_POSITION_FOLLOWING)),
+        heading: text.includes('資産温度計'),
+        stockValue: text.includes('株式時価（借入を含む）'),
+        unrealizedPnl: text.includes('評価損益'),
+        allWindows:
+          Boolean(node?.querySelector('[data-testid="temperature-前日"]')) &&
+          Boolean(node?.querySelector('[data-testid="temperature-7日"]')) &&
+          Boolean(node?.querySelector('[data-testid="temperature-30日"]')),
+        valueKinds:
+          text.includes('株式値動き') && text.includes('純資産の評価変動'),
+        cashReadiness:
+          text.includes('買い場の準備') &&
+          text.includes('確認済みプラス現金') &&
+          text.includes('借入・負現金'),
+        thresholds:
+          text.includes('判定基準') &&
+          text.includes('弱含み') &&
+          text.includes('調整') &&
+          text.includes('大幅下落'),
+        signal:
+          text.includes('通常範囲') ||
+          text.includes('弱含み') ||
+          text.includes('調整局面') ||
+          text.includes('大幅下落') ||
+          text.includes('判定待ち'),
+        noDuplicateTopCards:
+          document.querySelectorAll('[data-testid="top-stock-value-card"]').length === 1 &&
+          document.querySelectorAll('[data-testid="top-unrealized-pnl-card"]').length === 1 &&
+          document.querySelectorAll('[data-testid="top-asset-trend-card"]').length === 1,
+        noInvalid: !text.includes('NaN') && !text.includes('undefined'),
+      };
+    })()`);
+    await browser.evalValue(`document.querySelector('[data-testid="market-temperature-panel"]')?.scrollIntoView({ block: 'start' })`);
+    await sleep(300);
+    const marketTemperatureScreenshot = await browser.screenshot("market-temperature");
+
     await browser.evalValue(`document.querySelector('[data-testid="cash-income-actual-forecast"]')?.scrollIntoView({ block: 'start' })`);
     await sleep(300);
     const card = await browser.evalValue(`(() => {
@@ -268,6 +314,7 @@ async function verify(width, height, port) {
       Object.entries(card)
         .filter(([key]) => !["scrollWidth", "clientWidth"].includes(key))
         .every(([, value]) => value === true) &&
+      Object.values(marketTemperature).every(Boolean) &&
       longTermPresent &&
       reinvestmentBasisPresent &&
       classificationPresent &&
@@ -278,8 +325,10 @@ async function verify(width, height, port) {
       width,
       passed,
       card,
+      marketTemperature,
       dialog,
       screenshots: {
+        marketTemperature: marketTemperatureScreenshot,
         cashIncome: cardScreenshot,
         cashBalanceTracking: cashTrackingScreenshot,
         longTermGoal: longTermScreenshot,
