@@ -184,6 +184,26 @@ export function buildCashBalanceTracking(input: {
           2
         )
       : null;
+  const confirmedPositiveCashJpy =
+    accounts.length > 0 && allJpyKnown
+      ? round(
+          accounts.reduce(
+            (total, row) => total + Math.max(row.confirmedBalanceJpy ?? 0, 0),
+            0
+          ),
+          2
+        )
+      : null;
+  const confirmedNegativeCashJpy =
+    accounts.length > 0 && allJpyKnown
+      ? round(
+          accounts.reduce(
+            (total, row) => total + Math.min(row.confirmedBalanceJpy ?? 0, 0),
+            0
+          ),
+          2
+        )
+      : null;
   const settledDividendAfterAnchorJpy =
     accounts.length > 0 &&
     accounts.every(row => row.settledDividendAfterAnchorJpy !== null)
@@ -207,6 +227,29 @@ export function buildCashBalanceTracking(input: {
           2
         )
       : null;
+  const allProvisionalJpyKnown = accounts.every(
+    row => row.provisionalBalanceJpy !== null
+  );
+  const provisionalPositiveCashJpy =
+    accounts.length > 0 && allProvisionalJpyKnown
+      ? round(
+          accounts.reduce(
+            (total, row) => total + Math.max(row.provisionalBalanceJpy ?? 0, 0),
+            0
+          ),
+          2
+        )
+      : null;
+  const provisionalNegativeCashJpy =
+    accounts.length > 0 && allProvisionalJpyKnown
+      ? round(
+          accounts.reduce(
+            (total, row) => total + Math.min(row.provisionalBalanceJpy ?? 0, 0),
+            0
+          ),
+          2
+        )
+      : null;
 
   if (accounts.length === 0) {
     return {
@@ -217,8 +260,12 @@ export function buildCashBalanceTracking(input: {
       asOfDate: input.asOfDate,
       confirmedAccountCount: 0,
       confirmedAccountTotalJpy: null,
+      confirmedPositiveCashJpy: null,
+      confirmedNegativeCashJpy: null,
       settledDividendAfterAnchorJpy: null,
       provisionalAccountTotalJpy: null,
+      provisionalPositiveCashJpy: null,
+      provisionalNegativeCashJpy: null,
       legacyTotalJpy: input.legacyCashJpy,
       missingBrokers: Array.from(new Set(input.knownBrokers)),
       accounts: [],
@@ -232,12 +279,16 @@ export function buildCashBalanceTracking(input: {
     asOfDate: input.asOfDate,
     confirmedAccountCount: accounts.length,
     confirmedAccountTotalJpy,
+    confirmedPositiveCashJpy,
+    confirmedNegativeCashJpy,
     settledDividendAfterAnchorJpy,
     provisionalAccountTotalJpy,
+    provisionalPositiveCashJpy,
+    provisionalNegativeCashJpy,
     legacyTotalJpy: input.legacyCashJpy,
     missingBrokers,
     accounts,
     note:
-      "暫定残高はスクショ確定残高に、その後の同口座・同通貨の入金済み配当だけを加えた値です。売買、税・手数料、入出金、現金宝利息は自動加算せず、次回スクショで差額照合します。",
+      "プラス現金と負現金・借入を分けて表示し、相殺後だけを純現金と呼びます。暫定純現金はスクショ確定値に、その後の同口座・同通貨の入金済み配当だけを加えた値です。売買、税・手数料、入出金、現金宝利息は自動加算せず、次回スクショで差額照合します。",
   };
 }

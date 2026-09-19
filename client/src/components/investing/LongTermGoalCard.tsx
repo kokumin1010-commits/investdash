@@ -433,7 +433,13 @@ export function LongTermGoalCard(props: Props) {
                     現在価格による評価損益。売却前のため確定収益ではありません。
                   </p>
                 </div>
-                <ConfirmedIncomeBox label="現金宝：付与済み利息" metric={actualIncome?.interestYtd} />
+                <ConfirmedIncomeBox
+                  label="現金宝：前回スクショ以降の確定利息"
+                  metric={
+                    actualIncome?.confirmedInterestFromScreenshots ??
+                    actualIncome?.interestYtd
+                  }
+                />
                 <ConfirmedIncomeBox label="株式：入金済み配当" metric={actualIncome?.dividendYtd} />
               </div>
               <p className="mt-3 text-[10px] leading-relaxed text-muted-foreground">
@@ -514,7 +520,7 @@ function ConfirmedIncomeBox({
     status === "AVAILABLE"
       ? "確定"
       : status === "PARTIAL"
-        ? "確定（記録分）"
+        ? "確定（記録範囲）"
         : "未連携";
   return (
     <div className="rounded-lg border border-emerald-200 bg-emerald-50/60 p-3 dark:border-emerald-900/60 dark:bg-emerald-950/20">
@@ -529,8 +535,12 @@ function ConfirmedIncomeBox({
       </p>
       <p className="mt-1 text-[10px] leading-relaxed text-muted-foreground">
         {metric?.lastDate
-          ? `本年の記録分・${metric.lastDate}基準`
-          : "付与・入金の実績記録がまだありません"}
+          ? metric.periodStartDate
+            ? `${metric.periodStartDate}→${metric.lastDate}の累計差額`
+            : `${metric.lastDate}基準の確認済み記録`
+          : label.includes("配当")
+            ? "入金実績は未連携。保有株からの予想は下段に分離"
+            : "付与実績の記録がまだありません"}
       </p>
     </div>
   );

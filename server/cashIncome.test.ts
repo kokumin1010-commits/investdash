@@ -144,6 +144,7 @@ describe("buildCashIncomeOverview", () => {
           netAmount: "202.38",
           fxRateJpy: "150",
           source: "SCREENSHOT_CUMULATIVE_DELTA",
+          notes: "2026-08-24→2026-09-13の累計収益差額。日次利息とは重複加算しない。",
         }),
       ],
       currentInterestAssetCount: 1,
@@ -156,11 +157,17 @@ describe("buildCashIncomeOverview", () => {
     });
 
     expect(result.actual.latestDailyInterest.amountJpy).toBe(1_500);
-    expect(result.actual.interestMtd.amountJpy).toBe(30_357);
+    expect(result.actual.interestMtd.amountJpy).toBe(1_500);
     expect(result.actual.interestMtd.sourceLabel).toBe(
-      "月次スクショの累計収益差額"
+      "現金宝・貨幣基金の今月記録済み日次利息"
     );
-    expect(result.actual.recordedGrossIncomeMtdJpy).toBe(30_357);
+    expect(result.actual.recordedGrossIncomeMtdJpy).toBe(1_500);
+    expect(result.actual.confirmedInterestFromScreenshots).toMatchObject({
+      amountJpy: 30_357,
+      periodStartDate: "2026-08-24",
+      lastDate: "2026-09-13",
+      sourceLabel: "前回スクショから今回までの累計収益差額",
+    });
   });
 
   it("无股息现金流水时返回未取得，不用持仓预测冒充已到账", () => {

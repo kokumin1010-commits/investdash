@@ -13,8 +13,12 @@ const tracking: CashBalanceTracking = {
   asOfDate: "2026-09-17",
   confirmedAccountCount: 1,
   confirmedAccountTotalJpy: 1_590_000,
+  confirmedPositiveCashJpy: 1_590_000,
+  confirmedNegativeCashJpy: 0,
   settledDividendAfterAnchorJpy: 12_600,
   provisionalAccountTotalJpy: 1_602_600,
+  provisionalPositiveCashJpy: 1_602_600,
+  provisionalNegativeCashJpy: 0,
   legacyTotalJpy: 1_255_302,
   missingBrokers: ["futu_hk"],
   accounts: [
@@ -53,7 +57,10 @@ describe("CashBalanceTrackingSection", () => {
       );
 
       expect(screen.getByText("現金残高：スクショ確定＋暫定更新")).toBeTruthy();
+      expect(screen.getByText("プラス現金（確定）")).toBeTruthy();
+      expect(screen.getByText("借入・負現金（確定）")).toBeTruthy();
       expect(screen.getByText("¥1,590,000")).toBeTruthy();
+      expect(screen.getByText("¥0")).toBeTruthy();
       expect(screen.getByText("¥12,600")).toBeTruthy();
       expect(screen.getByText("¥1,602,600")).toBeTruthy();
       expect(screen.getByText("¥22,096,246")).toBeTruthy();
@@ -71,8 +78,12 @@ describe("CashBalanceTrackingSection", () => {
           status: "LEGACY_TOTAL_ONLY",
           confirmedAccountCount: 0,
           confirmedAccountTotalJpy: null,
+          confirmedPositiveCashJpy: null,
+          confirmedNegativeCashJpy: null,
           settledDividendAfterAnchorJpy: null,
           provisionalAccountTotalJpy: null,
+          provisionalPositiveCashJpy: null,
+          provisionalNegativeCashJpy: null,
           accounts: [],
         }}
         annualDividendJpy={22_096_246}

@@ -56,23 +56,38 @@ export function DataHealthCard({ showSyncButton = true }: { showSyncButton?: boo
   const { summary, problems, lastSyncAt } = data;
   const ok = summary.problem === 0;
 
+  if (ok) {
+    return (
+      <div
+        data-testid="data-health-compact"
+        className="inline-flex max-w-full flex-wrap items-center gap-x-2 gap-y-0.5 self-start rounded-full border border-emerald-200 bg-emerald-50/55 px-3 py-1.5 text-xs shadow-sm dark:border-emerald-900 dark:bg-emerald-950/20"
+      >
+        <CheckCircle2 className="size-3.5 shrink-0 text-emerald-600" />
+        <span className="font-medium">株価データは最新です</span>
+        <span className="text-muted-foreground">
+          {summary.total} 銘柄
+          {lastSyncAt
+            ? `・${new Date(lastSyncAt).toLocaleString("ja-JP", {
+                month: "numeric",
+                day: "numeric",
+                hour: "2-digit",
+                minute: "2-digit",
+              })}`
+            : ""}
+        </span>
+      </div>
+    );
+  }
+
   return (
     <Card
-      className={
-        ok
-          ? "border-border"
-          : "border-amber-300 bg-amber-50/60 dark:border-amber-800 dark:bg-amber-950/30"
-      }
+      className="border-amber-300 bg-amber-50/60 dark:border-amber-800 dark:bg-amber-950/30"
     >
       <CardContent className="space-y-2.5 py-3.5">
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
-          {ok ? (
-            <CheckCircle2 className="size-4 shrink-0 text-emerald-600" />
-          ) : (
-            <AlertTriangle className="size-4 shrink-0 text-amber-600" />
-          )}
+          <AlertTriangle className="size-4 shrink-0 text-amber-600" />
           <span className="text-sm font-medium">
-            {ok ? "株価データは最新です" : `${summary.problem} 銘柄の株価が古くなっています`}
+            {summary.problem} 銘柄の株価が古くなっています
           </span>
           <span className="text-muted-foreground text-xs">
             {summary.total} 銘柄を確認
@@ -102,8 +117,7 @@ export function DataHealthCard({ showSyncButton = true }: { showSyncButton?: boo
           ) : null}
         </div>
 
-        {!ok && (
-          <>
+        <>
             <p className="text-muted-foreground text-xs leading-relaxed">
               古い株価のままだと、実際には買い増しの価格帯に入っていない銘柄が
               「買い場」と表示されることがあります。
@@ -138,8 +152,7 @@ export function DataHealthCard({ showSyncButton = true }: { showSyncButton?: boo
                 <p className="text-muted-foreground text-xs">ほか {problems.length - 8} 銘柄</p>
               ) : null}
             </div>
-          </>
-        )}
+        </>
       </CardContent>
     </Card>
   );

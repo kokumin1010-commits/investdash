@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   overview: vi.fn(),
+  dataHealth: vi.fn(),
   priceBandOverview: vi.fn(),
   assetTrend: vi.fn(),
   settings: vi.fn(),
@@ -73,7 +74,7 @@ vi.mock("@/lib/trpc", () => ({
           isPending: false,
         }),
       },
-      dataHealth: { useQuery: () => ({ data: null, isLoading: false }) },
+      dataHealth: { useQuery: mocks.dataHealth },
       syncPrices: {
         useMutation: () => ({
           mutate: vi.fn(),
@@ -392,6 +393,7 @@ beforeEach(() => {
     isLoading: false,
     error: null,
   });
+  mocks.dataHealth.mockReturnValue({ data: null, isLoading: false });
   mocks.priceBandOverview.mockReturnValue({
     data: {
       ranking: {
@@ -425,6 +427,29 @@ beforeEach(() => {
 afterEach(() => cleanup());
 
 describe("Dashboard actual page", () => {
+  it("株価データ正常表示を小さなピルにして検索欄より上へ置く", () => {
+    mocks.dataHealth.mockReturnValue({
+      data: {
+        summary: { total: 146, problem: 0 },
+        problems: [],
+        lastSyncAt: new Date("2026-09-19T06:30:00.000Z"),
+      },
+      isLoading: false,
+    });
+
+    render(React.createElement(Dashboard));
+
+    const health = screen.getByTestId("data-health-compact");
+    const search = screen.getByPlaceholderText(
+      "会社名・コードを検索（V03 / Venture / AAPL）"
+    );
+    expect(health.className).toContain("rounded-full");
+    expect(health.className).toContain("py-1.5");
+    expect(
+      health.compareDocumentPosition(search) & Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy();
+  });
+
   for (const width of [390, 1280]) {
     it(`renders the 2030 long-term goal at ${width}px without turning it into a trade target`, () => {
       Object.defineProperty(window, "innerWidth", {
@@ -445,15 +470,17 @@ describe("Dashboard actual page", () => {
       expect(screen.getByText("高い挑戦目標")).toBeTruthy();
       expect(screen.getByText("キャッシュ収入：確定実績と将来予想")).toBeTruthy();
       expect(screen.getByText("記録済みの確定キャッシュ収益")).toBeTruthy();
-      expect(screen.getByText("本年の確定収益（記録分）")).toBeTruthy();
+      expect(screen.getByText("前回スクショ以降の確定利息")).toBeTruthy();
       expect(screen.getByText("本年の入金済み配当")).toBeTruthy();
       expect(screen.getAllByText("未連携").length).toBeGreaterThan(0);
       expect(screen.getByText("利益の種類を分けて表示")).toBeTruthy();
       expect(screen.getByText("株式：含み損益")).toBeTruthy();
-      expect(screen.getByText("現金宝：付与済み利息")).toBeTruthy();
+      expect(
+        screen.getByText("現金宝：前回スクショ以降の確定利息")
+      ).toBeTruthy();
       expect(screen.getByText("株式：入金済み配当")).toBeTruthy();
       expect(screen.getByText("未実現")).toBeTruthy();
-      expect(screen.getAllByText("確定（記録分）").length).toBeGreaterThan(0);
+      expect(screen.getAllByText("確定（記録範囲）").length).toBeGreaterThan(0);
       expect(screen.getByText("将来予想（未確定）")).toBeTruthy();
       expect(screen.getByText("将来1年間の予想（未確定）")).toBeTruthy();
       expect(screen.getByText("未来の配当予想（税引前）")).toBeTruthy();

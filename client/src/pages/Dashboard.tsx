@@ -665,6 +665,7 @@ export default function Dashboard() {
           </Button>
           </div>
         </div>
+        {!isEmpty ? <DataHealthCard showSyncButton={false} /> : null}
         <GlobalStockSearch />
       </header>
 
@@ -672,13 +673,6 @@ export default function Dashboard() {
         <EmptyState />
       ) : (
         <>
-          {/*
-            株価が古くなっていないかを最初に出す。古い株価のまま下の
-            数字を読むと、評価額も買い増し圏の判定も誤ったものになる。
-            正常なときは 1 行に収めて邪魔にならないようにする。
-          */}
-          <DataHealthCard showSyncButton={false} />
-
           {data?.cashIncome ? (
             <CashIncomeCard
               data={data.cashIncome}
@@ -1349,8 +1343,8 @@ export default function Dashboard() {
                   現金性資産（利息で増える）
                 </CardTitle>
                 <CardDescription className="text-xs">
-                  貨幣市場基金・現金宝。株価が動かない代わりに毎日利息が付く。
-                  株式の評価損益には含めていない
+                  貨幣市場基金・現金宝。毎日の利息を残高へ組み入れ、翌日以降の元本として日次複利で運用します。
+                  株式の評価損益と証券口座のAvailable Cashには重ねて加えません
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-3">

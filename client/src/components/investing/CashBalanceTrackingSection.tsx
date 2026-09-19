@@ -68,20 +68,31 @@ export function CashBalanceTrackingSection({
         </Badge>
       </div>
 
-      <div className="grid grid-cols-2 gap-2 xl:grid-cols-4">
+      <div className="grid grid-cols-2 gap-2 xl:grid-cols-5">
         <div className="min-w-0 rounded-xl border border-teal-200 bg-teal-50/50 p-3 dark:border-teal-900 dark:bg-teal-950/20">
-          <p className="text-[11px] text-muted-foreground">最新スクショ確定残高</p>
+          <p className="text-[11px] text-muted-foreground">
+            {legacyOnly ? "旧全体現金" : "プラス現金（確定）"}
+          </p>
           <p className="tabular mt-1 text-lg font-semibold">
             {legacyOnly
               ? yen(data.legacyTotalJpy)
-              : yen(data.confirmedAccountTotalJpy)}
+              : yen(data.confirmedPositiveCashJpy)}
           </p>
           <p className="mt-1 text-[10px] leading-relaxed text-muted-foreground">
             {legacyOnly
               ? "既存全体値・口座／基準日未分類"
               : unavailable
                 ? "次回スクショから開始"
-                : "口座別スクショ確認済みの合計"}
+                : "0以上の口座残高だけを合計"}
+          </p>
+        </div>
+        <div className="min-w-0 rounded-xl border border-rose-200 bg-rose-50/50 p-3 dark:border-rose-900 dark:bg-rose-950/20">
+          <p className="text-[11px] text-muted-foreground">借入・負現金（確定）</p>
+          <p className="tabular mt-1 text-lg font-semibold text-loss">
+            {legacyOnly || unavailable ? "未取得" : yen(data.confirmedNegativeCashJpy)}
+          </p>
+          <p className="mt-1 text-[10px] leading-relaxed text-muted-foreground">
+            0未満の口座残高。IBKR証拠金借入など
           </p>
         </div>
         <div className="min-w-0 rounded-xl border bg-background/80 p-3">
@@ -94,12 +105,12 @@ export function CashBalanceTrackingSection({
           </p>
         </div>
         <div className="min-w-0 rounded-xl border border-sky-200 bg-sky-50/50 p-3 dark:border-sky-900 dark:bg-sky-950/20">
-          <p className="text-[11px] text-muted-foreground">暫定現在残高</p>
+          <p className="text-[11px] text-muted-foreground">相殺後の暫定純現金</p>
           <p className="tabular mt-1 text-lg font-semibold">
             {yen(data.provisionalAccountTotalJpy)}
           </p>
           <p className="mt-1 text-[10px] leading-relaxed text-muted-foreground">
-            スクショ確定値＋確認済み配当
+            プラス現金＋負現金＋確認済み配当
           </p>
         </div>
         <div className="min-w-0 rounded-xl border border-amber-200 bg-amber-50/50 p-3 dark:border-amber-900 dark:bg-amber-950/20">
@@ -129,11 +140,21 @@ export function CashBalanceTrackingSection({
                     最終確定 {dateText(account.confirmedAsOfDate)}
                   </p>
                 </div>
-                <Badge variant="secondary" className="text-[10px]">
-                  {account.reconciliationStatus === "READY"
-                    ? "前回差額を照合済み"
-                    : "初回基準"}
-                </Badge>
+                <div className="flex flex-wrap justify-end gap-1">
+                  {account.confirmedBalance < 0 ? (
+                    <Badge
+                      variant="outline"
+                      className="border-rose-300 bg-rose-50 text-[10px] text-rose-700 dark:border-rose-900 dark:bg-rose-950/30 dark:text-rose-200"
+                    >
+                      負現金・借入
+                    </Badge>
+                  ) : null}
+                  <Badge variant="secondary" className="text-[10px]">
+                    {account.reconciliationStatus === "READY"
+                      ? "前回差額を照合済み"
+                      : "初回基準"}
+                  </Badge>
+                </div>
               </div>
               <div className="mt-3 grid grid-cols-3 gap-2 text-xs">
                 <div className="min-w-0">

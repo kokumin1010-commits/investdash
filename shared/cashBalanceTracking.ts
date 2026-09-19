@@ -29,8 +29,12 @@ export type CashBalanceTracking = {
   asOfDate: string;
   confirmedAccountCount: number;
   confirmedAccountTotalJpy: number | null;
+  confirmedPositiveCashJpy: number | null;
+  confirmedNegativeCashJpy: number | null;
   settledDividendAfterAnchorJpy: number | null;
   provisionalAccountTotalJpy: number | null;
+  provisionalPositiveCashJpy: number | null;
+  provisionalNegativeCashJpy: number | null;
   legacyTotalJpy: number | null;
   missingBrokers: Broker[];
   accounts: CashBalanceAccountView[];

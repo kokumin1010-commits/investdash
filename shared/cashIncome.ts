@@ -8,6 +8,7 @@ export type ActualIncomeMetric = {
   recordCount: number;
   recordedDays: number;
   lastDate: string | null;
+  periodStartDate?: string | null;
   sourceLabel: string;
 };
 
@@ -25,6 +26,7 @@ export type CashIncomeOverview = {
   cashBalanceTracking?: CashBalanceTracking;
   actual: {
     asOfDate: string;
+    confirmedInterestFromScreenshots?: ActualIncomeMetric;
     latestDailyInterest: ActualIncomeMetric;
     interestMtd: ActualIncomeMetric;
     interestYtd: ActualIncomeMetric;

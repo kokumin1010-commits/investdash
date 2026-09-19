@@ -74,6 +74,8 @@ describe("buildCashBalanceTracking", () => {
 
     expect(result.status).toBe("SCREENSHOT_PROVISIONAL");
     expect(result.confirmedAccountTotalJpy).toBe(150_000);
+    expect(result.confirmedPositiveCashJpy).toBe(150_000);
+    expect(result.confirmedNegativeCashJpy).toBe(0);
     expect(result.settledDividendAfterAnchorJpy).toBe(12_600);
     expect(result.provisionalAccountTotalJpy).toBe(162_600);
     expect(result.accounts[0]).toMatchObject({
@@ -83,6 +85,51 @@ describe("buildCashBalanceTracking", () => {
       reconciliationStatus: "BASELINE_ONLY",
     });
     expect(result.missingBrokers).toEqual(["futu_hk"]);
+  });
+
+  it("プラス現金とIBKR負現金を分離し、相殺後純現金だけをネット表示に使う", () => {
+    const result = buildCashBalanceTracking({
+      snapshots: [
+        {
+          broker: "ibkr",
+          currency: "SGD",
+          asOfDate: "2026-09-19",
+          cashBalance: "-1845956.61",
+          capturedAt: new Date("2026-09-19T00:00:00Z"),
+        },
+        {
+          broker: "sc_sg",
+          currency: "SGD",
+          asOfDate: "2026-09-17",
+          cashBalance: "40455.01",
+          capturedAt: new Date("2026-09-19T00:00:00Z"),
+        },
+        {
+          broker: "rakuten_ispeed",
+          currency: "JPY",
+          asOfDate: "2026-09-19",
+          cashBalance: "1978477",
+          capturedAt: new Date("2026-09-19T00:00:00Z"),
+        },
+        {
+          broker: "moomoo_jp",
+          currency: "JPY",
+          asOfDate: "2026-09-18",
+          cashBalance: "1414434",
+          capturedAt: new Date("2026-09-19T00:00:00Z"),
+        },
+      ],
+      cashIncomeRecords: [],
+      legacyCashJpy: null,
+      knownBrokers: ["ibkr", "sc_sg", "rakuten_ispeed", "moomoo_jp"],
+      fxRates: { ...fxRates, SGD: 122.936 },
+      asOfDate: "2026-09-19",
+    });
+
+    expect(result.confirmedPositiveCashJpy).toBe(8_366_288.11);
+    expect(result.confirmedNegativeCashJpy).toBe(-226_934_521.81);
+    expect(result.confirmedAccountTotalJpy).toBe(-218_568_233.7);
+    expect(result.provisionalAccountTotalJpy).toBe(-218_568_233.7);
   });
 
   it("次回スクショでは前回残高と期間中の確定配当との差を未識別差額として残す", () => {

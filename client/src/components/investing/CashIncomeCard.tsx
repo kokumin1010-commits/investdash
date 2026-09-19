@@ -69,7 +69,7 @@ function dateText(value: string | null) {
 
 function statusText(status: CashIncomeStatus) {
   if (status === "AVAILABLE") return "確定";
-  if (status === "PARTIAL") return "確定（記録分）";
+  if (status === "PARTIAL") return "確定（記録範囲）";
   return "未連携";
 }
 
@@ -87,11 +87,15 @@ function ActualBox({
   label,
   metric,
   helper,
+  periodLabel,
+  showRecordedDays = true,
   emphasize = false,
 }: {
   label: string;
   metric: ActualIncomeMetric;
   helper?: string;
+  periodLabel?: string;
+  showRecordedDays?: boolean;
   emphasize?: boolean;
 }) {
   return (
@@ -112,8 +116,13 @@ function ActualBox({
         {yen(metric.amountJpy)}
       </p>
       <p className="mt-1 text-[10px] leading-relaxed text-muted-foreground">
-        {metric.lastDate ? `${dateText(metric.lastDate)} 基準` : helper ?? metric.sourceLabel}
-        {metric.recordedDays > 0 ? `・${metric.recordedDays}日分` : ""}
+        {periodLabel ??
+          (metric.lastDate
+            ? `${dateText(metric.lastDate)} 基準`
+            : helper ?? metric.sourceLabel)}
+        {showRecordedDays && metric.recordedDays > 0
+          ? `・${metric.recordedDays}日分`
+          : ""}
       </p>
     </div>
   );
@@ -175,27 +184,19 @@ function ForecastBox({
   );
 }
 
-function actualMetric(
-  amountJpy: number | null,
-  status: CashIncomeStatus,
-  sourceLabel: string,
-  asOfDate: string
-): ActualIncomeMetric {
-  return {
-    amountJpy,
-    status,
-    recordCount: 0,
-    recordedDays: 0,
-    lastDate: asOfDate,
-    sourceLabel,
-  };
-}
-
 export function CashIncomeCard({ data, interestAssetsJpy, interestRatePct }: Props) {
   const actual = data.actual;
   const forecast = data.forecast;
   const annualBorrowing = forecast.annualBorrowingInterestJpy;
   const annualNet = forecast.annualNetCashJpy;
+  const confirmedInterest =
+    actual.confirmedInterestFromScreenshots ?? actual.interestYtd;
+  const confirmedInterestPeriod =
+    confirmedInterest.periodStartDate && confirmedInterest.lastDate
+      ? `${dateText(confirmedInterest.periodStartDate)}→${dateText(confirmedInterest.lastDate)}の累計差額`
+      : confirmedInterest.lastDate
+        ? `${dateText(confirmedInterest.lastDate)}保存の確認済み差額`
+        : "前回と今回のスクショ累計差額";
 
   return (
     <Card data-testid="cash-income-actual-forecast" className="scroll-mt-20 overflow-hidden border-emerald-200/70 shadow-sm dark:border-emerald-900/60">
@@ -246,29 +247,31 @@ export function CashIncomeCard({ data, interestAssetsJpy, interestRatePct }: Pro
 
           <div className="grid grid-cols-2 gap-2 xl:grid-cols-4">
             <ActualBox
-              label="本年の確定収益（記録分）"
+              label="前回スクショ以降の確定利息"
               emphasize
-              metric={actualMetric(
-                actual.recordedGrossIncomeYtdJpy,
-                actual.recordedGrossIncomeYtdStatus,
-                "日次利息＋入金済み配当",
-                actual.asOfDate
-              )}
+              metric={confirmedInterest}
+              periodLabel={confirmedInterestPeriod}
+              showRecordedDays={false}
             />
             <ActualBox label="最新記録の日次利息" metric={actual.latestDailyInterest} />
             <ActualBox
               label="本年の入金済み配当"
               metric={actual.dividendYtd}
-              helper="証券口座の実際入金は未連携"
+              helper="実際の入金履歴は未連携。保有株からの予想は下段に分離"
             />
-            <ActualBox label="現金宝の累計利息" metric={actual.lifetimeInterest} />
+            <ActualBox
+              label="現金宝の最新累計利息"
+              metric={actual.lifetimeInterest}
+              periodLabel={`各商品の最新累計値・${actual.lifetimeInterest.recordCount}商品`}
+              showRecordedDays={false}
+            />
           </div>
 
           <div className="grid gap-2 sm:grid-cols-3">
             <ActualBox
-              label="今月の現金宝利息"
+              label="今月の記録済み日次利息"
               metric={actual.interestMtd}
-              helper="今月の記録はありません"
+              helper="今月の日次記録はありません"
             />
             <ActualBox
               label="今月の入金済み配当"
@@ -283,7 +286,7 @@ export function CashIncomeCard({ data, interestAssetsJpy, interestRatePct }: Pro
           </div>
 
           <p className="rounded-lg border border-amber-200 bg-amber-50/60 px-3 py-2 text-[11px] leading-relaxed text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/20 dark:text-amber-200">
-            {actual.note} 現金宝の利息は最新残高に含まれるため、純資産へもう一度加算しません。
+            {actual.note} 現金宝は毎日の利息が元本へ組み入れられる日次複利ですが、最新残高に反映済みのため純資産へもう一度加算しません。配当予想も実際の入金確認までは確定収益にしません。
           </p>
         </section>
 

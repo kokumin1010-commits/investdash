@@ -24,6 +24,7 @@ export type CashIncomeRecordLike = {
   netAmount: string | number;
   fxRateJpy: string | number | null;
   source: string;
+  notes?: string | null;
 };
 
 function finite(value: string | number | null | undefined): number | null {
@@ -114,6 +115,14 @@ function filterDate<T>(rows: T[], dateOf: (row: T) => string, from: string, to: 
   });
 }
 
+function screenshotPeriodStart(rows: CashIncomeRecordLike[]): string | null {
+  const dates = rows
+    .map(row => row.notes?.match(/(\d{4}-\d{2}-\d{2})→\d{4}-\d{2}-\d{2}/)?.[1] ?? null)
+    .filter((value): value is string => value !== null)
+    .sort();
+  return dates[0] ?? null;
+}
+
 function knownIncomeTotal(
   metrics: ActualIncomeMetric[]
 ): { amountJpy: number | null; status: CashIncomeStatus } {
@@ -191,18 +200,13 @@ export function buildCashIncomeOverview(input: {
     yearStart,
     asOfDate
   );
-  const monthInterestDeltas = filterDate(
-    settledInterestDeltas,
-    row => row.occurredOn,
-    monthStart,
-    asOfDate
+  const latestInterestDeltaDate = settledInterestDeltas.reduce<string | null>(
+    (latest, row) => (!latest || row.occurredOn > latest ? row.occurredOn : latest),
+    null
   );
-  const yearInterestDeltas = filterDate(
-    settledInterestDeltas,
-    row => row.occurredOn,
-    yearStart,
-    asOfDate
-  );
+  const latestInterestDeltas = latestInterestDeltaDate
+    ? settledInterestDeltas.filter(row => row.occurredOn === latestInterestDeltaDate)
+    : [];
 
   const latestDailyInterest = sumConverted(
     latestInterestRows,
@@ -212,42 +216,32 @@ export function buildCashIncomeOverview(input: {
     "現金宝・貨幣基金の日次利息付与",
     latestInterestRows.length !== input.currentInterestAssetCount
   );
-  const interestMtd =
-    monthInterestDeltas.length > 0
-      ? sumConverted(
-          monthInterestDeltas,
-          row => row.occurredOn,
-          row => row.netAmount,
-          row => row.fxRateJpy,
-          "月次スクショの累計収益差額",
-          true
-        )
-      : sumConverted(
-          monthInterestRows,
-          row => row.incomeDate,
-          row => row.dailyIncome,
-          row => row.fxRateJpy,
-          "現金宝・貨幣基金の月次記録分",
-          true
-        );
-  const interestYtd =
-    yearInterestDeltas.length > 0
-      ? sumConverted(
-          yearInterestDeltas,
-          row => row.occurredOn,
-          row => row.netAmount,
-          row => row.fxRateJpy,
-          "月次スクショの累計収益差額",
-          true
-        )
-      : sumConverted(
-          yearInterestRows,
-          row => row.incomeDate,
-          row => row.dailyIncome,
-          row => row.fxRateJpy,
-          "現金宝・貨幣基金の年次記録分",
-          true
-        );
+  const confirmedInterestFromScreenshots = sumConverted(
+    latestInterestDeltas,
+    row => row.occurredOn,
+    row => row.netAmount,
+    row => row.fxRateJpy,
+    "前回スクショから今回までの累計収益差額",
+    true
+  );
+  confirmedInterestFromScreenshots.periodStartDate =
+    screenshotPeriodStart(latestInterestDeltas);
+  const interestMtd = sumConverted(
+    monthInterestRows,
+    row => row.incomeDate,
+    row => row.dailyIncome,
+    row => row.fxRateJpy,
+    "現金宝・貨幣基金の今月記録済み日次利息",
+    true
+  );
+  const interestYtd = sumConverted(
+    yearInterestRows,
+    row => row.incomeDate,
+    row => row.dailyIncome,
+    row => row.fxRateJpy,
+    "現金宝・貨幣基金の本年記録済み日次利息",
+    true
+  );
   const dividendMtd = sumConverted(
     monthDividends,
     row => row.occurredOn,
@@ -319,6 +313,7 @@ export function buildCashIncomeOverview(input: {
   return {
     actual: {
       asOfDate,
+      confirmedInterestFromScreenshots,
       latestDailyInterest,
       interestMtd,
       interestYtd,
