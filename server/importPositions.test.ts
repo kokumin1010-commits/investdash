@@ -74,6 +74,35 @@ describe("consolidateBrokerPositionRows", () => {
     expect(result.warnings[0]).toContain("安全に確定できない");
   });
 
+  it("楽天の分割建玉合計が既存総数と一致したら加重平均して1行にする", () => {
+    const result = consolidateBrokerPositionRows(
+      [
+        row({
+          symbol: "PYPL",
+          quantity: 88,
+          avgCost: 65.7896,
+          existingQuantity: 356,
+        }),
+        row({
+          symbol: "PYPL",
+          quantity: 268,
+          avgCost: 72.4699,
+          existingQuantity: 356,
+        }),
+      ],
+      "rakuten_ispeed"
+    );
+
+    expect(result.rows).toHaveLength(1);
+    expect(result.rows[0]).toMatchObject({
+      symbol: "PYPL",
+      quantity: 356,
+      avgCost: 70.8186,
+      mode: "UPDATE",
+    });
+    expect(result.warnings[0]).toContain("取得単価を加重平均");
+  });
+
   it("楽天以外は入力順と重複を変更しない", () => {
     const rows = [
       row({ symbol: "PYPL", quantity: 88 }),
