@@ -494,10 +494,15 @@ describe("Dashboard actual page", () => {
       expect(
         screen.getByText(/株価・為替・入出金・現金性資産・借入などを含み/)
       ).toBeTruthy();
-      expect(screen.getByText("2030年末の3つの達成情景")).toBeTruthy();
-      expect(screen.getByText("年率仮定 4.0%")).toBeTruthy();
-      expect(screen.getByText("年率仮定 8.0%")).toBeTruthy();
-      expect(screen.getByText("年率仮定 12.0%")).toBeTruthy();
+      expect(screen.getByText("2030年末の3つの複利・再投資情景")).toBeTruthy();
+      expect(screen.getByTestId("long-term-projection-basis")).toBeTruthy();
+      expect(screen.getByText("配当は全額再投資")).toBeTruthy();
+      expect(screen.getByText("株価年率 4.0%")).toBeTruthy();
+      expect(screen.getByText("株価年率 8.0%")).toBeTruthy();
+      expect(screen.getByText("株価年率 12.0%")).toBeTruthy();
+      expect(screen.getAllByText("配当再投資")).toHaveLength(3);
+      expect(screen.getAllByText("現金宝複利")).toHaveLength(3);
+      expect(screen.getAllByText("借入利息").length).toBeGreaterThanOrEqual(3);
       expect(screen.getAllByText("未達試算")).toHaveLength(3);
       expect(screen.getAllByText("2030年までに必要な月次入金")).toHaveLength(3);
       expect(

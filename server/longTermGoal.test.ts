@@ -66,6 +66,39 @@ describe("buildLongTermGoalProgress", () => {
     }
   });
 
+  it("separates stock returns, dividend reinvestment, cash-fund compounding, and borrowing cost", () => {
+    const result = buildLongTermGoalProgress({
+      currentNetAssetsJpy: 1_400,
+      stockAssetsJpy: 1_000,
+      cashJpy: 100,
+      interestAssetsJpy: 500,
+      borrowedPrincipalJpy: 200,
+      targetNetAssetsJpy: 2_000,
+      targetDate: "2030-12-31",
+      annualDividendJpy: 120,
+      annualInterestIncomeJpy: 50,
+      annualBorrowingInterestJpy: 24,
+      annualContributionJpy: 120,
+      conservativeReturnPct: 0,
+      baseReturnPct: 0,
+      optimisticReturnPct: 0,
+      now: new Date("2029-12-31T15:00:00.000Z"),
+    });
+
+    expect(result.projectionBasis.reconciliationJpy).toBe(0);
+    expect(result.projectionBasis.dividendYieldPct).toBe(12);
+    expect(result.projectionBasis.interestEffectiveRatePct).toBe(10);
+    for (const scenario of result.scenarios) {
+      expect(scenario.totalContributionJpy).toBe(120);
+      expect(scenario.stockPriceChangeJpy).toBeCloseTo(0, 8);
+      expect(scenario.reinvestedDividendJpy).toBeCloseTo(132.2850542358, 8);
+      expect(scenario.compoundedInterestJpy).toBeCloseTo(50, 8);
+      expect(scenario.borrowingInterestCostJpy).toBe(24);
+      expect(scenario.investmentGrowthJpy).toBeCloseTo(158.2850542358, 8);
+      expect(scenario.projectedNetAssetsJpy).toBeCloseTo(1_678.2850542358, 8);
+    }
+  });
+
   it("supports negative and positive scenario assumptions without presenting them as forecasts", () => {
     const result = buildLongTermGoalProgress({
       currentNetAssetsJpy: 12_000_000,

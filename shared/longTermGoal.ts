@@ -18,6 +18,14 @@ export type LongTermGoalScenarioKey = "CONSERVATIVE" | "BASE" | "OPTIMISTIC";
 
 export type LongTermGoalInput = {
   currentNetAssetsJpy: number | null | undefined;
+  /** 現在の株式時価。情景年率はこの部分だけに適用する */
+  stockAssetsJpy?: number | null;
+  /** 利息の付かない通常現金。試算では横ばい */
+  cashJpy?: number | null;
+  /** 現金宝・貨幣基金の現在元本。日次複利で別計算する */
+  interestAssetsJpy?: number | null;
+  /** 借入元本。返済せず一定とし、利息だけを費用計上する */
+  borrowedPrincipalJpy?: number | null;
   targetNetAssetsJpy: number | null | undefined;
   targetDate: string | null | undefined;
   annualDividendJpy: number | null | undefined;
@@ -47,6 +55,10 @@ export type LongTermGoalScenario = {
   projectedNetAssetsJpy: number | null;
   totalContributionJpy: number | null;
   investmentGrowthJpy: number | null;
+  stockPriceChangeJpy: number | null;
+  reinvestedDividendJpy: number | null;
+  compoundedInterestJpy: number | null;
+  borrowingInterestCostJpy: number | null;
   targetProgressPct: number | null;
   gapJpy: number | null;
   achievesTarget: boolean | null;
@@ -59,6 +71,19 @@ export type LongTermGoalScenario = {
     | "UNAVAILABLE";
   requiredMonthlyContributionJpy: number | null;
   additionalMonthlyContributionJpy: number | null;
+};
+
+export type LongTermProjectionBasis = {
+  stockAssetsJpy: number | null;
+  cashJpy: number | null;
+  interestAssetsJpy: number | null;
+  borrowedPrincipalJpy: number | null;
+  reconciliationJpy: number | null;
+  annualDividendJpy: number | null;
+  dividendYieldPct: number | null;
+  annualInterestJpy: number | null;
+  interestEffectiveRatePct: number | null;
+  annualBorrowingInterestJpy: number | null;
 };
 
 export type LongTermGoalProgress = {
@@ -78,6 +103,7 @@ export type LongTermGoalProgress = {
   annualBorrowingInterestJpy: number | null;
   annualNetCash: IncomeProgress;
   annualContributionJpy: number;
+  projectionBasis: LongTermProjectionBasis;
   scenarioRatesDefaulted: boolean;
   scenarios: LongTermGoalScenario[];
 };
@@ -121,6 +147,187 @@ function formatJstMonthAfter(now: Date, monthsAfter: number) {
   const year = Math.floor(monthIndex / 12);
   const month = (monthIndex % 12) + 1;
   return `${year}-${String(month).padStart(2, "0")}`;
+}
+
+type ComponentProjectionBasis = {
+  stockAssetsJpy: number;
+  cashJpy: number;
+  interestAssetsJpy: number;
+  borrowedPrincipalJpy: number;
+  reconciliationJpy: number;
+  annualDividendJpy: number;
+  annualInterestJpy: number;
+  annualBorrowingInterestJpy: number;
+};
+
+type ComponentProjectionResult = {
+  projectedNetAssetsJpy: number;
+  totalContributionJpy: number;
+  stockPriceChangeJpy: number;
+  reinvestedDividendJpy: number;
+  compoundedInterestJpy: number;
+  borrowingInterestCostJpy: number;
+};
+
+/**
+ * 株式価格、配当再投資、現金宝、借入コストを別々に月次ロールする。
+ * - 情景年率は株価変動だけ
+ * - 配当は現在の税引前利回りを一定と置き、毎月末に全額再投資
+ * - 現金宝は現在の実効年利を月次等価率へ変換（元の計算は日次複利）
+ * - 借入元本は返済せず一定、現在の年間利息を12等分して支払う
+ * - 追加入金は従来どおり毎月末に株式へ投入
+ */
+function projectComponents(params: {
+  basis: ComponentProjectionBasis;
+  annualReturnPct: number;
+  months: number;
+  monthlyContributionJpy: number;
+}): ComponentProjectionResult {
+  const { basis, annualReturnPct, months, monthlyContributionJpy } = params;
+  const stockMonthlyRate = monthlyRateFromAnnualPct(annualReturnPct);
+  const monthlyDividendYield =
+    basis.stockAssetsJpy > 0
+      ? basis.annualDividendJpy / basis.stockAssetsJpy / 12
+      : 0;
+  const interestEffectiveAnnualRate =
+    basis.interestAssetsJpy > 0
+      ? Math.max(0, basis.annualInterestJpy / basis.interestAssetsJpy)
+      : 0;
+  const interestMonthlyRate =
+    Math.pow(1 + interestEffectiveAnnualRate, 1 / 12) - 1;
+  const monthlyBorrowingCost = basis.annualBorrowingInterestJpy / 12;
+
+  let stock = basis.stockAssetsJpy;
+  let interestAssets = basis.interestAssetsJpy;
+  let stockPriceChangeJpy = 0;
+  let reinvestedDividendJpy = 0;
+  let compoundedInterestJpy = 0;
+  let borrowingInterestCostJpy = 0;
+
+  for (let month = 0; month < months; month += 1) {
+    const stockPriceChange = stock * stockMonthlyRate;
+    stock += stockPriceChange;
+    stockPriceChangeJpy += stockPriceChange;
+
+    const dividend = stock * monthlyDividendYield;
+    stock += dividend;
+    reinvestedDividendJpy += dividend;
+
+    const interest = interestAssets * interestMonthlyRate;
+    interestAssets += interest;
+    compoundedInterestJpy += interest;
+
+    stock += monthlyContributionJpy - monthlyBorrowingCost;
+    borrowingInterestCostJpy += monthlyBorrowingCost;
+  }
+
+  return {
+    projectedNetAssetsJpy:
+      stock +
+      basis.cashJpy +
+      interestAssets +
+      basis.reconciliationJpy -
+      basis.borrowedPrincipalJpy,
+    totalContributionJpy: monthlyContributionJpy * months,
+    stockPriceChangeJpy,
+    reinvestedDividendJpy,
+    compoundedInterestJpy,
+    borrowingInterestCostJpy,
+  };
+}
+
+function estimateComponentAttainment(params: {
+  basis: ComponentProjectionBasis;
+  targetNetAssetsJpy: number;
+  annualReturnPct: number;
+  annualContributionJpy: number;
+  now: Date;
+}) {
+  const currentNetAssetsJpy =
+    params.basis.stockAssetsJpy +
+    params.basis.cashJpy +
+    params.basis.interestAssetsJpy +
+    params.basis.reconciliationJpy -
+    params.basis.borrowedPrincipalJpy;
+  if (currentNetAssetsJpy >= params.targetNetAssetsJpy) {
+    return {
+      estimatedMonthsToTarget: 0,
+      estimatedTargetMonth: formatJstMonthAfter(params.now, 0),
+      attainmentStatus: "ALREADY_ACHIEVED" as const,
+    };
+  }
+  for (let month = 1; month <= MAX_ATTAINMENT_MONTHS; month += 1) {
+    const projected = projectComponents({
+      basis: params.basis,
+      annualReturnPct: params.annualReturnPct,
+      months: month,
+      monthlyContributionJpy: params.annualContributionJpy / 12,
+    });
+    if (projected.projectedNetAssetsJpy >= params.targetNetAssetsJpy) {
+      return {
+        estimatedMonthsToTarget: month,
+        estimatedTargetMonth: formatJstMonthAfter(params.now, month),
+        attainmentStatus: "ESTIMATED" as const,
+      };
+    }
+  }
+  return {
+    estimatedMonthsToTarget: null,
+    estimatedTargetMonth: null,
+    attainmentStatus: "BEYOND_HORIZON" as const,
+  };
+}
+
+function requiredComponentMonthlyContribution(params: {
+  basis: ComponentProjectionBasis;
+  targetNetAssetsJpy: number;
+  annualReturnPct: number;
+  monthsRemaining: number;
+  currentMonthlyContributionJpy: number;
+}) {
+  if (params.monthsRemaining <= 0) {
+    return {
+      requiredMonthlyContributionJpy: null,
+      additionalMonthlyContributionJpy: null,
+    };
+  }
+  const projectedAt = (monthlyContributionJpy: number) =>
+    projectComponents({
+      basis: params.basis,
+      annualReturnPct: params.annualReturnPct,
+      months: params.monthsRemaining,
+      monthlyContributionJpy,
+    }).projectedNetAssetsJpy;
+  if (projectedAt(0) >= params.targetNetAssetsJpy) {
+    return {
+      requiredMonthlyContributionJpy: 0,
+      additionalMonthlyContributionJpy: 0,
+    };
+  }
+
+  let low = 0;
+  let high = Math.max(1, params.targetNetAssetsJpy / params.monthsRemaining);
+  for (let attempt = 0; attempt < 80 && projectedAt(high) < params.targetNetAssetsJpy; attempt += 1) {
+    high *= 2;
+  }
+  if (!Number.isFinite(high) || projectedAt(high) < params.targetNetAssetsJpy) {
+    return {
+      requiredMonthlyContributionJpy: null,
+      additionalMonthlyContributionJpy: null,
+    };
+  }
+  for (let iteration = 0; iteration < 100; iteration += 1) {
+    const mid = (low + high) / 2;
+    if (projectedAt(mid) >= params.targetNetAssetsJpy) high = mid;
+    else low = mid;
+  }
+  return {
+    requiredMonthlyContributionJpy: high,
+    additionalMonthlyContributionJpy: Math.max(
+      0,
+      high - params.currentMonthlyContributionJpy
+    ),
+  };
 }
 
 function estimateAttainment(params: {
@@ -236,6 +443,7 @@ function buildScenario(params: {
   targetNetAssetsJpy: number | null;
   monthsRemaining: number | null;
   annualContributionJpy: number;
+  projectionBasis: ComponentProjectionBasis | null;
   now: Date;
 }): LongTermGoalScenario {
   const {
@@ -246,8 +454,81 @@ function buildScenario(params: {
     targetNetAssetsJpy,
     monthsRemaining,
     annualContributionJpy,
+    projectionBasis,
     now,
   } = params;
+  if (
+    currentNetAssetsJpy === null ||
+    targetNetAssetsJpy === null ||
+    targetNetAssetsJpy <= 0 ||
+    monthsRemaining === null
+  ) {
+    return {
+      key,
+      label,
+      annualReturnPct,
+      projectedNetAssetsJpy: null,
+      totalContributionJpy: null,
+      investmentGrowthJpy: null,
+      stockPriceChangeJpy: null,
+      reinvestedDividendJpy: null,
+      compoundedInterestJpy: null,
+      borrowingInterestCostJpy: null,
+      targetProgressPct: null,
+      gapJpy: null,
+      achievesTarget: null,
+      estimatedMonthsToTarget: null,
+      estimatedTargetMonth: null,
+      attainmentStatus: "UNAVAILABLE",
+      requiredMonthlyContributionJpy: null,
+      additionalMonthlyContributionJpy: null,
+    };
+  }
+
+  if (projectionBasis) {
+    const projected = projectComponents({
+      basis: projectionBasis,
+      annualReturnPct,
+      months: monthsRemaining,
+      monthlyContributionJpy: annualContributionJpy / 12,
+    });
+    const attainment = estimateComponentAttainment({
+      basis: projectionBasis,
+      targetNetAssetsJpy,
+      annualReturnPct,
+      annualContributionJpy,
+      now,
+    });
+    const requiredContribution = requiredComponentMonthlyContribution({
+      basis: projectionBasis,
+      targetNetAssetsJpy,
+      annualReturnPct,
+      monthsRemaining,
+      currentMonthlyContributionJpy: annualContributionJpy / 12,
+    });
+    const investmentGrowthJpy =
+      projected.stockPriceChangeJpy +
+      projected.reinvestedDividendJpy +
+      projected.compoundedInterestJpy -
+      projected.borrowingInterestCostJpy;
+    return {
+      key,
+      label,
+      annualReturnPct,
+      ...projected,
+      investmentGrowthJpy,
+      targetProgressPct:
+        (projected.projectedNetAssetsJpy / targetNetAssetsJpy) * 100,
+      gapJpy: Math.max(
+        0,
+        targetNetAssetsJpy - projected.projectedNetAssetsJpy
+      ),
+      achievesTarget: projected.projectedNetAssetsJpy >= targetNetAssetsJpy,
+      ...attainment,
+      ...requiredContribution,
+    };
+  }
+
   const attainment = estimateAttainment({
     currentNetAssetsJpy,
     targetNetAssetsJpy,
@@ -262,26 +543,6 @@ function buildScenario(params: {
     monthsRemaining,
     currentMonthlyContributionJpy: annualContributionJpy / 12,
   });
-  if (
-    currentNetAssetsJpy === null ||
-    targetNetAssetsJpy === null ||
-    targetNetAssetsJpy <= 0 ||
-    monthsRemaining === null
-  ) {
-    return {
-      key,
-      label,
-      annualReturnPct,
-      projectedNetAssetsJpy: null,
-      totalContributionJpy: null,
-      investmentGrowthJpy: null,
-      targetProgressPct: null,
-      gapJpy: null,
-      achievesTarget: null,
-      ...attainment,
-      ...requiredContribution,
-    };
-  }
 
   const monthlyRate = Math.pow(1 + annualReturnPct / 100, 1 / 12) - 1;
   const growthFactor = Math.pow(1 + monthlyRate, monthsRemaining);
@@ -303,6 +564,10 @@ function buildScenario(params: {
     projectedNetAssetsJpy,
     totalContributionJpy,
     investmentGrowthJpy,
+    stockPriceChangeJpy: investmentGrowthJpy,
+    reinvestedDividendJpy: 0,
+    compoundedInterestJpy: 0,
+    borrowingInterestCostJpy: 0,
     targetProgressPct: (projectedNetAssetsJpy / targetNetAssetsJpy) * 100,
     gapJpy: Math.max(0, targetNetAssetsJpy - projectedNetAssetsJpy),
     achievesTarget: projectedNetAssetsJpy >= targetNetAssetsJpy,
@@ -375,6 +640,38 @@ export function buildLongTermGoalProgress(
       ? annualDividend + annualInterest - annualBorrowingInterest
       : null;
   const annualContribution = finiteNonNegative(input.annualContributionJpy) ?? 0;
+  const stockAssets = finiteNonNegative(input.stockAssetsJpy);
+  const cash = finiteNonNegative(input.cashJpy);
+  const interestAssets = finiteNonNegative(input.interestAssetsJpy);
+  const borrowedPrincipal = finiteNonNegative(input.borrowedPrincipalJpy);
+  const reconciliation =
+    current !== null &&
+    stockAssets !== null &&
+    cash !== null &&
+    interestAssets !== null &&
+    borrowedPrincipal !== null
+      ? current - (stockAssets + cash + interestAssets - borrowedPrincipal)
+      : null;
+  const componentBasis: ComponentProjectionBasis | null =
+    stockAssets !== null &&
+    cash !== null &&
+    interestAssets !== null &&
+    borrowedPrincipal !== null &&
+    reconciliation !== null &&
+    annualDividend !== null &&
+    annualInterest !== null &&
+    annualBorrowingInterest !== null
+      ? {
+          stockAssetsJpy: stockAssets,
+          cashJpy: cash,
+          interestAssetsJpy: interestAssets,
+          borrowedPrincipalJpy: borrowedPrincipal,
+          reconciliationJpy: reconciliation,
+          annualDividendJpy: annualDividend,
+          annualInterestJpy: annualInterest,
+          annualBorrowingInterestJpy: annualBorrowingInterest,
+        }
+      : null;
   const scenarioRatesDefaulted =
     input.conservativeReturnPct === null ||
     input.conservativeReturnPct === undefined ||
@@ -409,6 +706,7 @@ export function buildLongTermGoalProgress(
       targetNetAssetsJpy: target,
       monthsRemaining,
       annualContributionJpy: annualContribution,
+      projectionBasis: componentBasis,
       now,
     }),
     buildScenario({
@@ -419,6 +717,7 @@ export function buildLongTermGoalProgress(
       targetNetAssetsJpy: target,
       monthsRemaining,
       annualContributionJpy: annualContribution,
+      projectionBasis: componentBasis,
       now,
     }),
     buildScenario({
@@ -429,6 +728,7 @@ export function buildLongTermGoalProgress(
       targetNetAssetsJpy: target,
       monthsRemaining,
       annualContributionJpy: annualContribution,
+      projectionBasis: componentBasis,
       now,
     }),
   ];
@@ -459,6 +759,24 @@ export function buildLongTermGoalProgress(
       finiteNonNegative(input.targetAnnualNetCashJpy)
     ),
     annualContributionJpy: annualContribution,
+    projectionBasis: {
+      stockAssetsJpy: stockAssets,
+      cashJpy: cash,
+      interestAssetsJpy: interestAssets,
+      borrowedPrincipalJpy: borrowedPrincipal,
+      reconciliationJpy: reconciliation,
+      annualDividendJpy: annualDividend,
+      dividendYieldPct:
+        stockAssets !== null && stockAssets > 0 && annualDividend !== null
+          ? (annualDividend / stockAssets) * 100
+          : null,
+      annualInterestJpy: annualInterest,
+      interestEffectiveRatePct:
+        interestAssets !== null && interestAssets > 0 && annualInterest !== null
+          ? (annualInterest / interestAssets) * 100
+          : null,
+      annualBorrowingInterestJpy: annualBorrowingInterest,
+    },
     scenarioRatesDefaulted,
     scenarios,
   };

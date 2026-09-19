@@ -35,6 +35,10 @@ import { toast } from "sonner";
 
 type Props = {
   currentNetAssetsJpy: number | null | undefined;
+  stockAssetsJpy: number | null | undefined;
+  cashJpy: number | null | undefined;
+  interestAssetsJpy: number | null | undefined;
+  borrowedPrincipalJpy: number | null | undefined;
   unrealizedPnlJpy: number | null | undefined;
   annualDividendJpy: number | null | undefined;
   annualInterestIncomeJpy: number | null | undefined;
@@ -48,6 +52,12 @@ const JPY_PER_MAN = 10_000;
 function yen(value: number | null | undefined) {
   if (value === null || value === undefined || !Number.isFinite(value)) return "—";
   return `¥${Math.round(value).toLocaleString("ja-JP")}`;
+}
+
+function signedYen(value: number | null | undefined) {
+  if (value === null || value === undefined || !Number.isFinite(value)) return "—";
+  const sign = value > 0 ? "+" : value < 0 ? "−" : "";
+  return `${sign}¥${Math.round(Math.abs(value)).toLocaleString("ja-JP")}`;
 }
 
 function oku(value: number | null | undefined) {
@@ -158,6 +168,10 @@ export function LongTermGoalCard(props: Props) {
     () =>
       buildLongTermGoalProgress({
         currentNetAssetsJpy: props.currentNetAssetsJpy,
+        stockAssetsJpy: props.stockAssetsJpy,
+        cashJpy: props.cashJpy,
+        interestAssetsJpy: props.interestAssetsJpy,
+        borrowedPrincipalJpy: props.borrowedPrincipalJpy,
         targetNetAssetsJpy: settings.data?.longTermTargetNetAssetsJpy
           ? Number(settings.data.longTermTargetNetAssetsJpy)
           : null,
@@ -465,9 +479,9 @@ export function LongTermGoalCard(props: Props) {
             <div className="rounded-xl border bg-background/75 p-4" data-testid="long-term-scenarios">
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div>
-                  <p className="text-sm font-semibold">2030年末の3つの達成情景</p>
+                  <p className="text-sm font-semibold">2030年末の3つの複利・再投資情景</p>
                   <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
-                    年間入金を12等分して毎月末に積み立て、名目年率で月次複利計算します。予測ではありません。
+                    株価変動、配当の全額再投資、現金宝の日次複利、借入利息、毎月入金を分けて積み上げる数学試算です。
                   </p>
                 </div>
                 <div className="text-left text-xs sm:text-right">
@@ -481,6 +495,42 @@ export function LongTermGoalCard(props: Props) {
                     <p className="mt-1 text-[11px] text-amber-700">標準仮定 4% / 8% / 12%</p>
                   ) : null}
                 </div>
+              </div>
+              <div
+                className="mt-4 rounded-xl border border-emerald-200/80 bg-emerald-50/50 p-3 dark:border-emerald-900/60 dark:bg-emerald-950/15"
+                data-testid="long-term-projection-basis"
+              >
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <p className="text-xs font-semibold">今回から試算へ自動反映するもの</p>
+                  <Badge variant="outline" className="border-emerald-300 text-[10px] text-emerald-700">
+                    配当は全額再投資
+                  </Badge>
+                </div>
+                <div className="mt-3 grid gap-2 text-[11px] sm:grid-cols-2 xl:grid-cols-4">
+                  <ProjectionBasisItem
+                    label="株式時価"
+                    value={yen(progress.projectionBasis.stockAssetsJpy)}
+                    detail={`予想配当 ${yen(progress.projectionBasis.annualDividendJpy)} / 年（税引前）・利回り ${progress.projectionBasis.dividendYieldPct?.toFixed(2) ?? "—"}%`}
+                  />
+                  <ProjectionBasisItem
+                    label="現金宝・貨幣基金"
+                    value={yen(progress.projectionBasis.interestAssetsJpy)}
+                    detail={`日次複利・実効年率 ${progress.projectionBasis.interestEffectiveRatePct?.toFixed(2) ?? "—"}%`}
+                  />
+                  <ProjectionBasisItem
+                    label="通常現金"
+                    value={yen(progress.projectionBasis.cashJpy)}
+                    detail="利息を付けず横ばい"
+                  />
+                  <ProjectionBasisItem
+                    label="借入（返済しない前提）"
+                    value={yen(progress.projectionBasis.borrowedPrincipalJpy)}
+                    detail={`利息 ${yen(progress.projectionBasis.annualBorrowingInterestJpy)} / 年を控除`}
+                  />
+                </div>
+                <p className="mt-3 text-[10px] leading-relaxed text-muted-foreground">
+                  配当は現在の税引前予想配当利回りを一定と置き、毎月末に株式へ全額再投資します。現金宝は現在の残高と確認済み日次収益からの実効年率で独立して複利計算します。入金済み配当の実績とは別で、予想を確定収益にはしません。
+                </p>
               </div>
               <div className="mt-4 grid gap-3 lg:grid-cols-3">
                 {progress.scenarios.map(scenario => (
@@ -603,6 +653,24 @@ function TrendLine({
   );
 }
 
+function ProjectionBasisItem({
+  label,
+  value,
+  detail,
+}: {
+  label: string;
+  value: string;
+  detail: string;
+}) {
+  return (
+    <div className="min-w-0 rounded-lg border bg-background/75 p-2.5">
+      <p className="text-muted-foreground">{label}</p>
+      <p className="tabular mt-0.5 break-all text-sm font-semibold">{value}</p>
+      <p className="mt-1 leading-relaxed text-muted-foreground">{detail}</p>
+    </div>
+  );
+}
+
 function ScenarioCard({
   scenario,
   currentMonthlyContributionJpy,
@@ -619,7 +687,7 @@ function ScenarioCard({
       <div className="flex items-center justify-between gap-2">
         <p className="font-semibold">{scenario.label}</p>
         <Badge variant="outline" className="tabular">
-          年率仮定 {scenario.annualReturnPct.toFixed(1)}%
+          株価年率 {scenario.annualReturnPct.toFixed(1)}%
         </Badge>
       </div>
       <p className="mt-3 text-[11px] text-muted-foreground">目標日の試算純資産</p>
@@ -640,8 +708,26 @@ function ScenarioCard({
           <p className="tabular mt-0.5 font-medium">{oku(scenario.totalContributionJpy)}</p>
         </div>
         <div>
-          <p className="text-muted-foreground">投資増減寄与</p>
+          <p className="text-muted-foreground">収益等の純寄与</p>
           <p className="tabular mt-0.5 font-medium">{oku(scenario.investmentGrowthJpy)}</p>
+        </div>
+      </div>
+      <div className="mt-2 grid grid-cols-2 gap-2 rounded-lg border bg-background/60 p-2.5 text-[10px]">
+        <div>
+          <p className="text-muted-foreground">株価変動</p>
+          <p className="tabular mt-0.5 font-medium">{signedYen(scenario.stockPriceChangeJpy)}</p>
+        </div>
+        <div>
+          <p className="text-muted-foreground">配当再投資</p>
+          <p className="tabular mt-0.5 font-medium text-emerald-700">{signedYen(scenario.reinvestedDividendJpy)}</p>
+        </div>
+        <div>
+          <p className="text-muted-foreground">現金宝複利</p>
+          <p className="tabular mt-0.5 font-medium text-emerald-700">{signedYen(scenario.compoundedInterestJpy)}</p>
+        </div>
+        <div>
+          <p className="text-muted-foreground">借入利息</p>
+          <p className="tabular mt-0.5 font-medium text-loss">{signedYen(scenario.borrowingInterestCostJpy === null ? null : -scenario.borrowingInterestCostJpy)}</p>
         </div>
       </div>
       <div className="mt-3 space-y-2 rounded-lg bg-muted/40 p-2.5 text-[11px]">
@@ -681,7 +767,7 @@ function ScenarioCard({
         </p>
       ) : null}
       <p className="mt-2 text-[10px] leading-relaxed text-muted-foreground">
-        到達年月と必要入金は一定年率を置いた数学試算で、収益予測ではありません。
+        配当・現金宝は現在ランレート一定、借入元本は返済しない前提の数学試算です。実現収益ではありません。
       </p>
     </div>
   );
