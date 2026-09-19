@@ -529,8 +529,8 @@ describe("Dashboard actual page", () => {
           },
         ],
         snapshotCount: 2,
-        firstAt: new Date("2026-09-18T00:00:00Z"),
-        lastAt: new Date("2026-09-19T00:00:00Z"),
+        firstAt: new Date("2026-09-17T15:30:00Z"),
+        lastAt: new Date("2026-09-18T15:30:00Z"),
         changedPointCount: 0,
         priceOnlyChange: -3_600,
         fellBack: false,
@@ -547,6 +547,7 @@ describe("Dashboard actual page", () => {
     expect(screen.getByTestId("top-stock-value-card")).toBeTruthy();
     expect(screen.getByTestId("top-unrealized-pnl-card")).toBeTruthy();
     expect(screen.getByTestId("top-asset-trend-card")).toBeTruthy();
+    expect(screen.getByText(/（9\/18〜9\/19）/)).toBeTruthy();
     expect(screen.getByTestId("temperature-前日")).toBeTruthy();
     expect(screen.getByTestId("temperature-7日")).toBeTruthy();
     expect(screen.getByTestId("temperature-30日")).toBeTruthy();

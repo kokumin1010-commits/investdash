@@ -496,7 +496,7 @@ export function MarketTemperaturePanel({
                   <>
                     記録 {assetTrend.data.snapshotCount}件
                     {assetTrend.data.firstAt && assetTrend.data.lastAt
-                      ? `（${new Date(assetTrend.data.firstAt).toLocaleDateString("ja-JP", { month: "numeric", day: "numeric" })}〜${new Date(assetTrend.data.lastAt).toLocaleDateString("ja-JP", { month: "numeric", day: "numeric" })}）`
+                      ? `（${new Date(assetTrend.data.firstAt).toLocaleDateString("ja-JP", { month: "numeric", day: "numeric", timeZone: "Asia/Tokyo" })}〜${new Date(assetTrend.data.lastAt).toLocaleDateString("ja-JP", { month: "numeric", day: "numeric", timeZone: "Asia/Tokyo" })}）`
                       : ""}
                     {assetTrend.data.fellBack ? "・月次不足のため日次表示" : ""}
                     ・JSTの各日／月の最新1点
