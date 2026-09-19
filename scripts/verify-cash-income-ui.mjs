@@ -123,6 +123,10 @@ async function verify(width, height, port) {
       "long-term income state",
       `(document.body.innerText.includes('未来の配当予想（税引前）') && document.body.innerText.includes('未来の純キャッシュ収入予想')) || document.body.innerText.includes('目標純資産と目標日がまだ設定されていません')`
     );
+    await browser.waitUntil(
+      "stock data health",
+      `document.body.innerText.includes('株価データは最新です') || document.body.innerText.includes('銘柄の株価が古くなっています')`
+    );
     await browser.evalValue(`document.querySelector('[data-testid="cash-income-actual-forecast"]')?.scrollIntoView({ block: 'start' })`);
     await sleep(300);
     const card = await browser.evalValue(`(() => {
@@ -133,8 +137,12 @@ async function verify(width, height, port) {
         present: Boolean(node),
         screenshotEntry: text.includes('スクショから自動計算'),
         actualHeading: text.includes('記録済みの確定キャッシュ収益'),
-        recordedYtd: text.includes('本年の確定収益（記録分）'),
+        confirmedScreenshotPeriod:
+          text.includes('前回スクショ以降の確定利息') &&
+          text.includes('→') &&
+          text.includes('の累計差額'),
         dailyInterest: text.includes('最新記録の日次利息'),
+        latestCumulative: text.includes('現金宝の最新累計利息'),
         dividendActual: text.includes('本年の入金済み配当'),
         unlinked: text.includes('未連携'),
         forecastHeading: text.includes('将来1年間の予想（未確定）'),
@@ -151,19 +159,27 @@ async function verify(width, height, port) {
         thirtyDayHonest: /30日比（[0-9]{4}-[0-9]{2}-[0-9]{2}基準）/.test(pageText) || pageText.includes('30日比 30日前未取得'),
         netAssetsAreValuation: pageText.includes('現在の純資産（評価額）') && pageText.includes('純資産の評価変動（未確定を含む）'),
         unrealizedStockPnl: pageText.includes('株式：含み損益') && pageText.includes('未実現'),
-        confirmedCashIncome: pageText.includes('現金宝：付与済み利息') && pageText.includes('株式：入金済み配当'),
+        confirmedCashIncome:
+          pageText.includes('現金宝：前回スクショ以降の確定利息') &&
+          pageText.includes('株式：入金済み配当'),
         forecastIsUnconfirmed: pageText.includes('将来予想（未確定）') && pageText.includes('将来1年間の予想（未確定）'),
         noSourceInference: pageText.includes('純資産差から推測して埋めることもしません'),
         cashTracking: text.includes('現金残高：スクショ確定＋暫定更新'),
-        screenshotConfirmed: text.includes('最新スクショ確定残高'),
+        positiveCash: text.includes('プラス現金（確定）'),
+        negativeMarginCash: text.includes('借入・負現金（確定）'),
         settledAfterAnchor: text.includes('基準後の入金済み配当'),
-        provisionalBalance: text.includes('暫定現在残高'),
+        provisionalBalance: text.includes('相殺後の暫定純現金'),
         pendingDividend: text.includes('入金確認待ちの配当予想'),
         noForecastInBalance: text.includes('予想配当は残高に入れません'),
         honestLegacyState:
           text.includes('旧全体値・口座未分類') || text.includes('暫定・'),
         screenshotWait:
           text.includes('次回スクショ待ち') || text.includes('口座別スクショ確認済みの合計'),
+        dailyCompounding:
+          pageText.includes('毎日の利息を残高へ組み入れ') &&
+          pageText.includes('日次複利'),
+        compactHealthPresent: pageText.includes('株価データは最新です'),
+        globalSearchPresent: Boolean(document.querySelector('#global-stock-query')),
         longTermIncomeHonest:
           (pageText.includes('未来の配当予想（税引前）') &&
             pageText.includes('未来の利息予想') &&
