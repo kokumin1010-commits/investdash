@@ -121,7 +121,7 @@ async function verify(width, height, port) {
     );
     await browser.waitUntil(
       "long-term income state",
-      `(document.body.innerText.includes('未来の配当予想（税引前）') && document.body.innerText.includes('未来の純キャッシュ収入予想')) || document.body.innerText.includes('目標純資産と目標日がまだ設定されていません')`
+      `(document.body.innerText.includes('未来の配当予想（税引前）') && document.body.innerText.includes('2030年末の3つの複利・再投資情景')) || document.body.innerText.includes('目標純資産と目標日がまだ設定されていません')`
     );
     await browser.waitUntil(
       "stock data health",
@@ -185,6 +185,19 @@ async function verify(width, height, port) {
             pageText.includes('未来の利息予想') &&
             pageText.includes('未来の純キャッシュ収入予想')) ||
           pageText.includes('目標純資産と目標日がまだ設定されていません'),
+        goalReinvestmentModel:
+          (pageText.includes('2030年末の3つの複利・再投資情景') &&
+            pageText.includes('配当は全額再投資') &&
+            pageText.includes('配当再投資') &&
+            pageText.includes('現金宝複利') &&
+            pageText.includes('借入利息') &&
+            pageText.includes('株価年率 4.0%') &&
+            pageText.includes('株価年率 8.0%') &&
+            pageText.includes('株価年率 12.0%')) ||
+          pageText.includes('目標純資産と目標日がまだ設定されていません'),
+        forecastNotActualDividend:
+          pageText.includes('予想を確定収益にはしません') ||
+          pageText.includes('目標純資産と目標日がまだ設定されていません'),
         scrollWidth: document.documentElement.scrollWidth,
         clientWidth: document.documentElement.clientWidth,
       };
@@ -207,6 +220,14 @@ async function verify(width, height, port) {
     })()`);
     await sleep(300);
     const longTermScreenshot = await browser.screenshot("long-term-goal");
+
+    const reinvestmentBasisPresent = await browser.evalValue(`(() => {
+      const node = document.querySelector('[data-testid="long-term-projection-basis"]');
+      node?.scrollIntoView({ block: 'start' });
+      return Boolean(node);
+    })()`);
+    await sleep(300);
+    const reinvestmentScreenshot = await browser.screenshot("goal-reinvestment");
 
     const classificationPresent = await browser.evalValue(`(() => {
       const node = document.querySelector('[data-testid="return-classification"]');
@@ -248,6 +269,7 @@ async function verify(width, height, port) {
         .filter(([key]) => !["scrollWidth", "clientWidth"].includes(key))
         .every(([, value]) => value === true) &&
       longTermPresent &&
+      reinvestmentBasisPresent &&
       classificationPresent &&
       cashTrackingPresent &&
       card.scrollWidth <= card.clientWidth &&
@@ -261,6 +283,7 @@ async function verify(width, height, port) {
         cashIncome: cardScreenshot,
         cashBalanceTracking: cashTrackingScreenshot,
         longTermGoal: longTermScreenshot,
+        goalReinvestment: reinvestmentScreenshot,
         returnClassification: classificationScreenshot,
       },
     };
