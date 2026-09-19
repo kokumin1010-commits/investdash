@@ -278,13 +278,38 @@ export function normalizeBrokerImportSymbol(
   exchangeHint?: string | null
 ): { symbol: string; tickerCode: string; market: Market } {
   const input = raw.trim().toUpperCase();
-  if (formatId === "ibkr" && exchangeHint) {
+  if ((formatId === "ibkr" || formatId === "futu_hk") && exchangeHint) {
     const resolved = resolveByExchange(input, exchangeHint);
     return {
       symbol: resolved.symbol,
       tickerCode: resolved.tickerCode,
       market: resolved.market,
     };
+  }
+  /*
+   * 富途香港は同一画面に港股・米国株・日本株が混在する。
+   * 港股は画面上5桁（00005 / 02318）だが、OCRが4桁（0005）へ
+   * 正規化する場合もある。先頭0の4桁も港股として扱い、通常の
+   * 4桁日本株（6902 / 7203 / 8058）だけを東証へ送る。
+   */
+  if (formatId === "futu_hk") {
+    if (/^[0-9]{5}$/.test(input) || /^0[0-9]{3}$/.test(input)) {
+      const resolved = resolveByExchange(input, "SEHK");
+      return {
+        symbol: resolved.symbol,
+        tickerCode: resolved.tickerCode,
+        market: resolved.market,
+      };
+    }
+    if (/^[0-9]{4}$/.test(input)) {
+      const resolved = resolveByExchange(input, "TSE");
+      return {
+        symbol: resolved.symbol,
+        tickerCode: resolved.tickerCode,
+        market: resolved.market,
+      };
+    }
+    return normalizeSymbol(input);
   }
   if (formatId !== "sc_sg") return normalizeSymbol(input);
 
@@ -453,7 +478,12 @@ export function resolveByExchange(
   if (ex === "HKEX" || ex === "HKG" || ex === "SEHK" || ex === "HK") {
     const digits = code.replace(/[^0-9]/g, "");
     const padded = digits ? String(Number(digits)).padStart(4, "0") : code;
-    return { symbol: `${padded}.HK`, tickerCode: code, market: "HK", currency: "HKD" };
+    return {
+      symbol: `${padded}.HK`,
+      tickerCode: padded,
+      market: "HK",
+      currency: "HKD",
+    };
   }
 
   // 米国市場はサフィックスなし

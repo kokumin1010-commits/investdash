@@ -401,13 +401,14 @@ function normalizePosition(
   position: ParsedPosition,
   formatId?: BrokerFormatId
 ): ParsedPosition {
-  const priceDigits = formatId === "sc_sg" ? 4 : 2;
+  const priceDigits = formatId === "sc_sg" || formatId === "futu_hk" ? 4 : 2;
+  const quantityDigits = formatId === "futu_hk" ? 4 : 0;
   return {
     ...position,
     exchange: position.exchange?.trim().toUpperCase() || null,
     quantityDisplay: position.quantityDisplay?.trim() || null,
     quantityIsRounded: Boolean(position.quantityIsRounded),
-    quantity: roundTo(position.quantity, 0),
+    quantity: roundTo(position.quantity, quantityDigits),
     avgCost: roundTo(position.avgCost, priceDigits),
     currentPrice: roundTo(position.currentPrice, priceDigits),
     marketValue: roundTo(position.marketValue, 2),

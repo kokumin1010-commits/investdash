@@ -108,6 +108,44 @@ describe("OCR 抽出結果の正規化", () => {
     expect(res.pnlPct).toBe(9.29);
   });
 
+  it("富途香港は端株と小数第4位の取得単価を保持する", () => {
+    const res = normalizePositionForTest(
+      {
+        name: "英偉達",
+        tickerCode: "NVDA",
+        quantityDisplay: "0.5",
+        quantityIsRounded: false,
+        quantity: 0.5,
+        avgCost: 132.99,
+        currentPrice: 222.53,
+        marketValue: 111.265,
+        pnl: 44.77,
+        pnlPct: null,
+        confidence: 95,
+      },
+      "futu_hk"
+    );
+    expect(res.quantity).toBe(0.5);
+    expect(res.avgCost).toBe(132.99);
+    expect(res.currentPrice).toBe(222.53);
+
+    const amd = normalizePositionForTest(
+      {
+        name: "美國超微公司",
+        tickerCode: "AMD",
+        quantity: 150,
+        avgCost: -38.4877,
+        currentPrice: 557.5,
+        marketValue: 83_625,
+        pnl: 89_398.15,
+        pnlPct: null,
+        confidence: 95,
+      },
+      "futu_hk"
+    );
+    expect(amd.avgCost).toBe(-38.4877);
+  });
+
   it("楽天iSPEEDのMy Page行情は数量・取得単価がなければ保有候補から除外する", () => {
     const held = normalizePositionForTest(
       {

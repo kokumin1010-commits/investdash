@@ -93,6 +93,37 @@ describe("normalizeBrokerImportSymbol", () => {
       market: "US",
     });
   });
+
+  it("富途香港は港股5桁・先頭0の4桁・日本株4桁を分ける", () => {
+    expect(normalizeBrokerImportSymbol("00005", "futu_hk")).toEqual({
+      symbol: "0005.HK",
+      tickerCode: "0005",
+      market: "HK",
+    });
+    expect(normalizeBrokerImportSymbol("0823", "futu_hk")).toEqual({
+      symbol: "0823.HK",
+      tickerCode: "0823",
+      market: "HK",
+    });
+    expect(normalizeBrokerImportSymbol("7203", "futu_hk")).toEqual({
+      symbol: "7203.T",
+      tickerCode: "7203",
+      market: "JP",
+    });
+    expect(normalizeBrokerImportSymbol("AMD", "futu_hk")).toEqual({
+      symbol: "AMD",
+      tickerCode: "AMD",
+      market: "US",
+    });
+  });
+
+  it("富途香港は取引所ヒントがある場合はそれを優先する", () => {
+    expect(normalizeBrokerImportSymbol("02318", "futu_hk", "SEHK")).toEqual({
+      symbol: "2318.HK",
+      tickerCode: "2318",
+      market: "HK",
+    });
+  });
 });
 
 describe("resolveScreenshotQuantity", () => {
