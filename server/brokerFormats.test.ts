@@ -237,9 +237,12 @@ describe("富途證券 香港（保證金綜合帳戶）", () => {
 
   it("港股の 5 桁ゼロ埋めコードの変換を指示している", () => {
     const p = format.layoutPrompt ?? "";
-    // 00005 → 0005.HK。ゼロを詰めないと株価が取得できない
+    // OCRは5桁を保持し、後段で0005.HKへ変換する。OCR中に末尾を落とすと別銘柄になる。
     expect(p).toContain("00005");
     expect(p).toContain("0005.HK");
+    expect(p).toContain('00823→"00823"');
+    expect(p).toContain("0082 / 0088 / 0231 にしてはならない");
+    expect(p).toContain('exchange は "SEHK"');
   });
 
   /*
