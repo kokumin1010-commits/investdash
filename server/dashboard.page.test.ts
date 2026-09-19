@@ -481,9 +481,9 @@ describe("Dashboard actual page", () => {
       sevenDayChangeJpy: -21_000,
       sevenDayChangePct: -6.5,
       sevenDayAsOfDate: "2026-09-12",
-      thirtyDayChangeJpy: null,
-      thirtyDayChangePct: null,
-      thirtyDayAsOfDate: null,
+      thirtyDayChangeJpy: 12_000,
+      thirtyDayChangePct: 4,
+      thirtyDayAsOfDate: "2026-08-20",
     };
     data.cashIncome.cashBalanceTracking = {
       status: "SCREENSHOT_PROVISIONAL",
@@ -550,6 +550,8 @@ describe("Dashboard actual page", () => {
     expect(screen.getByTestId("temperature-前日")).toBeTruthy();
     expect(screen.getByTestId("temperature-7日")).toBeTruthy();
     expect(screen.getByTestId("temperature-30日")).toBeTruthy();
+    expect(screen.getAllByText("保有株値動き").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("純資産評価変動").length).toBeGreaterThan(0);
     expect(screen.getByText(/実測 2\/3期間/)).toBeTruthy();
     expect(screen.getByText(/確認済みプラス現金/)).toBeTruthy();
     expect(

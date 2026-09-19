@@ -147,6 +147,8 @@ async function verify(width, height, port) {
           Boolean(node?.querySelector('[data-testid="temperature-30日"]')),
         valueKinds:
           text.includes('株式値動き') && text.includes('純資産の評価変動'),
+        headlineKinds:
+          text.includes('保有株値動き') && text.includes('純資産評価変動'),
         cashReadiness:
           text.includes('買い場の準備') &&
           text.includes('確認済みプラス現金') &&

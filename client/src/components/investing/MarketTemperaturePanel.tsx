@@ -166,6 +166,12 @@ function PeriodCard({
   money: Props["money"];
 }) {
   const primary = marketPct ?? netPct;
+  const primaryLabel =
+    marketPct !== null
+      ? "保有株値動き"
+      : netPct !== null
+        ? "純資産評価変動"
+        : "実測未取得";
   const isNegative = primary !== null && primary < 0;
   const isPositive = primary !== null && primary > 0;
 
@@ -175,8 +181,11 @@ function PeriodCard({
         <p className="text-xs font-semibold text-muted-foreground">{label}</p>
         <span className="text-[10px] text-muted-foreground">{basis}</span>
       </div>
+      <p className="mt-2 text-[10px] font-medium text-muted-foreground">
+        {primaryLabel}
+      </p>
       <p
-        className={`mt-1 font-mono text-xl font-semibold tabular-nums ${
+        className={`mt-0.5 font-mono text-xl font-semibold tabular-nums ${
           isNegative ? "text-loss" : isPositive ? "text-gain" : "text-foreground"
         }`}
       >
