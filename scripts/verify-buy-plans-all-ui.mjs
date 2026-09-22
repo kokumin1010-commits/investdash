@@ -76,7 +76,7 @@ async function verify(scenario) {
     return result.result.value;
   };
   const waitUntil = async (label, expression) => {
-    for (let i = 0; i < 240; i += 1) {
+    for (let i = 0; i < Number(process.env.UI_WAIT_ATTEMPTS ?? 360); i += 1) {
       try {
         if (await evaluate(expression)) return;
       } catch {}
@@ -163,5 +163,7 @@ async function verify(scenario) {
 
 const results = [];
 for (const scenario of scenarios) results.push(await verify(scenario));
-console.log(JSON.stringify({ version: "56b3048", results }, null, 2));
+console.log(
+  JSON.stringify({ version: "strict-existing-holding-add-v1", results }, null, 2)
+);
 if (results.some(result => !result.passed)) process.exitCode = 1;
