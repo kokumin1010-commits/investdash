@@ -78,6 +78,7 @@ import { LongTermGoalCard } from "@/components/investing/LongTermGoalCard";
 import { CashIncomeCard } from "@/components/investing/CashIncomeCard";
 import { GlobalStockSearch } from "@/components/investing/GlobalStockSearch";
 import { MarketTemperaturePanel } from "@/components/investing/MarketTemperaturePanel";
+import { ExistingHoldingAddPanel } from "@/components/investing/ExistingHoldingAddPanel";
 
 export default function Dashboard() {
   const utils = trpc.useUtils();
@@ -648,6 +649,15 @@ export default function Dashboard() {
             />
           ) : null}
 
+          {!buyPlans.isLoading ? (
+            <ExistingHoldingAddPanel
+              summary={
+                buyPlans.data?.ranking.existingHoldingAddSummary ?? null
+              }
+              compact
+            />
+          ) : null}
+
           {data?.cashIncome ? (
             <CashIncomeCard
               data={data.cashIncome}
@@ -810,7 +820,7 @@ export default function Dashboard() {
               <CardHeader className="pb-2">
                 <CardDescription className="flex items-center gap-1.5 text-xs font-medium">
                   <Brain className="h-4 w-4" />
-                  AI シグナル内訳
+                  AI 保有シグナル内訳
                 </CardDescription>
               </CardHeader>
               <CardContent className="pt-0">
@@ -821,6 +831,12 @@ export default function Dashboard() {
                 ) : (
                   <div className="space-y-2">
                     <DashboardSignalStatsStrip stats={signalStats} />
+                    <p
+                      className="rounded-lg border border-sky-200 bg-sky-50/60 px-2.5 py-2 text-[11px] leading-5 text-sky-950 dark:border-sky-900 dark:bg-sky-950/30 dark:text-sky-100"
+                      data-testid="signal-add-separation-note"
+                    >
+                      ここの ADD は、AI が保有判断として明示した件数です。価格帯・安全ゲートによる買い増し候補は上の「既存保有・今月の買い増し検討順」に別集計しています。
+                    </p>
                     {(actionQueue.data?.pending ?? 0) > 0 ||
                     (actionQueue.data?.approved ?? 0) > 0 ? (
                       <Link

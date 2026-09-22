@@ -103,46 +103,54 @@ async function verify(scenario) {
     );
     await send("Page.navigate", { url: `${baseUrl}${path}` });
     await waitUntil(
-      "all ranked candidates",
-      "document.body?.innerText.includes('今月の候補ランキング（全件）') && document.body?.innerText.includes('順位 51〜60')"
+      "strict existing holding candidates",
+      "Boolean(document.querySelector('[data-testid=\"existing-holding-add-panel\"]')) && document.body?.innerText.includes('未保有・購入判断')"
     );
     const state = await evaluate(`(() => {
       const body = document.body.innerText;
-      const ranked = document.querySelector('[data-testid="all-ranked-candidates"]');
-      const cards = ranked ? ranked.querySelectorAll('[data-slot="card"]') : [];
-      const priorityLabels = ranked
-        ? [...ranked.querySelectorAll('*')].filter(node => node.textContent?.trim() === '今月優先')
+      const ranked = document.querySelector('[data-testid="existing-holding-add-panel"]');
+      const text = ranked?.innerText ?? '';
+      const cards = ranked
+        ? ranked.querySelectorAll('[data-testid^="existing-holding-add-candidate-"]')
         : [];
       return {
-        hasUnheldSection: body.includes('未保有・品質資料と価格条件を通過'),
-        hasHonestEmptyState: body.includes('現在、条件をすべて満たす未保有候補はありません'),
-        hasFirstGroup: body.includes('順位 1〜10'),
-        hasLastGroup: body.includes('順位 51〜60'),
-        hasAllCount: body.includes('実行可能 60 銘柄 / 表示 60 銘柄（全件）'),
+        hasUnheldSection: body.includes('未保有・購入判断'),
+        strictHeading: text.includes('既存保有・今月の買い増し検討順'),
+        strictFunnel:
+          text.includes('価格帯内') &&
+          text.includes('安全ゲート通過') &&
+          text.includes('厳格確認済み'),
+        concreteSizing:
+          text.includes('買い増し目安') &&
+          text.includes('保有株数') &&
+          text.includes('実行後') &&
+          text.includes('実行後構成比'),
+        confirmationOnly: text.includes('検討用の参考案であり、注文ではありません'),
+        separatedHoldingSignal: text.includes('AI保有シグナルの HOLD'),
+        savedAiOverlay: body.includes('AI補足見解（保存済み・手動更新）'),
+        staleSavedAiSeparated:
+          body.includes('現在の買い増し候補数には含めていません') ||
+          body.includes('まだ提案がありません'),
         rankedCardCount: cards.length,
-        priorityLabelCount: priorityLabels.length,
         scrollWidth: document.documentElement.scrollWidth,
         clientWidth: document.documentElement.clientWidth,
       };
     })()`);
-    await evaluate(`(() => {
-      const node = [...document.querySelectorAll('h2')].find(
-        element => element.textContent?.trim() === '今月の候補ランキング（全件）'
-      );
-      node?.scrollIntoView({ block: 'start', inline: 'nearest' });
-    })()`);
+    await evaluate(`document.querySelector('[data-testid="existing-holding-add-panel"]')?.scrollIntoView({ block: 'start', inline: 'nearest' })`);
     await sleep(400);
     const shot = await send("Page.captureScreenshot", { format: "png" });
     const screenshotPath = `/tmp/investdash-buy-all-${scenario.name}.png`;
     await writeFile(screenshotPath, Buffer.from(shot.data, "base64"));
     const passed =
       state.hasUnheldSection &&
-      state.hasHonestEmptyState &&
-      state.hasFirstGroup &&
-      state.hasLastGroup &&
-      state.hasAllCount &&
-      state.rankedCardCount === 60 &&
-      state.priorityLabelCount === 5 &&
+      state.strictHeading &&
+      state.strictFunnel &&
+      state.concreteSizing &&
+      state.confirmationOnly &&
+      state.separatedHoldingSignal &&
+      state.savedAiOverlay &&
+      state.staleSavedAiSeparated &&
+      state.rankedCardCount > 0 &&
       state.scrollWidth <= state.clientWidth;
     return { ...scenario, ...state, screenshotPath, passed };
   } finally {

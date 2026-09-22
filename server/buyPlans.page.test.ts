@@ -108,9 +108,13 @@ const commonRow = {
   watchPriority: null,
   targetTooFar: false,
   generatedAt: new Date("2026-08-01T00:00:00Z"),
+  holdingQuantity: 100,
   signalAction: "ADD",
   signalConfidence: 85,
   signalDataQuality: "STRONG",
+  signalWouldBuyNow: "YES",
+  signalWouldBuyNowReason: "現在値でも長期価値を確認できます",
+  signalIsStale: false,
   cardConviction: 4,
   sizing: {
     status: "BUY",
@@ -259,6 +263,32 @@ const overviewData = {
     eligibleCount: 12,
     priorityCandidateCount: 5,
     unheldOpportunityVersion: "unheld-purchase-decision-v2",
+    existingHoldingAddSummary: {
+      policyVersion: "existing-holding-add-review-v1",
+      rawAddZoneCount: 12,
+      rawAddMainCount: 6,
+      rawAddSmallCount: 6,
+      safetyGatePassedCount: 11,
+      reviewReadyCount: 7,
+      reviewReadyMainCount: 3,
+      reviewReadySmallCount: 4,
+      reviewOnlyCount: 5,
+      deferralCounts: {
+        SAFETY_GATE: 1,
+        CONFIRMED_CONCERN: 1,
+        SIGNAL_CONFLICT: 1,
+        SIGNAL_STALE_OR_MISSING: 1,
+        SIGNAL_DATA_LIMITED: 1,
+        VALUATION_NOT_POSITIVE: 1,
+        LOW_CONVICTION: 1,
+      },
+      candidates: [] as Array<
+        (typeof overviewData.rows)[number] & {
+          reviewRank: number;
+          priceBandRank: number;
+        }
+      >,
+    },
     unheldCandidates: [] as Array<
       (typeof overviewData.rows)[number] & {
         purchaseDecision: {
@@ -277,6 +307,15 @@ const overviewData = {
 overviewData.ranking.monthlyCandidates = overviewData.rows
   .filter(row => row.ranking.eligible && row.ranking.rank !== null)
   .sort((a, b) => (a.ranking.rank ?? 999) - (b.ranking.rank ?? 999));
+overviewData.ranking.existingHoldingAddSummary.candidates =
+  overviewData.ranking.monthlyCandidates
+    .filter(row => row.held)
+    .slice(0, 7)
+    .map((row, index) => ({
+      ...row,
+      reviewRank: index + 1,
+      priceBandRank: row.ranking.rank!,
+    }));
 const unheldBySymbol = (symbol: string) => overviewData.rows.find(row => row.symbol === symbol)!;
 overviewData.ranking.unheldCandidates = [
   {
@@ -492,7 +531,7 @@ describe("BuyPlans page interactions", () => {
     expect(within(card).getByText(/市場基準 2026-09-11/)).toBeTruthy();
   });
   it.each([390, 1280])(
-    "%dpx 相当で全候補を10名ごとに表示し、上位5名を優先強調する",
+    "%dpx 相当で既存保有の厳格候補だけを順位・株数・金額つきで表示する",
     width => {
     Object.defineProperty(window, "innerWidth", {
       value: width,
@@ -500,14 +539,21 @@ describe("BuyPlans page interactions", () => {
     });
     render(React.createElement(BuyPlans));
 
-    expect(screen.getByText("今月の候補ランキング（全件）")).toBeTruthy();
-    expect(screen.getByText("順位 1〜10")).toBeTruthy();
-    expect(screen.getByText("順位 11〜12")).toBeTruthy();
-    expect(screen.getAllByText("今月優先")).toHaveLength(5);
-    expect(screen.getAllByText("500 株").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("154 万円").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("2.30%").length).toBeGreaterThan(0);
-    expect(screen.getByText(/表示 12 銘柄（全件）/)).toBeTruthy();
+    const panel = screen.getByTestId("existing-holding-add-panel");
+    const unheld = screen.getByTestId("unheld-quality-opportunities");
+    expect(screen.getByText("既存保有・今月の買い増し検討順")).toBeTruthy();
+    expect(panel.textContent).toContain("今月レビュー");
+    expect(panel.textContent).toContain("7");
+    expect(panel.textContent).toContain("価格帯内");
+    expect(panel.textContent).toContain("安全ゲート通過");
+    expect(panel.textContent).toContain("+500株");
+    expect(panel.textContent).toContain("154万円");
+    expect(panel.textContent).toContain("実行後 600株");
+    expect(panel.textContent).toContain("2.30%");
+    expect(panel.textContent).toContain("注文ではありません");
+    expect(
+      panel.compareDocumentPosition(unheld) & Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy();
     expect(screen.queryByTestId("full-buy-plan-list")).toBeNull();
     expect(screen.getByRole("button", { name: "全 15 銘柄を表示" })).toBeTruthy();
     }
@@ -530,9 +576,9 @@ describe("BuyPlans page interactions", () => {
     expect(screen.getByText("価格待ち", { selector: "span" })).toBeTruthy();
     expect(screen.getByText("資料確認待ち", { selector: "span" })).toBeTruthy();
     expect(screen.getByText("今回は見送る", { selector: "span" })).toBeTruthy();
-    expect(screen.getAllByText("Alphabet").length).toBeGreaterThanOrEqual(2);
-    expect(screen.getAllByText("25 株").length).toBeGreaterThanOrEqual(2);
-    expect(screen.getAllByText("77 万円").length).toBeGreaterThanOrEqual(2);
+    expect(screen.getAllByText("Alphabet").length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByText("25 株").length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByText("77 万円").length).toBeGreaterThanOrEqual(1);
     const priceWaitButton = screen
       .getAllByRole("button")
       .find(button => button.textContent?.includes("価格待ち"));

@@ -16,6 +16,7 @@ import {
   selectUnheldPurchaseCandidates,
   selectUnheldQualityPriceOpportunities,
 } from "../../shared/buyPlanOpportunity";
+import { buildExistingHoldingAddSummary } from "../../shared/existingHoldingAddCandidates";
 import { getDb } from "../db";
 import * as dbq from "../db";
 import { convertToJpy } from "./fx";
@@ -50,6 +51,9 @@ export type RankedPlanOverviewRow = PlanOverviewRow & {
   signalAction: BuyPlanRankingInput["signalAction"];
   signalConfidence: number | null;
   signalDataQuality: BuyPlanRankingInput["signalDataQuality"];
+  signalWouldBuyNow: "YES" | "NO" | "UNCLEAR" | null;
+  signalWouldBuyNowReason: string | null;
+  signalIsStale: boolean | null;
   cardConviction: number | null;
   ranking: BuyPlanRankingView;
 };
@@ -199,6 +203,11 @@ export async function buildRankedPlanOverview(
       signalAction: input.signalAction,
       signalConfidence: input.signalConfidence,
       signalDataQuality: input.signalDataQuality,
+      signalWouldBuyNow: groupMap.get(row.symbol)?.signal?.wouldBuyNow ?? null,
+      signalWouldBuyNowReason:
+        groupMap.get(row.symbol)?.signal?.wouldBuyNowReason ?? null,
+      signalIsStale:
+        groupMap.get(row.symbol)?.signal?.freshness.isStale ?? null,
       cardConviction: input.cardConviction,
       ranking: {
         eligible: snapshot.eligible,
@@ -214,6 +223,8 @@ export async function buildRankedPlanOverview(
   const monthlyCandidates = selectAllRankedCandidates(enrichedRows);
   const unheldCandidates = selectUnheldPurchaseCandidates(enrichedRows);
   const unheldOpportunities = selectUnheldQualityPriceOpportunities(enrichedRows);
+  const existingHoldingAddSummary =
+    buildExistingHoldingAddSummary(enrichedRows);
 
   return {
     rows: enrichedRows,
@@ -225,6 +236,7 @@ export async function buildRankedPlanOverview(
       eligibleCount: enrichedRows.filter(item => item.ranking.eligible).length,
       monthlyCandidates,
       priorityCandidateCount: Math.min(5, monthlyCandidates.length),
+      existingHoldingAddSummary,
       unheldOpportunityVersion: BUY_PLAN_OPPORTUNITY_VERSION,
       unheldCandidates,
       unheldOpportunities,

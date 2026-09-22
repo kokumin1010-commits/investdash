@@ -397,6 +397,48 @@ beforeEach(() => {
   mocks.priceBandOverview.mockReturnValue({
     data: {
       ranking: {
+        existingHoldingAddSummary: {
+          policyVersion: "existing-holding-add-review-v1",
+          rawAddZoneCount: 3,
+          rawAddMainCount: 1,
+          rawAddSmallCount: 2,
+          safetyGatePassedCount: 2,
+          reviewReadyCount: 1,
+          reviewReadyMainCount: 1,
+          reviewReadySmallCount: 0,
+          reviewOnlyCount: 2,
+          deferralCounts: {
+            SAFETY_GATE: 1,
+            CONFIRMED_CONCERN: 0,
+            SIGNAL_CONFLICT: 0,
+            SIGNAL_STALE_OR_MISSING: 1,
+            SIGNAL_DATA_LIMITED: 0,
+            VALUATION_NOT_POSITIVE: 1,
+            LOW_CONVICTION: 0,
+          },
+          candidates: [
+            {
+              symbol: "7203.T",
+              name: "トヨタ自動車",
+              currency: "JPY",
+              currentPrice: 3000,
+              action: "ADD_MAIN",
+              currentBandReason: "企業価値の伸びに対して価格が許容範囲です",
+              holdingQuantity: 100,
+              signalAction: "HOLD",
+              signalConfidence: 68,
+              signalWouldBuyNowReason: "現在値でも長期価値を確認できます",
+              cardConviction: 4,
+              reviewRank: 1,
+              priceBandRank: 2,
+              sizing: {
+                amountBase: 600000,
+                shares: 200,
+                afterWeightPct: 1.2,
+              },
+            },
+          ],
+        },
         unheldCandidates: [
           { symbol: "GOOGL", purchaseDecision: { decision: "BUY_NOW" } },
           { symbol: "MSFT", purchaseDecision: { decision: "PRICE_WAIT" } },
@@ -427,6 +469,28 @@ beforeEach(() => {
 afterEach(() => cleanup());
 
 describe("Dashboard actual page", () => {
+  it("separates AI holding ADD 0 from strict existing-holding add candidates", () => {
+    render(React.createElement(Dashboard));
+
+    expect(screen.getByTestId("existing-holding-add-panel")).toBeTruthy();
+    expect(screen.getByText("既存保有・今月の買い増し検討順")).toBeTruthy();
+    expect(screen.getByText("AI 保有シグナル内訳")).toBeTruthy();
+    expect(screen.getByRole("button", { name: /ADD\s*0/ })).toBeTruthy();
+    expect(
+      screen.getByTestId("signal-add-separation-note").textContent
+    ).toContain("別集計");
+    expect(
+      screen.getByTestId("existing-holding-add-funnel").textContent
+    ).toContain("価格帯内");
+    expect(
+      screen.getByTestId("existing-holding-add-candidate-7203.T").textContent
+    ).toContain("+200株");
+    expect(
+      screen.getByTestId("existing-holding-add-candidate-7203.T").textContent
+    ).toContain("実行後 300株");
+    expect(screen.getByText(/検討用の参考案であり、注文ではありません/)).toBeTruthy();
+  });
+
   it("株価データ正常表示を小さなピルにして検索欄より上へ置く", () => {
     mocks.dataHealth.mockReturnValue({
       data: {
@@ -541,6 +605,7 @@ describe("Dashboard actual page", () => {
     render(React.createElement(Dashboard));
 
     const panel = screen.getByTestId("market-temperature-panel");
+    const addPanel = screen.getByTestId("existing-holding-add-panel");
     const income = screen.getByText("キャッシュ収入：確定実績と将来予想");
     expect(screen.getByText("資産温度計")).toBeTruthy();
     expect(screen.getByText("調整局面")).toBeTruthy();
@@ -557,6 +622,12 @@ describe("Dashboard actual page", () => {
     expect(screen.getByText(/確認済みプラス現金/)).toBeTruthy();
     expect(
       panel.compareDocumentPosition(income) & Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy();
+    expect(
+      panel.compareDocumentPosition(addPanel) & Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy();
+    expect(
+      addPanel.compareDocumentPosition(income) & Node.DOCUMENT_POSITION_FOLLOWING
     ).toBeTruthy();
     expect(mocks.assetTrend).toHaveBeenCalledWith({ scale: "day" });
   });
@@ -747,7 +818,7 @@ describe("Dashboard actual page", () => {
     expect(screen.getByText("今回は見送る")).toBeTruthy();
     expect(screen.queryByText("未保有と仮定した新規判断")).toBeNull();
     const signalCard = screen
-      .getByText("AI シグナル内訳")
+      .getByText("AI 保有シグナル内訳")
       .closest("[data-slot='card']");
     expect(signalCard?.querySelectorAll("button")).toHaveLength(5);
   });

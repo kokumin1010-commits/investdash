@@ -124,6 +124,10 @@ async function verify(width, height, port) {
       `Boolean(document.querySelector('[data-testid="market-temperature-panel"]'))`
     );
     await browser.waitUntil(
+      "existing holding add panel",
+      `Boolean(document.querySelector('[data-testid="existing-holding-add-panel"]'))`
+    );
+    await browser.waitUntil(
       "long-term income state",
       `(document.body.innerText.includes('未来の配当予想（税引前）') && document.body.innerText.includes('2030年末の3つの複利・再投資情景')) || document.body.innerText.includes('目標純資産と目標日がまだ設定されていません')`
     );
@@ -174,6 +178,36 @@ async function verify(width, height, port) {
     await browser.evalValue(`document.querySelector('[data-testid="market-temperature-panel"]')?.scrollIntoView({ block: 'start' })`);
     await sleep(300);
     const marketTemperatureScreenshot = await browser.screenshot("market-temperature");
+
+    const existingHoldingAdds = await browser.evalValue(`(() => {
+      const node = document.querySelector('[data-testid="existing-holding-add-panel"]');
+      const text = node?.innerText ?? '';
+      const pageText = document.body?.innerText ?? '';
+      const candidateCount = node?.querySelectorAll('[data-testid^="existing-holding-add-candidate-"]').length ?? 0;
+      node?.scrollIntoView({ block: 'start' });
+      return {
+        present: Boolean(node),
+        heading: text.includes('既存保有・今月の買い増し検討順'),
+        funnel:
+          text.includes('価格帯内') &&
+          text.includes('安全ゲート通過') &&
+          text.includes('厳格確認済み'),
+        concreteSizing:
+          text.includes('買い増し目安') &&
+          text.includes('保有株数') &&
+          text.includes('実行後構成比'),
+        confirmationOnly: text.includes('検討用の参考案であり、注文ではありません'),
+        signalSeparated:
+          pageText.includes('AI 保有シグナル内訳') &&
+          pageText.includes('価格帯・安全ゲートによる買い増し候補') &&
+          pageText.includes('別集計'),
+        hasCandidateOrHonestEmpty:
+          candidateCount > 0 || text.includes('厳格条件を通過した買い増し候補はありません'),
+        noInvalid: !text.includes('NaN') && !text.includes('undefined'),
+      };
+    })()`);
+    await sleep(300);
+    const existingHoldingAddScreenshot = await browser.screenshot("existing-holding-add");
 
     await browser.evalValue(`document.querySelector('[data-testid="cash-income-actual-forecast"]')?.scrollIntoView({ block: 'start' })`);
     await sleep(300);
@@ -317,6 +351,7 @@ async function verify(width, height, port) {
         .filter(([key]) => !["scrollWidth", "clientWidth"].includes(key))
         .every(([, value]) => value === true) &&
       Object.values(marketTemperature).every(Boolean) &&
+      Object.values(existingHoldingAdds).every(Boolean) &&
       longTermPresent &&
       reinvestmentBasisPresent &&
       classificationPresent &&
@@ -328,9 +363,11 @@ async function verify(width, height, port) {
       passed,
       card,
       marketTemperature,
+      existingHoldingAdds,
       dialog,
       screenshots: {
         marketTemperature: marketTemperatureScreenshot,
+        existingHoldingAdd: existingHoldingAddScreenshot,
         cashIncome: cardScreenshot,
         cashBalanceTracking: cashTrackingScreenshot,
         longTermGoal: longTermScreenshot,

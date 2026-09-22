@@ -928,6 +928,8 @@ export type PlanOverviewRow = {
   /** 照合済みで懸念ありの件数 */
   concernCount: number;
   generatedAt: Date;
+  /** 現在の保有株数。複数口座に分かれていても銘柄単位で合算する */
+  holdingQuantity: number | null;
   /** 保有額（円換算）。複数口座に分かれていても合算する */
   holdingValueJpy: number | null;
   /** 株式時価全体に対する構成比（%） */
@@ -1334,10 +1336,16 @@ function buildHoldingFacts(
   totalValueJpy: number
 ): Pick<
   PlanOverviewRow,
-  "holdingValueJpy" | "weightPct" | "avgCost" | "pnlPct" | "costRecovered"
+  | "holdingQuantity"
+  | "holdingValueJpy"
+  | "weightPct"
+  | "avgCost"
+  | "pnlPct"
+  | "costRecovered"
 > {
   if (!agg || agg.qty === 0) {
     return {
+      holdingQuantity: null,
       holdingValueJpy: null,
       weightPct: null,
       avgCost: null,
@@ -1348,6 +1356,7 @@ function buildHoldingFacts(
   const avgCost = agg.costLocal / agg.qty;
   const marketLocal = price === null ? null : price * agg.qty;
   return {
+    holdingQuantity: agg.qty,
     holdingValueJpy: agg.valueJpy,
     weightPct:
       agg.valueJpy !== null && totalValueJpy > 0

@@ -28,20 +28,19 @@ import {
   Search,
   ShieldCheck,
   TrendingUp,
-  WalletCards,
 } from "lucide-react";
 import { useMemo, useState } from "react";
 import { Link } from "wouter";
 import { toast } from "sonner";
 import { TransitionHistoryCard } from "@/components/investing/TransitionHistoryCard";
 import { AddProposalCard } from "@/components/investing/AddProposalCard";
+import { ExistingHoldingAddPanel } from "@/components/investing/ExistingHoldingAddPanel";
 import {
   filterBuyPlanRows,
   formatNextBandHint,
   type BuyPlanListFilter,
 } from "@shared/buyPlanUi";
 import {
-  groupRankedCandidates,
   UNHELD_PURCHASE_DECISION_LABELS,
   type UnheldPurchaseDecision,
 } from "@shared/buyPlanOpportunity";
@@ -132,14 +131,10 @@ export default function BuyPlans() {
   const stats = data?.stats;
   const coverage = data?.coverage;
   const ranking = data?.ranking;
-  const monthlyCandidates = ranking?.monthlyCandidates ?? [];
   const unheldCandidates = ranking?.unheldCandidates ?? [];
   const unheldOpportunities = ranking?.unheldOpportunities ?? [];
-  const priorityCandidateCount = ranking?.priorityCandidateCount ?? Math.min(5, monthlyCandidates.length);
-  const rankedCandidateGroups = useMemo(
-    () => groupRankedCandidates(monthlyCandidates),
-    [monthlyCandidates]
-  );
+  const existingHoldingAddSummary =
+    ranking?.existingHoldingAddSummary ?? null;
   const unheldDecisionCounts = useMemo(() => {
     const counts: Record<"ALL" | UnheldPurchaseDecision, number> = {
       ALL: unheldCandidates.length,
@@ -327,6 +322,10 @@ export default function BuyPlans() {
           未照合分は Railway が 20 分ごとに小分けで自動確認します。ニュース根拠がない項目は「不明」のまま残し、安全と断定しません。
         </p>
       )}
+
+      {!isLoading && !error && existingHoldingAddSummary ? (
+        <ExistingHoldingAddPanel summary={existingHoldingAddSummary} />
+      ) : null}
 
       {coverage && coverage.total > 0 && (
         <Card>
@@ -625,70 +624,9 @@ export default function BuyPlans() {
         )}
       </section>
 
-      {!isLoading && !error && ranking && (
-        <section className="space-y-3" data-testid="monthly-priority-candidates">
-          <div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
-            <div>
-              <p className="text-xs font-semibold tracking-[0.14em] text-emerald-700 dark:text-emerald-300">
-                MONTHLY CAPITAL ALLOCATION
-              </p>
-              <h2 className="mt-1 text-xl font-semibold">今月の候補ランキング（全件）</h2>
-              <p className="mt-1 text-sm text-muted-foreground">
-                実行条件を満たす候補をすべて順位順に表示します。上位{priorityCandidateCount}銘柄は今月優先として強調しますが、順位は売買指示ではなく月1回の検討順です。
-              </p>
-            </div>
-            <div className="text-xs text-muted-foreground sm:text-right">
-              <p>{ranking.rankingMonth} · {ranking.scoreVersion}</p>
-              <p>実行可能 {ranking.eligibleCount} 銘柄 / 表示 {monthlyCandidates.length} 銘柄（全件）</p>
-            </div>
-          </div>
-
-          {monthlyCandidates.length > 0 ? (
-            <div className="space-y-6" data-testid="all-ranked-candidates">
-              {rankedCandidateGroups.map((group, groupIndex) => (
-                <section
-                  key={`candidate-group-${groupIndex}`}
-                  className="space-y-3"
-                  data-testid={`ranked-candidate-group-${groupIndex + 1}`}
-                >
-                  <div className="flex items-center justify-between gap-3 border-b pb-2">
-                    <h3 className="font-semibold">
-                      順位 {group[0]?.ranking.rank}〜{group[group.length - 1]?.ranking.rank}
-                    </h3>
-                    <span className="text-xs text-muted-foreground">{group.length} 銘柄</span>
-                  </div>
-                  <div className="grid gap-3 lg:grid-cols-2">
-                    {group.map(row => (
-                      <MonthlyCandidateCard
-                        key={row.symbol}
-                        row={row}
-                        priority={(row.ranking.rank ?? 999) <= priorityCandidateCount}
-                      />
-                    ))}
-                  </div>
-                </section>
-              ))}
-            </div>
-          ) : (
-            <Card className="border-dashed">
-              <CardContent className="flex min-h-40 items-center gap-3 p-5">
-                <ShieldCheck className="size-7 shrink-0 text-emerald-600" />
-                <div>
-                  <p className="font-semibold">今月、無理に買う候補はありません</p>
-                  <p className="mt-1 text-sm text-muted-foreground">
-                    未照合事項、シグナル競合、集中度、現金余力または IBKR リスクの門槛を優先しています。
-                  </p>
-                </div>
-              </CardContent>
-            </Card>
-          )}
-        </section>
-      )}
-
       {/**
-        AI の結論を一覧より前に置く。
-        月 1 回しか開かない使い方では、123 行から自分で探させるのではなく
-        「どれを買うべきか」の結論が先に見えている方が判断が始まる。
+        保存済み AI 文面は価格帯ランキングの補足であり、主判定には使わない。
+        日付と鮮度を明示して、古い WAIT / SKIP を現在の結論と誤認させない。
       */}
       <AddProposalCard />
 
@@ -1121,143 +1059,6 @@ function ResearchIdeaCard({
             {adding ? <Loader2 className="size-4 animate-spin" /> : <Plus className="size-4" />}
             ウォッチリストへ追加
           </Button>
-        </div>
-      </CardContent>
-    </Card>
-  );
-}
-
-function MonthlyCandidateCard({
-  row,
-  priority = false,
-  unheldOpportunity = false,
-}: {
-  row: Row;
-  priority?: boolean;
-  unheldOpportunity?: boolean;
-}) {
-  return (
-    <Card
-      className={`overflow-hidden shadow-sm ${
-        unheldOpportunity
-          ? "border-sky-300 dark:border-sky-800"
-          : priority
-            ? "border-emerald-200 dark:border-emerald-900"
-            : "border-border"
-      }`}
-    >
-      <CardHeader
-        className={`border-b pb-3 ${
-          unheldOpportunity
-            ? "bg-gradient-to-br from-sky-50 to-white dark:from-sky-950/40 dark:to-background"
-            : priority
-              ? "bg-gradient-to-br from-emerald-50 to-white dark:from-emerald-950/40 dark:to-background"
-              : "bg-muted/20"
-        }`}
-      >
-        <div className="flex items-start justify-between gap-3">
-          <div className="min-w-0">
-            <div className="flex flex-wrap items-center gap-2">
-              <Badge
-                className={
-                  unheldOpportunity
-                    ? "bg-sky-700 text-white hover:bg-sky-700"
-                    : priority
-                      ? "bg-emerald-700 text-white hover:bg-emerald-700"
-                      : "bg-slate-700 text-white hover:bg-slate-700"
-                }
-              >
-                #{row.ranking.rank}
-              </Badge>
-              <CardTitle className="text-base break-words">{row.name}</CardTitle>
-              <span className="text-xs text-muted-foreground">{row.symbol}</span>
-              {!row.held && <Badge variant="outline">未保有</Badge>}
-              {unheldOpportunity && (
-                <Badge className="bg-sky-100 text-sky-800 hover:bg-sky-100 dark:bg-sky-950 dark:text-sky-200">
-                  初回建て候補
-                </Badge>
-              )}
-              {priority && !unheldOpportunity && (
-                <Badge className="bg-emerald-100 text-emerald-800 hover:bg-emerald-100 dark:bg-emerald-950 dark:text-emerald-200">
-                  今月優先
-                </Badge>
-              )}
-            </div>
-            <CardDescription className="mt-1">
-              {row.actionLabel ?? (row.action ? BAND_ACTION_LABELS[row.action] : "判定待ち")}
-            </CardDescription>
-          </div>
-          <div className="shrink-0 text-right">
-            <p className={`font-mono text-2xl font-semibold ${unheldOpportunity ? "text-sky-700 dark:text-sky-300" : "text-emerald-700 dark:text-emerald-300"}`}>
-              {row.ranking.score}
-            </p>
-            <p className="text-[10px] text-muted-foreground">100点・構造資料ベース</p>
-          </div>
-        </div>
-      </CardHeader>
-      <CardContent className="space-y-3 p-4">
-        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-          <div className="rounded-lg bg-muted/50 p-2.5">
-            <p className="text-[11px] text-muted-foreground">現在の保有</p>
-            <p className="mt-1 font-mono text-sm font-semibold">
-              {row.held && row.holdingValueJpy !== null ? manYen(row.holdingValueJpy) : "0円（未保有）"}
-            </p>
-            <p className="text-[11px] text-muted-foreground">{formatPct(row.weightPct)}</p>
-          </div>
-          <div className="rounded-lg bg-emerald-50 p-2.5 dark:bg-emerald-950/30">
-            <p className="text-[11px] text-muted-foreground">今回の目安</p>
-            <p className="mt-1 font-mono text-sm font-semibold text-emerald-800 dark:text-emerald-200">
-              {row.sizing.shares.toLocaleString("ja-JP", { maximumFractionDigits: 4 })} 株
-            </p>
-            <p className="text-[11px] text-muted-foreground">{manYen(row.sizing.amountBase)}</p>
-          </div>
-          <div className="rounded-lg bg-muted/50 p-2.5">
-            <p className="text-[11px] text-muted-foreground">買付後構成比</p>
-            <p className="mt-1 font-mono text-sm font-semibold">{row.sizing.afterWeightPct.toFixed(2)}%</p>
-            <p className="text-[11px] text-muted-foreground">単一銘柄上限 5%</p>
-          </div>
-          <div className="rounded-lg bg-muted/50 p-2.5">
-            <p className="text-[11px] text-muted-foreground">価格条件</p>
-            <p className="mt-1 text-xs font-semibold leading-5">{priceBandText(row)}</p>
-          </div>
-        </div>
-
-        <div className="rounded-xl border px-3 py-2.5 text-sm">
-          <p className="font-medium">{row.currentBandReason || row.ranking.rationale[0]}</p>
-          <p className="mt-1 text-xs leading-5 text-muted-foreground">
-            最新シグナル {row.signalAction ?? "未取得"} · カード確信度 {row.cardConviction ?? "未設定"}/5 ·
-            IBKR {row.sizing.ibkrRiskLevel ?? "未取得"}
-          </p>
-        </div>
-
-        <details className="rounded-xl border px-3 py-2 text-sm">
-          <summary className="cursor-pointer font-medium">順位の内訳と制約</summary>
-          <div className="mt-2 grid grid-cols-2 gap-1 text-xs text-muted-foreground sm:grid-cols-5">
-            <span>資料品質 {row.ranking.breakdown.quality ?? 0}/30</span>
-            <span>安全余地 {row.ranking.breakdown.valuation ?? 0}/25</span>
-            <span>基礎動向 {row.ranking.breakdown.fundamentals ?? 0}/20</span>
-            <span>組合適合 {row.ranking.breakdown.portfolioFit ?? 0}/15</span>
-            <span>資金余力 {row.ranking.breakdown.liquidityLeverage ?? 0}/10</span>
-          </div>
-          {row.sizing.reasons.length > 0 && (
-            <ul className="mt-2 space-y-1 text-xs text-muted-foreground">
-              {row.sizing.reasons.map((reason, index) => (
-                <li key={`${reason}-${index}`}>・{reason}</li>
-              ))}
-            </ul>
-          )}
-        </details>
-
-        <div className="flex items-center justify-between gap-3">
-          <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-            <WalletCards className="size-3.5" /> 借入を増やさず現金性資産で計算
-          </div>
-          <Link
-            href={row.held ? `/holdings?symbol=${encodeURIComponent(row.symbol)}` : "/watchlist"}
-            className="text-sm font-medium text-primary hover:underline"
-          >
-            詳細を見る
-          </Link>
         </div>
       </CardContent>
     </Card>

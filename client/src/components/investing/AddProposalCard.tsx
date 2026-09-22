@@ -8,7 +8,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { trpc } from "@/lib/trpc";
-import { Sparkles, Check, Clock, XCircle } from "lucide-react";
+import { Sparkles, Check, Clock, XCircle, AlertTriangle } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 import { Link } from "wouter";
@@ -63,6 +63,11 @@ function fmtPrice(v: number, currency: string): string {
   return `${currency} ${n}`;
 }
 
+function ageDays(value: Date | string): number {
+  const elapsed = Date.now() - new Date(value).getTime();
+  return Math.max(0, Math.floor(elapsed / (24 * 60 * 60 * 1000)));
+}
+
 export function AddProposalCard() {
   const utils = trpc.useUtils();
   const { data, isLoading } = trpc.portfolio.addProposals.useQuery();
@@ -97,6 +102,11 @@ export function AddProposalCard() {
   const proposals = data ?? [];
   const buyCount = proposals.filter(p => p.stance === "BUY").length;
   const waitCount = proposals.filter(p => p.stance === "WAIT").length;
+  const skipCount = proposals.filter(p => p.stance === "SKIP").length;
+  const staleProposalCount = proposals.filter(p => ageDays(p.createdAt) > 7).length;
+  const newestProposal = [...proposals].sort(
+    (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+  )[0];
 
   return (
     <Card>
@@ -105,11 +115,11 @@ export function AddProposalCard() {
           <div>
             <CardTitle className="flex items-center gap-2 text-base">
               <Sparkles className="h-4 w-4 text-primary" />
-              AI の買い増し提案
+              AI補足見解（保存済み・手動更新）
             </CardTitle>
             <CardDescription className="text-xs leading-relaxed">
-              資産全体・借入・業種の偏りを見て、買う・待つ・見送るを結論付けます。
-              金額は現金性資産から算出した範囲に収めています。
+              保存時点の文章による補足です。上の厳格ランキングの判定元や注文ではありません。
+              日付と価格変化を確認し、必要なときだけ最大6銘柄を更新します。
             </CardDescription>
           </div>
           <Button
@@ -123,7 +133,7 @@ export function AddProposalCard() {
             }}
           >
             <Sparkles className={`mr-1.5 h-3.5 w-3.5 ${busy ? "animate-pulse" : ""}`} />
-            {busy ? "AI が判断中..." : "判断が必要な銘柄を提案させる"}
+            {busy ? "AI が判断中..." : "AI補足見解を更新（最大6）"}
           </Button>
         </div>
       </CardHeader>
@@ -137,24 +147,29 @@ export function AddProposalCard() {
           </p>
         ) : (
           <>
+            {staleProposalCount > 0 ? (
+              <div className="flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50/70 px-3 py-2.5 text-xs leading-5 text-amber-950 dark:border-amber-900 dark:bg-amber-950/25 dark:text-amber-100">
+                <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+                <p>
+                  {staleProposalCount}件は保存から7日超です。
+                  {newestProposal
+                    ? ` 最新でも ${new Date(newestProposal.createdAt).toLocaleDateString("ja-JP")}（${ageDays(newestProposal.createdAt)}日前）です。`
+                    : ""}
+                  現在の買い増し候補数には含めていません。
+                </p>
+              </div>
+            ) : null}
             {/*
               件数は結論ごとに分けて出す。以前は「4 銘柄に買いの結論」と
               書きながら実際は買い 3 件・待ち 1 件で、数と中身が合わず
               どれを買えばよいのか分からなかった。
             */}
-            {buyCount > 0 || waitCount > 0 ? (
-              <p className="text-sm">
-                {buyCount > 0 ? (
-                  <>
-                    <span className="font-medium text-gain">買う {buyCount} 銘柄</span>
-                    {waitCount > 0 ? <span className="text-muted-foreground"> ・ </span> : null}
-                  </>
-                ) : null}
-                {waitCount > 0 ? (
-                  <span className="text-muted-foreground">値段を待つ {waitCount} 銘柄</span>
-                ) : null}
-              </p>
-            ) : null}
+            <p className="text-sm">
+              <span className="font-medium text-gain">保存済み BUY {buyCount}</span>
+              <span className="text-muted-foreground">
+                {" "}・ WAIT {waitCount} ・ SKIP {skipCount}
+              </span>
+            </p>
             {proposals.map(p => {
               const s = STANCE[p.stance] ?? STANCE.WAIT;
               const Icon = s.icon;
@@ -266,6 +281,11 @@ export function AddProposalCard() {
                       <span className="tabular">
                         提案時から {p.priceChangePct > 0 ? "+" : ""}
                         {p.priceChangePct.toFixed(1)}%
+                      </span>
+                    ) : null}
+                    {ageDays(p.createdAt) > 7 ? (
+                      <span className="font-medium text-amber-700 dark:text-amber-300">
+                        保存から {ageDays(p.createdAt)} 日・要再確認
                       </span>
                     ) : null}
                     <Link
